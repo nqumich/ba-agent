@@ -25,12 +25,12 @@ BA-Agent (Business Analysis Agent) 是一个商业分析助手 Agent，面向非
 │  ├─ Memory Management (三层记忆)                            │
 │  └─ Tool Invocation (langchain.agents.create_agent)         │
 ├─────────────────────────────────────────────────────────────┤
-│  Tools Layer (8个基础工具)                                  │
+│  Tools Layer (基础工具)                                      │
 │  ├─ execute_command (Docker隔离)                            │
 │  ├─ run_python (Docker隔离，核心)                           │
 │  ├─ web_search (MCP: mcp__web-search-prime__webSearchPrime) │
 │  ├─ read_webpage (MCP: mcp__web_reader__webReader)          │
-│  ├─ read_file (CSV/Excel/JSON/文本)                         │
+│  ├─ read_file (CSV/Excel/JSON/文本/Python/SQL)              │
 │  ├─ query_database (SQLAlchemy)                             │
 │  ├─ search_knowledge (Chroma向量检索)                       │
 │  └─ invoke_skill (调用可配置Skills)                         │
@@ -79,6 +79,18 @@ BA-Agent (Business Analysis Agent) 是一个商业分析助手 Agent，面向非
 ### Python 版本限制 (2025-02-04)
 - **当前**: Python 3.12 ARM64
 - **已知问题**: Python 3.14 ARM64 暂不支持 chromadb (缺少 onnxruntime)
+
+### 统一工具输出格式系统 (2025-02-05)
+- **目的**: 统一所有工具的输出格式，支持模型间上下文传递和工程遥测
+- **核心文件**: `models/tool_output.py`, `tools/base.py`
+- **功能特性**:
+  - **响应格式**: CONCISE/STANDARD/DETAILED/RAW 四种模式
+  - **模型上下文**: summary (摘要), observation (ReAct 格式), result (详细数据)
+  - **工程遥测**: ToolTelemetry 收集延迟、Token 使用、错误追踪、缓存状态
+  - **ReAct 兼容**: 标准化 Observation 格式，兼容 LangChain/LangGraph
+  - **Token 优化**: 紧凑格式、YAML、XML 等多种输出格式
+- **使用方式**: 使用 `@unified_tool` 装饰器包装现有工具函数
+- **参考**: 基于 Anthropic、Claude Code、Manus 等 Agent 产品的最佳实践
 
 ## 三层记忆管理
 

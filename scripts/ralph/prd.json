@@ -216,8 +216,8 @@
         "编写单元测试"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "tool: execute_command"
+      "passes": true,
+      "notes": "tool: execute_command - 16 测试通过"
     },
     {
       "id": "US-007",
@@ -232,8 +232,8 @@
         "编写单元测试"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "tool: run_python - 核心工具，所有分析能力的基础"
+      "passes": true,
+      "notes": "tool: run_python - 29 测试通过 - 核心工具，所有分析能力的基础"
     },
     {
       "id": "US-008",
@@ -247,8 +247,8 @@
         "添加args_schema (WebSearchInput模型)"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "tool: web_search - 使用Z.ai MCP工具"
+      "passes": true,
+      "notes": "tool: web_search - 22 测试通过 - 使用Z.ai MCP工具"
     },
     {
       "id": "US-009",
@@ -262,8 +262,8 @@
         "添加args_schema (WebReaderInput模型)"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "tool: read_webpage - 使用Z.ai MCP工具"
+      "passes": true,
+      "notes": "tool: read_webpage - 27 测试通过 - 使用Z.ai MCP工具"
     },
     {
       "id": "US-010",
@@ -271,14 +271,16 @@
       "acceptanceCriteria": [
         "创建tools/file_reader.py",
         "继承StructuredTool from langchain_core.tools",
-        "实现_read方法 (支持CSV/Excel/JSON/文本)",
-        "实现路径安全检查 (allowed_paths配置)",
-        "添加args_schema",
+        "实现_read方法 (支持CSV/Excel/JSON/文本/Python/SQL)",
+        "实现路径安全检查 (allowed_paths配置，包含./skills目录)",
+        "Python文件支持AST解析提取函数/类/导入",
+        "SQL文件支持按分号提取多条查询语句",
+        "添加args_schema (FileReadInput模型)",
         "编写单元测试"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "tool: read_file"
+      "passes": true,
+      "notes": "tool: read_file - 61 测试通过 - 支持 Python/SQL 文件读取和解析"
     },
     {
       "id": "US-011",
@@ -293,8 +295,8 @@
         "编写单元测试"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "tool: query_database"
+      "passes": true,
+      "notes": "tool: query_database - 54 测试通过 - 支持 SQLAlchemy 集成、参数化查询、多数据库连接配置"
     },
     {
       "id": "US-012",
@@ -523,6 +525,25 @@
       "priority": 4,
       "passes": false,
       "notes": "文档"
+    },
+    {
+      "id": "US-INFRA-01",
+      "title": "统一工具输出格式系统",
+      "acceptanceCriteria": [
+        "创建models/tool_output.py定义ToolOutput和ToolTelemetry模型",
+        "创建tools/base.py提供unified_tool装饰器和ReActFormatter",
+        "实现ResponseFormat枚举 (CONCISE/STANDARD/DETAILED/RAW)",
+        "实现TelemetryCollector遥测收集器",
+        "支持模型上下文传递 (summary/observation/result)",
+        "支持工程遥测 (延迟/Token/错误/缓存)",
+        "支持ReAct Observation格式兼容",
+        "实现Token优化工具 (紧凑格式/YAML/XML)",
+        "编写单元测试 (42个测试全部通过)",
+        "创建设计文档 docs/tool-output-format-design.md"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "核心基础设施 - 基于 Anthropic/Claude Code/Manus 最佳实践 - 42 测试通过"
     }
   ]
 }

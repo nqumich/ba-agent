@@ -34,6 +34,29 @@
 - **当前**: Python 3.12 ARM64
 - **限制**: Python 3.14 ARM64 暂不支持 chromadb
 
+### 2025-02-05: 统一工具输出格式系统
+- **选择**: 基于 Anthropic、Claude Code、Manus 等最佳实践实现的统一工具输出格式
+- **核心组件**:
+  - `models/tool_output.py`: ToolOutput, ToolTelemetry, ResponseFormat
+  - `tools/base.py`: unified_tool 装饰器, ReActFormatter, TokenOptimizer
+- **功能特性**:
+  - **模型上下文传递**: summary, observation, result 三层结构
+  - **工程遥测**: 延迟、Token 使用、错误追踪、缓存状态
+  - **响应格式**: CONCISE/STANDARD/DETAILED/RAW 四种模式
+  - **ReAct 兼容**: 标准 Observation 格式
+  - **Token 优化**: 紧凑格式、YAML、XML
+- **参考**: [工具输出格式设计文档](docs/tool-output-format-design.md)
+
+### 2025-02-05: ReAct 输出格式规范
+- **选择**: 在 AGENTS.md 中定义完整的 ReAct 输出格式规范
+- **核心格式**: Thought → Action → Observation → Final Answer
+- **关键特性**:
+  - 与统一工具输出格式对齐
+  - 明确的工具调用格式: `Action: <工具名称>[<参数1>=<值1>, ...]`
+  - 标准化 Observation 格式: 包含 summary, observation, result
+  - 完整的 Few-Shot 示例
+- **版本**: AGENTS.md v2.0
+
 ## 项目里程碑
 
 | 日期 | 里程碑 | 状态 |
@@ -41,8 +64,14 @@
 | 2025-02-04 | 项目初始化完成 | ✅ |
 | 2025-02-04 | 依赖安装完成 | ✅ |
 | 2025-02-04 | LangChain 1.2.x API 修复完成 | ✅ |
-| - | 核心数据模型定义 | ⏳ |
-| - | LangGraph Agent 框架 | ⏳ |
+| 2025-02-05 | Phase 1 基础设施完成 (5/5) | ✅ |
+| 2025-02-05 | Phase 2 核心工具部分完成 (5/8) | ✅ |
+| 2025-02-05 | 统一工具输出格式系统完成 | ✅ |
+| 2025-02-05 | ReAct 输出格式规范完成 | ✅ |
+| 2025-02-05 | 278 个测试全部通过 | ✅ |
+| - | SQL 查询工具 | ⏳ |
+| - | 向量检索工具 | ⏳ |
+| - | Skill 调用工具 | ⏳ |
 
 ## 经验教训
 
@@ -66,6 +95,10 @@
 | 归因分析 | 分析业务指标变化驱动因素的方法 |
 | MCP | Model Context Protocol，模型上下文协议 |
 | Skill | 可配置的分析能力模块 |
+| ReAct | Reasoning + Acting，Agent 思考与行动的循环模式 |
+| ToolOutput | 统一工具输出格式，包含 summary, observation, result |
+| ToolTelemetry | 工程遥测数据，包含延迟、Token、错误追踪 |
+| ResponseFormat | 响应格式控制: CONCISE/STANDARD/DETAILED/RAW |
 
 ## 链接
 

@@ -17,8 +17,24 @@ load_dotenv()
 T = TypeVar('T', bound=BaseModel)
 
 
-class DatabaseConfig(BaseModel):
-    """数据库配置"""
+class DatabaseSecurityConfig(BaseModel):
+    """数据库安全配置"""
+
+    enabled: bool = Field(default=True, description="是否启用安全检查")
+    allowed_statements: list[str] = Field(
+        default_factory=lambda: ["SELECT", "WITH"],
+        description="允许的 SQL 语句类型"
+    )
+    forbidden_keywords: list[str] = Field(
+        default_factory=lambda: ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE"],
+        description="禁止的关键字"
+    )
+    query_timeout: int = Field(default=30, description="查询超时时间（秒）")
+    max_rows: int = Field(default=10000, description="最大返回行数")
+
+
+class DatabaseConnectionConfig(BaseModel):
+    """单个数据库连接配置"""
 
     host: str = Field(default="localhost", description="数据库主机")
     port: int = Field(default=5432, description="数据库端口")
@@ -27,6 +43,31 @@ class DatabaseConfig(BaseModel):
     database: str = Field(default="ba_agent", description="数据库名称")
     pool_size: int = Field(default=10, description="连接池大小")
     max_overflow: int = Field(default=20, description="最大溢出连接数")
+
+
+class DatabaseConfig(BaseModel):
+    """数据库配置"""
+
+    # 默认连接配置（向后兼容）
+    host: str = Field(default="localhost", description="数据库主机")
+    port: int = Field(default=5432, description="数据库端口")
+    username: str = Field(default="", description="数据库用户名")
+    password: str = Field(default="", description="数据库密码")
+    database: str = Field(default="ba_agent", description="数据库名称")
+    pool_size: int = Field(default=10, description="连接池大小")
+    max_overflow: int = Field(default=20, description="最大溢出连接数")
+
+    # 多数据库连接配置
+    connections: Dict[str, DatabaseConnectionConfig] = Field(
+        default_factory=dict,
+        description="多数据库连接配置"
+    )
+
+    # 安全配置
+    security: DatabaseSecurityConfig = Field(
+        default_factory=DatabaseSecurityConfig,
+        description="数据库安全配置"
+    )
 
 
 class LLMConfig(BaseModel):
