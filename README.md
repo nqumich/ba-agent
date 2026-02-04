@@ -96,16 +96,19 @@ ba-agent/
 │   ├── test_docker/           # Docker 沙盒测试
 │   ├── tools/                 # 工具测试
 │   └── models/                # 模型测试
-├── memory/                    # 三层记忆系统
-│   ├── 2025-02-04.md          # 每日日志
-│   ├── MEMORY.md              # 长期知识
-│   ├── CLAUDE.md              # 项目级记忆
-│   ├── AGENTS.md              # Agent 系统指令
-│   └── USER.md                # 用户信息
+├── memory/                    # 每日对话日志 (Layer 1)
+│   └── 2025-02-04.md          # 每日日志
 ├── docs/                      # 文档
 │   ├── PRD.md                 # 产品需求文档
+│   ├── project-structure.md   # 项目目录结构说明
 │   └── tool-output-format-design.md  # 工具输出格式设计
 ├── scripts/ralph/             # Ralph Loop 脚本
+├── AGENTS.md                  # Agent 系统指令和记忆指南
+├── CLAUDE.md                  # 项目级记忆 (Layer 3: Context Bootstrap)
+├── MEMORY.md                  # 长期知识记忆 (Layer 2)
+├── USER.md                    # 用户信息
+├── progress.md                # 开发进度和测试结果
+├── task_plan.md               # 任务计划和 User Stories
 ├── Dockerfile                 # 主服务镜像
 ├── Dockerfile.sandbox         # Python 沙盒镜像 (含数据分析库)
 └── docker-compose.yml         # 开发环境编排

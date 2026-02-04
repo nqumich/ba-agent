@@ -12,9 +12,16 @@ ba-agent/
 ├── skills/           # Skills 实现
 ├── config/           # 配置管理系统
 ├── tests/            # 测试套件
-├── memory/           # 三层记忆系统
+├── memory/           # 每日对话日志 (Layer 1)
 ├── docs/             # 项目文档
 ├── scripts/          # 工具脚本
+├── AGENTS.md         # Agent 系统指令
+├── CLAUDE.md         # 项目级记忆 (Layer 3)
+├── MEMORY.md         # 长期知识记忆 (Layer 2)
+├── USER.md           # 用户信息
+├── README.md         # 项目概述
+├── progress.md       # 开发进度
+├── task_plan.md      # 任务计划
 └── [配置文件]        # 各种配置文件
 ```
 
@@ -287,28 +294,42 @@ pytest tests/test_agents/
 pytest --cov=backend --cov=tools --cov-report=html
 ```
 
-## 6. memory/ - 三层记忆系统
+## 6. 三层记忆系统
 
 采用 Clawdbot/Manus 模式的三层记忆架构。
 
-### 记忆层级
+### 实际文件组织
 
+**每日对话日志** (memory/ 目录):
 ```
 memory/
-├── 2025-02-04.md          # Layer 1: 每日对话日志
-├── MEMORY.md              # Layer 2: 长期知识记忆
+└── 2025-02-04.md          # Layer 1: 每日对话日志
+```
+
+**核心记忆文件** (根目录):
+```
+根目录/
+├── AGENTS.md              # Agent 系统指令和记忆指南
 ├── CLAUDE.md              # Layer 3: 项目级记忆（Context Bootstrap）
-├── AGENTS.md              # Agent 系统指令
+├── MEMORY.md              # Layer 2: 长期知识记忆
 └── USER.md                # 用户信息
 ```
+
+### 记忆层级说明
+
+| Layer | 文件位置 | 用途 | 内容 |
+|-------|----------|------|------|
+| **Layer 1** | `memory/YYYY-MM-DD.md` | 每日对话日志 | 日常笔记、临时讨论、当天上下文 |
+| **Layer 2** | 根目录 `MEMORY.md` | 长期知识记忆 | 持久事实、决策、用户偏好 |
+| **Layer 3** | 根目录 `CLAUDE.md` | 项目级记忆 | 项目结构、技术架构、重要里程碑 |
 
 ### 写入规则
 
 | 触发条件 | 目标位置 | 示例 |
 |----------|----------|------|
-| 日常笔记 | `memory/YYYY-MM-DD.md` | "讨论了 API 设计" |
-| 持久事实、决策 | `MEMORY.md` | "用户偏好 TypeScript" |
-| 重要里程碑 | `CLAUDE.md` | "完成 API 重构" |
+| 日常笔记、临时讨论 | `memory/YYYY-MM-DD.md` | "讨论了 API 设计" |
+| 持久事实、决策 | `MEMORY.md` (根目录) | "用户偏好 TypeScript" |
+| 重要里程碑 | `CLAUDE.md` (根目录) | "完成 API 重构" |
 
 ### 使用方式
 
@@ -332,8 +353,22 @@ docs/
 ├── README.md           # 项目概述和快速开始
 ├── progress.md         # 开发进度和测试结果
 ├── task_plan.md        # 任务计划和 User Stories
-└── findings.md         # 技术研究发现
+├── findings.md         # 技术研究发现
+├── AGENTS.md           # Agent 系统指令和记忆指南
+├── CLAUDE.md           # 项目级记忆 (Layer 3: Context Bootstrap)
+├── MEMORY.md           # 长期知识记忆 (Layer 2)
+└── USER.md             # 用户信息
 ```
+
+### 三层记忆系统文件说明
+
+| 文件 | 位置 | 层级 | 用途 |
+|------|------|------|------|
+| `memory/YYYY-MM-DD.md` | memory/ 目录 | Layer 1 | 每日对话日志 |
+| `MEMORY.md` | 根目录 | Layer 2 | 长期知识记忆 |
+| `CLAUDE.md` | 根目录 | Layer 3 | 项目级记忆 |
+| `AGENTS.md` | 根目录 | - | Agent 系统指令 |
+| `USER.md` | 根目录 | - | 用户信息 |
 
 ## 8. scripts/ - 工具脚本
 
