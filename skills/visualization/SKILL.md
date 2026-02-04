@@ -48,7 +48,7 @@
 
 ## 依赖
 
-- google-generativeai>=0.3.0 (Gemini API)
+- google-genai>=1.0.0 (Gemini API - 新 SDK)
 - anthropic>=0.39.0 (Claude - 用于辅助分析)
 - pandas>=2.0.0 (数据处理)
 
