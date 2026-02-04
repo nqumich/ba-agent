@@ -85,6 +85,17 @@
 - ✅ 创建 16 个单元测试 (16/16 通过)
 - ✅ 修复 tests 目录缺少 __init__.py 导致的导入问题
 
+#### 02:00 - US-007: Python沙盒工具完成 (核心工具)
+- ✅ 创建 tools/python_sandbox.py
+- ✅ 继承 StructuredTool from langchain_core.tools
+- ✅ 实现 Docker 隔离的 Python 代码执行
+- ✅ 实现 import 白名单验证 (pandas, numpy, scipy, statsmodels 等)
+- ✅ 使用 AST 分析检测危险操作 (os, subprocess, exec, eval, 文件写入)
+- ✅ 添加 PythonCodeInput Pydantic 模型
+- ✅ 创建 29 个单元测试 (27/27 通过, 2 skipped 需要自定义 Docker 镜像)
+- ✅ 修复 DockerSandbox.execute_python 超时和日志捕获问题
+- ✅ 添加 reset_sandbox() 函数用于测试隔离
+
 ---
 
 ## 测试结果
@@ -183,4 +194,4 @@ agent = create_agent(model, [test_tool], checkpointer=memory)
 
 ---
 
-**最后更新**: 2025-02-05 01:00
+**最后更新**: 2025-02-05 02:00

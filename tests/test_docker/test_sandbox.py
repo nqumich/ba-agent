@@ -223,15 +223,17 @@ class TestDockerSandboxUnit:
         mock_container.logs.return_value = b'output'
 
         mock_client = MagicMock()
-        mock_client.containers.run.return_value = mock_container
+        mock_client.containers.create.return_value = mock_container
 
         with patch('backend.docker.sandbox.docker.from_env', return_value=mock_client):
             sandbox = DockerSandbox()
             result = sandbox.execute_python('print("test")')
 
-            # 验证容器被创建
-            mock_client.containers.run.assert_called_once()
-            call_args = mock_client.containers.run.call_args
+            # 验证容器被创建和启动
+            mock_client.containers.create.assert_called_once()
+            mock_container.start.assert_called_once()
+            mock_container.wait.assert_called_once()
+            call_args = mock_client.containers.create.call_args
             assert 'python' in call_args[1]['command']
 
     def test_execute_command_creates_container(self):

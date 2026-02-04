@@ -11,6 +11,7 @@ from tools.execute_command import (
     execute_command_impl,
     execute_command_tool,
 )
+from backend.docker.sandbox import reset_sandbox
 
 
 class TestExecuteCommandInput:
@@ -220,6 +221,10 @@ class TestExecuteCommandTool:
 
 class TestExecuteCommandIntegration:
     """集成测试（需要 Docker）"""
+
+    def setup_method(self):
+        """每个测试前重置沙盒"""
+        reset_sandbox()
 
     @pytest.mark.slow
     @pytest.mark.docker

@@ -56,29 +56,26 @@ class DockerSandbox:
             f.write(code)
             code_file = f.name
 
+        container = None
         try:
-            # 容器配置
-            container_config = {
-                'image': self.config.docker.image,
-                'command': f'python {code_file}',
-                'volumes': {
-                    os.path.dirname(code_file): {'bind': '/workspace', 'mode': 'ro'}
-                },
-                'mem_limit': memory_limit,
-                'cpu_quota': int(float(cpu_limit) * 100000),
-                'cpu_period': 100000,
-                'network_disabled': network_disabled,
-                'detach': True,
-                'remove': True,
-            }
+            # 创建容器（detach=True 以便支持超时）
+            container = self.client.containers.create(
+                image=self.config.docker.image,
+                command=f'python /workspace/{os.path.basename(code_file)}',
+                volumes={os.path.dirname(code_file): {'bind': '/workspace', 'mode': 'ro'}},
+                mem_limit=memory_limit,
+                cpu_quota=int(float(cpu_limit) * 100000),
+                cpu_period=100000,
+                network_disabled=network_disabled,
+            )
 
-            # 创建并启动容器
-            container = self.client.containers.run(**container_config)
+            # 启动容器
+            container.start()
 
-            # 等待容器完成
+            # 等待容器完成（带超时）
             result = container.wait(timeout=timeout)
 
-            # 获取日志
+            # 获取日志（在容器被移除之前）
             logs = container.logs().decode('utf-8')
 
             return {
@@ -110,6 +107,12 @@ class DockerSandbox:
                 'exit_code': -1,
             }
         finally:
+            # 清理容器
+            if container:
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
             # 清理临时文件
             if os.path.exists(code_file):
                 os.remove(code_file)
@@ -224,6 +227,22 @@ def get_sandbox() -> DockerSandbox:
     return _sandbox
 
 
+def reset_sandbox():
+    """
+    重置全局沙盒实例（主要用于测试）
+
+    注意：这会关闭当前的 Docker 客户端连接
+    """
+    global _sandbox
+
+    if _sandbox is not None:
+        try:
+            _sandbox.close()
+        except Exception:
+            pass
+        _sandbox = None
+
+
 def execute_python_safely(
     code: str,
     timeout: int = 30,
@@ -256,5 +275,6 @@ def execute_python_safely(
 __all__ = [
     "DockerSandbox",
     "get_sandbox",
+    "reset_sandbox",
     "execute_python_safely",
 ]
