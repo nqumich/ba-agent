@@ -1,8 +1,13 @@
 #!/bin/bash
 set -e
 
+# Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Get project root (two levels up from scripts/ralph directory)
+# Use a subshell to safely navigate up two levels
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 MAX_ITERATIONS=${1:-50}
 
 # Color output
