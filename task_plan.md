@@ -32,12 +32,12 @@
   - [x] 实现 AgentExecutor: 使用 langgraph.prebuilt.create_react_agent
   - [x] 添加 MemorySaver checkpointer 支持对话历史
   - [x] 添加基础测试验证 Agent 可正常响应
-- [ ] **US-005**: Docker 隔离环境配置
-  - [ ] 创建 Dockerfile 用于 Python 沙盒容器
-  - [ ] 创建 docker-compose.yml 用于开发环境
-  - [ ] 配置 Docker 网络隔离
-  - [ ] 实现容器资源限制 (CPU/内存)
-  - [ ] 测试容器启动和代码执行
+- [x] **US-005**: Docker 隔离环境配置
+  - [x] 创建 Dockerfile 用于 Python 沙盒容器
+  - [x] 创建 docker-compose.yml 用于开发环境
+  - [x] 配置 Docker 网络隔离
+  - [x] 实现容器资源限制 (CPU/内存)
+  - [x] 测试容器启动和代码执行
 
 ---
 
@@ -99,10 +99,10 @@
 ## 📊 进度统计
 
 - **总任务数**: 26
-- **已完成**: 5 (19.2%)
+- **已完成**: 6 (23.1%)
 - **进行中**: 0 (0%)
-- **待开始**: 21 (80.8%)
+- **待开始**: 20 (76.9%)
 
 ---
 
-**最后更新**: 2025-02-04 23:45
+**最后更新**: 2025-02-05 00:15

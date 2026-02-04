@@ -68,6 +68,14 @@
 - ✅ 添加 MemorySaver checkpointer 支持对话历史
 - ✅ 添加 15 个单元测试 (13 个通过, 2 个需要 API 密钥)
 
+#### 00:15 - US-005: Docker 隔离环境配置完成
+- ✅ 创建 Dockerfile 用于 Python 沙盒容器
+- ✅ 创建 docker-compose.yml 用于开发环境
+- ✅ 配置 Docker 网络隔离 (独立 bridge 网络)
+- ✅ 实现容器资源限制 (CPU quota + memory limit)
+- ✅ 创建 DockerSandbox 沙盒执行器
+- ✅ 添加 13 个单元测试 (7 个通过, 6 个需要 Docker daemon)
+
 ---
 
 ## 测试结果

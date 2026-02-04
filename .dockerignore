@@ -1,15 +1,84 @@
+# BA-Agent Docker Ignore
+
+# Git
 .git
 .gitignore
-.vscode
-.idea
-__pycache__
-*.pyc
-venv/
-env/
-.env
-.env.local
-tests/
+.gitattributes
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
 docs/
 *.md
-!README.md
+!CLAUDE.md
+!AGENTS.md
+!USER.md
+!MEMORY.md
+README.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Memory and cache
+.memory/
+.cache/
+.pytest_cache/
+
+# Ralph Loop
+RALPH_CHECKPOINT.md
+ralph.log
+
+# Test files
+tests/
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Environment variables
+.env
+.env.local
