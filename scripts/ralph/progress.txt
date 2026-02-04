@@ -29,6 +29,34 @@ Started: 2025-02-04
 
 ---
 
+## [2025-02-04] - 三层记忆管理系统实现
+- **任务**: 实现 BA-Agent 三层记忆管理系统
+- **文件变更**:
+  - 新增: CLAUDE.md, AGENTS.md, USER.md, MEMORY.md
+  - 新增: memory/2025-02-04.md
+  - 新增: task_plan.md, findings.md, progress.md (Manus 三文件模式)
+  - 更新: .gitignore (忽略本地记忆文件)
+  - 更新: scripts/ralph/prd.json (添加记忆管理任务)
+- **完成标准**:
+  - ✅ 创建三层记忆文件结构
+  - ✅ CLAUDE.md - 项目级记忆 (团队共享)
+  - ✅ AGENTS.md - Agent 系统指令和记忆指南
+  - ✅ USER.md - 用户信息和偏好
+  - ✅ MEMORY.md - 长期策划知识
+  - ✅ memory/YYYY-MM-DD.md - 每日日志
+  - ✅ task_plan.md - 任务进度跟踪
+  - ✅ findings.md - 研究发现
+  - ✅ progress.md - 会话日志
+- **Learnings**:
+  - Clawdbot/Moltbot 的三层 Markdown 记忆架构
+  - Progressive Context Generation (渐进式解析)
+  - Manus AI 的三文件模式 (task_plan.md, findings.md, progress.md)
+  - Context vs Memory: 临时上下文 vs 持久存储
+  - 搜索胜过注入: 不将所有记忆塞入上下文，而是按需搜索
+  - 混合搜索: 向量搜索 (0.7) + 关键词搜索 (0.3)
+
+---
+
 ## [2025-02-04] - LangChain 1.2.x API 修复完成
 - **任务**: 修复 LangChain 1.2.x API 兼容性问题
 - **文件变更**: requirements.txt, scripts/ralph/prd.json, scripts/ralph/prompt.md

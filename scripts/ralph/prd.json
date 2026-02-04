@@ -78,6 +78,86 @@
       "notes": "本地隔离环境替代云端虚拟机"
     },
     {
+      "id": "US-005-MEM-01",
+      "title": "三层记忆文件结构创建",
+      "acceptanceCriteria": [
+        "创建CLAUDE.md (项目级记忆)",
+        "创建AGENTS.md (Agent系统指令)",
+        "创建USER.md (用户信息)",
+        "创建MEMORY.md (长期策划知识)",
+        "创建memory/目录 (每日日志)",
+        "创建Manus三文件模式: task_plan.md, findings.md, progress.md",
+        "更新.gitignore忽略本地记忆文件"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "记忆管理基础文件结构"
+    },
+    {
+      "id": "US-005-MEM-02",
+      "title": "记忆搜索工具 (LangChain Tool)",
+      "acceptanceCriteria": [
+        "创建tools/memory_search.py",
+        "继承StructuredTool from langchain_core.tools",
+        "实现语义搜索 (使用sqlite-vec或临时方案)",
+        "实现关键词搜索 (BM25或类似)",
+        "混合评分 (0.7 * vectorScore + 0.3 * textScore)",
+        "搜索MEMORY.md + memory/*.md",
+        "支持maxResults和minScore参数",
+        "添加args_schema (MemorySearchInput模型)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: memory_search - 搜索记忆"
+    },
+    {
+      "id": "US-005-MEM-03",
+      "title": "记忆读取工具 (LangChain Tool)",
+      "acceptanceCriteria": [
+        "创建tools/memory_get.py",
+        "继承StructuredTool from langchain_core.tools",
+        "实现读取特定文件特定行的功能",
+        "支持路径安全检查",
+        "添加args_schema (MemoryGetInput模型)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: memory_get - 读取记忆"
+    },
+    {
+      "id": "US-005-MEM-04",
+      "title": "记忆写入工具 (LangChain Tool)",
+      "acceptanceCriteria": [
+        "创建tools/memory_write.py",
+        "继承StructuredTool from langchain_core.tools",
+        "实现自动选择Layer 1或Layer 2的逻辑",
+        "Layer 1: memory/YYYY-MM-DD.md (日常笔记)",
+        "Layer 2: MEMORY.md (持久知识)",
+        "支持追加和更新模式",
+        "实现Markdown格式化",
+        "添加args_schema (MemoryWriteInput模型)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: memory_write - 写入记忆"
+    },
+    {
+      "id": "US-005-MEM-05",
+      "title": "Hooks系统实现",
+      "acceptanceCriteria": [
+        "创建hooks/pre_tool_use.py",
+        "创建hooks/post_tool_use.py",
+        "创建hooks/stop.py",
+        "PreToolUse: 使用工具前重新读取task_plan.md",
+        "PostToolUse: 每2次操作后提示保存发现",
+        "Stop: 验证task_plan.md中的阶段是否完成",
+        "集成到Agent执行流程"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "Hooks系统 - PreToolUse, PostToolUse, Stop"
+    },
+    {
       "id": "US-006",
       "title": "命令行工具 (LangChain Tool)",
       "acceptanceCriteria": [

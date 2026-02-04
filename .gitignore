@@ -47,3 +47,16 @@ Thumbs.db
 
 # Claude
 .claude/
+
+# Memory Management (Local files, not shared)
+CLAUDE.local.md
+AGENTS.local.md
+USER.local.md
+
+# Memory index and cache
+memory/.index/
+memory/.cache/
+
+# Vector database
+data/chroma/
+data/vectordb/
