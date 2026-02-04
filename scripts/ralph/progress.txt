@@ -1,0 +1,19 @@
+# BA-Agent Progress Log
+
+Started: 2025-02-04
+
+## Codebase Patterns
+- 项目结构：backend/ (核心代码), config/ (配置), skills/ (可配置Skills), docs/ (文档)
+- 所有工具继承自 `langchain.tools.StructuredTool`
+- 所有Skills通过 `config/skills.yaml` 注册
+- 使用 Pydantic 定义所有数据模型
+- Docker隔离用于代码执行
+- 本地隔离环境替代云端虚拟机
+
+## Key Files
+- backend/agents/agent.py (主Agent)
+- backend/tools/ (基础工具)
+- skills/ (可配置分析Skills)
+- config/skills.yaml (Skills配置)
+
+---

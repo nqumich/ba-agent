@@ -1,0 +1,401 @@
+{
+  "projectName": "BA-Agent (Business Analysis Agent)",
+  "branchName": "feature/ba-agent-implementation",
+  "baseBranch": "main",
+  "architecture": "Single LangChain Agent + Basic Tools + Configurable Skills (inspired by Manus AI)",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "项目初始化与目录结构创建",
+      "acceptanceCriteria": [
+        "创建Python项目结构 (backend/, config/, docs/, scripts/, skills/, tests/)",
+        "创建requirements.txt包含langchain, anthropic, fastapi等依赖",
+        "创建.env.example配置文件模板",
+        "创建README.md说明项目目的和使用方法",
+        "创建.dockerignore和.gitignore",
+        "初始化Git仓库并提交初始结构"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "项目基础设施搭建"
+    },
+    {
+      "id": "US-002",
+      "title": "核心数据模型定义 (Pydantic)",
+      "acceptanceCriteria": [
+        "创建models/目录",
+        "定义Query和QueryResult模型 (支持自然语言查询和结构化结果)",
+        "定义ToolInput和ToolOutput模型 (工具调用接口)",
+        "定义SkillConfig和SkillResult模型 (Skill配置和返回)",
+        "定义Anomaly, Attribution, Report, ChartConfig等业务模型",
+        "添加类型验证和序列化测试"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "数据层基础"
+    },
+    {
+      "id": "US-003",
+      "title": "配置管理系统",
+      "acceptanceCriteria": [
+        "创建config/config.py配置加载类",
+        "创建config/settings.yaml配置文件模板",
+        "支持环境变量覆盖配置",
+        "实现密钥管理 (API keys等)",
+        "创建config.py单元测试"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "配置管理"
+    },
+    {
+      "id": "US-004",
+      "title": "LangChain Agent基础框架",
+      "acceptanceCriteria": [
+        "创建agents/agent.py主Agent类",
+        "初始化ChatAnthropic (Claude 3.5 Sonnet)",
+        "创建Agent prompt template (system message定义)",
+        "实现AgentExecutor (LangChain工具调用)",
+        "添加基础测试验证Agent可正常响应"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "核心Agent框架"
+    },
+    {
+      "id": "US-005",
+      "title": "Docker隔离环境配置",
+      "acceptanceCriteria": [
+        "创建Dockerfile用于Python沙盒容器",
+        "创建docker-compose.yml用于开发环境",
+        "配置Docker网络隔离",
+        "实现容器资源限制 (CPU/内存)",
+        "测试容器启动和代码执行"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "本地隔离环境替代云端虚拟机"
+    },
+    {
+      "id": "US-006",
+      "title": "命令行工具 (LangChain Tool)",
+      "acceptanceCriteria": [
+        "创建tools/command_line.py",
+        "继承StructuredTool from langchain",
+        "实现_execute方法 (Docker隔离执行命令)",
+        "实现命令白名单验证机制",
+        "实现超时控制",
+        "添加args_schema (CommandInput模型)",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: execute_command"
+    },
+    {
+      "id": "US-007",
+      "title": "Python沙盒工具 (LangChain Tool) - 核心",
+      "acceptanceCriteria": [
+        "创建tools/python_sandbox.py",
+        "继承StructuredTool from langchain",
+        "实现_run_python方法 (Docker隔离执行Python代码)",
+        "实现import白名单 (pandas, numpy, scipy等数据分析库)",
+        "实现资源限制 (内存、超时)",
+        "添加args_schema (PythonCodeInput模型)",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: run_python - 核心工具，所有分析能力的基础"
+    },
+    {
+      "id": "US-008",
+      "title": "Web搜索工具 (LangChain Tool)",
+      "acceptanceCriteria": [
+        "创建tools/web_search.py",
+        "继承StructuredTool from langchain",
+        "实现_search方法 (对接搜索API)",
+        "实现结果解析和过滤",
+        "添加args_schema",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: web_search"
+    },
+    {
+      "id": "US-009",
+      "title": "Web Reader工具 (LangChain Tool)",
+      "acceptanceCriteria": [
+        "创建tools/web_reader.py",
+        "继承StructuredTool from langchain",
+        "实现_read方法 (网页内容提取)",
+        "支持多种内容类型 (article, news, general)",
+        "添加args_schema",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: read_webpage"
+    },
+    {
+      "id": "US-010",
+      "title": "文件读取工具 (LangChain Tool)",
+      "acceptanceCriteria": [
+        "创建tools/file_reader.py",
+        "继承StructuredTool from langchain",
+        "实现_read方法 (支持CSV/Excel/JSON/文本)",
+        "实现路径安全检查 (allowed_paths配置)",
+        "添加args_schema",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: read_file"
+    },
+    {
+      "id": "US-011",
+      "title": "SQL查询工具 (LangChain Tool)",
+      "acceptanceCriteria": [
+        "创建tools/database.py",
+        "继承StructuredTool from langchain",
+        "实现_query方法 (SQLAlchemy集成)",
+        "实现SQL注入防护 (参数化查询)",
+        "支持多数据库连接配置",
+        "添加args_schema",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: query_database"
+    },
+    {
+      "id": "US-012",
+      "title": "向量检索工具 (LangChain Tool)",
+      "acceptanceCriteria": [
+        "创建tools/vector_search.py",
+        "继承StructuredTool from langchain",
+        "实现_search方法 (Chroma集成)",
+        "实现指标/维度定义检索",
+        "实现文档向量化和存储",
+        "添加args_schema",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: search_knowledge"
+    },
+    {
+      "id": "US-013",
+      "title": "Skill调用工具 (LangChain Tool) - 核心",
+      "acceptanceCriteria": [
+        "创建tools/skill_invoker.py",
+        "继承StructuredTool from langchain",
+        "实现invoke_skill方法 (读取Skills配置并调用)",
+        "实现与run_python工具的桥接 (构建Python代码调用Skill)",
+        "支持动态参数传递",
+        "添加args_schema",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "tool: invoke_skill - 桥接Agent和Skills的核心工具"
+    },
+    {
+      "id": "US-014",
+      "title": "Skills配置系统",
+      "acceptanceCriteria": [
+        "创建config/skills.yaml配置文件",
+        "定义Skills注册格式 (name, entrypoint, function, requirements, config)",
+        "创建skills/loader.py配置加载器",
+        "实现Skill发现和验证",
+        "实现Skill参数解析",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "可配置Skills系统"
+    },
+    {
+      "id": "US-015",
+      "title": "示例Skill: 异动检测",
+      "acceptanceCriteria": [
+        "创建skills/anomaly_detection/SKILL.md",
+        "创建skills/anomaly_detection/main.py",
+        "实现detect()函数 (使用Claude API + 统计方法)",
+        "支持3-sigma、历史对比、AI智能识别",
+        "返回结构化异动结果",
+        "编写测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "示例Skill，用户可参考自定义"
+    },
+    {
+      "id": "US-016",
+      "title": "示例Skill: 归因分析",
+      "acceptanceCriteria": [
+        "创建skills/attribution/SKILL.md",
+        "创建skills/attribution/main.py",
+        "实现analyze()函数 (使用Claude API + 维度分析)",
+        "支持维度下钻、事件归因、外部因素分析",
+        "返回结构化归因结果",
+        "编写测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "示例Skill"
+    },
+    {
+      "id": "US-017",
+      "title": "示例Skill: 报告生成",
+      "acceptanceCriteria": [
+        "创建skills/report_gen/SKILL.md",
+        "创建skills/report_gen/main.py",
+        "实现generate()函数 (使用Claude API + 模板引擎)",
+        "支持日报/周报/月报模板",
+        "支持PDF/Word/Excel导出",
+        "编写测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "示例Skill"
+    },
+    {
+      "id": "US-018",
+      "title": "示例Skill: 数据可视化",
+      "acceptanceCriteria": [
+        "创建skills/visualization/SKILL.md",
+        "创建skills/visualization/main.py",
+        "实现create_chart()函数 (使用Claude API + plotly/matplotlib)",
+        "支持折线图/柱状图/饼图/热力图/地图",
+        "返回图表配置或图片",
+        "编写测试"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "示例Skill"
+    },
+    {
+      "id": "US-019",
+      "title": "Agent System Prompt与工具集成",
+      "acceptanceCriteria": [
+        "编写完整的Agent system prompt",
+        "定义Agent角色、能力、约束",
+        "定义工具使用说明",
+        "添加few-shot示例 (异动检测、归因分析、报告生成)",
+        "集成所有8个基础工具到Agent",
+        "端到端测试"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "组装所有组件成完整Agent"
+    },
+    {
+      "id": "US-020",
+      "title": "知识库初始化",
+      "acceptanceCriteria": [
+        "创建data/knowledge/目录",
+        "创建指标定义文件 (metrics.yaml)",
+        "创建维度定义文件 (dimensions.yaml)",
+        "初始化Chroma向量数据库",
+        "写入示例指标和维度数据",
+        "创建导入脚本"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "知识库基础数据"
+    },
+    {
+      "id": "US-021",
+      "title": "API服务实现 (FastAPI)",
+      "acceptanceCriteria": [
+        "创建backend/api/main.py",
+        "实现FastAPI应用初始化",
+        "实现/query POST endpoint (接收查询，返回Agent结果)",
+        "实现/health GET endpoint (健康检查)",
+        "实现CORS配置",
+        "实现API Key认证中间件",
+        "实现限流",
+        "编写API文档"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "后端API服务"
+    },
+    {
+      "id": "US-022",
+      "title": "IM Bot集成 (企业微信/钉钉)",
+      "acceptanceCriteria": [
+        "创建backend/bot/wechat.py企业微信Bot",
+        "创建backend/bot/dingtalk.py钉钉Bot",
+        "实现webhook接收消息",
+        "实现与Agent的异步调用",
+        "实现消息格式转换",
+        "编写集成测试"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "IM Bot集成"
+    },
+    {
+      "id": "US-023",
+      "title": "Excel插件",
+      "acceptanceCriteria": [
+        "创建excel-plugin/目录",
+        "实现Office.js插件结构",
+        "实现侧边栏UI (React + TypeScript)",
+        "实现与后端API的通信",
+        "实现数据写入到Excel",
+        "实现图表插入",
+        "编写安装和测试"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "Excel插件"
+    },
+    {
+      "id": "US-024",
+      "title": "日志与监控系统",
+      "acceptanceCriteria": [
+        "使用loguru实现结构化日志",
+        "集成Prometheus metrics",
+        "实现请求追踪",
+        "实现健康检查endpoint",
+        "配置告警规则"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "可观测性"
+    },
+    {
+      "id": "US-025",
+      "title": "单元测试与覆盖率",
+      "acceptanceCriteria": [
+        "所有工具单元测试",
+        "所有Skills单元测试",
+        "Agent集成测试",
+        "API端点测试",
+        "测试覆盖率 > 80%",
+        "所有测试通过"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "测试覆盖"
+    },
+    {
+      "id": "US-026",
+      "title": "文档完善",
+      "acceptanceCriteria": [
+        "更新README.md (安装、配置、使用指南)",
+        "API文档完整 (FastAPI自动生成)",
+        "部署文档完整 (Docker、环境配置)",
+        "开发指南完整 (架构说明、开发规范)",
+        "用户手册完整 (功能说明、示例)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "文档"
+    }
+  ]
+}
