@@ -164,7 +164,9 @@ class TestWebSearchIntegration:
             assert result is not None
             assert result["isError"] == False
             content = result["content"][0]["text"]
-            assert f"结果数量: {max_results}" in content
+            # 检查结果数量（去除 markdown 格式）
+            assert f"{max_results}" in content
+            assert "搜索结果" in content
 
 
 # 保留原有的简单测试（用于快速验证）

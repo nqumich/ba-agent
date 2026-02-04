@@ -63,3 +63,10 @@ memory/.cache/
 # Vector database
 data/chroma/
 data/vectordb/
+
+# Test-generated Skills (skill_manager tests)
+skills/test_*/
+skills/*test_*/
+skills/installed_skill*/
+skills/extracted_skill
+skills/existing_skill

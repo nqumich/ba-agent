@@ -8,10 +8,10 @@
 ```
 ba-agent/
 ├── backend/          # 后端核心模块
-├── tools/            # LangChain 工具集合
-├── skills/           # Skills 实现
+├── tools/            # LangChain 工具集合 (9个)
+├── skills/           # Skills 实现 (4个内置)
 ├── config/           # 配置管理系统
-├── tests/            # 测试套件
+├── tests/            # 测试套件 (481个测试)
 ├── memory/           # 每日对话日志 (Layer 1)
 ├── docs/             # 项目文档
 ├── scripts/          # 工具脚本
@@ -42,7 +42,8 @@ agents/
 
 **关键功能**:
 - 使用 LangGraph create_react_agent 创建 Agent
-- 集成 Claude 3.5 Sonnet 模型
+- 集成 Claude Sonnet 4.5 模型
+- 支持自定义 API 端点 (LingYi AI)
 - 支持工具调用和记忆管理
 
 ### 1.2 backend/docker/ - Docker 沙盒
@@ -122,8 +123,8 @@ from models.tool_output import ToolOutput
 | base.py | unified_tool | 统一工具输出格式装饰器 | 42 tests ✅ |
 | execute_command.py | execute_command | Docker 隔离命令行执行 | 16 tests ✅ |
 | python_sandbox.py | run_python | Docker 隔离 Python 执行 | 29 tests ✅ |
-| web_search.py | web_search | Web 搜索 (MCP) | 22 tests ✅ |
-| web_reader.py | web_reader | Web 读取 (MCP) | 27 tests ✅ |
+| web_search.py | web_search | Web 搜索 (Z.ai MCP) | 22 tests ✅ |
+| web_reader.py | web_reader | Web 读取 (Z.ai MCP) | 27 tests ✅ |
 | file_reader.py | file_reader | 多格式文件读取 | 61 tests ✅ |
 | database.py | query_database | SQL 查询 | 54 tests ✅ |
 | vector_search.py | search_knowledge | 向量检索 | 51 tests ✅ |
@@ -212,7 +213,7 @@ config/
 
 包含以下配置：
 - **数据库**: PostgreSQL, ClickHouse 连接
-- **LLM**: Claude 3.5 Sonnet 配置
+- **LLM**: Claude/Gemini 配置 (支持 LingYi AI 代理)
 - **向量数据库**: ChromaDB 配置
 - **Docker**: 镜像、网络、资源限制
 - **记忆**: 三层记忆系统配置
@@ -222,21 +223,6 @@ config/
 ```bash
 export BA_DATABASE__HOST=localhost
 export BA_LLM__API_KEY=sk-xxx
-```
-
-### skills.yaml - Skills 运行时配置
-
-```yaml
-global:
-  skill_timeout: 120
-  max_memory: 512m
-  enable_cache: true
-  cache_ttl: 3600
-
-skills_config:
-  anomaly_detection:
-    threshold: 2.0
-    min_data_points: 7
 ```
 
 ### skills_registry.json - Skills 注册表
@@ -261,6 +247,8 @@ tests/
 │   └── test_config.py
 ├── test_docker/             # Docker 测试
 │   └── test_sandbox.py
+├── mcp_server/              # MCP 测试服务器
+│   └── server.py
 └── tools/                   # 工具测试
     ├── conftest.py
     ├── test_database.py
@@ -271,14 +259,16 @@ tests/
     ├── test_skill_manager.py
     ├── test_vector_search.py
     ├── test_web_reader.py
-    └── test_web_search.py
+    ├── test_web_reader_integration.py
+    ├── test_web_search.py
+    └── test_web_search_integration.py
 ```
 
 ### 测试统计
 
-- **总计**: 469 个测试
-- **通过**: 469 (100%)
-- **跳过**: 6 (需要 MCP 依赖)
+- **总计**: 481 个测试
+- **通过**: 481 (100%)
+- **跳过**: 0
 
 ### 运行测试
 
@@ -289,6 +279,10 @@ pytest
 # 运行特定测试
 pytest tests/tools/test_skill_manager.py
 pytest tests/test_agents/
+
+# 运行 MCP 集成测试
+MCP_AVAILABLE=true pytest tests/tools/test_web_search_integration.py
+MCP_AVAILABLE=true pytest tests/tools/test_web_reader_integration.py
 
 # 查看覆盖率
 pytest --cov=backend --cov=tools --cov-report=html
@@ -343,7 +337,9 @@ Agent 可以通过以下工具管理记忆：
 ```
 docs/
 ├── PRD.md                              # 产品需求文档
-└── tool-output-format-design.md        # 工具输出格式设计文档
+├── project-structure.md                # 本文档 - 项目目录结构
+├── tool-output-format-design.md        # 工具输出格式设计
+└── mcp-setup.md                        # MCP 服务器配置
 ```
 
 ### 其他重要文档
@@ -381,9 +377,22 @@ scripts/
     └── ralph.sh        # Ralph Loop 执行脚本
 ```
 
-## 9. 配置文件
+## 9. .claude/ - Claude CLI 配置
 
-### 9.1 根目录配置文件
+```
+.claude/
+├── hooks/               # Claude 钩子脚本 (5个)
+│   ├── check-security.sh
+│   ├── log-and-summarize.sh
+│   ├── prompt-save-finding.sh
+│   ├── session-manager.sh
+│   └── validate-input.sh
+└── hooks.json          # 钩子配置
+```
+
+## 10. 配置文件
+
+### 根目录配置文件
 
 | 文件 | 用途 |
 |------|------|
@@ -396,20 +405,36 @@ scripts/
 | `pytest.ini` | pytest 配置 |
 | `requirements.txt` | Python 依赖 |
 
-### 9.2 .claude/ - Claude CLI 配置
+## 11. API 集成配置
 
-```
-.claude/
-├── hooks/               # Claude 钩子脚本
-└── hooks.json          # 钩子配置
+### LingYi AI 代理 (可选)
+
+支持使用 LingYi AI 作为 Claude/Gemini API 的代理端点：
+
+```bash
+# .env 配置
+ANTHROPIC_API_KEY=your_lingyi_api_key
+ANTHROPIC_BASE_URL=https://api.lingyaai.cn/v1/messages
+
+GOOGLE_API_KEY=your_lingyi_gemini_key
+GOOGLE_BASE_URL=https://api.lingyaai.cn/v1
 ```
 
-## 10. 构建输出目录（不在版本控制中）
+### Z.ai MCP 集成
+
+```bash
+# .env 配置
+MCP_AVAILABLE=true
+ZAI_MCP_API_KEY=your_zhipuai_api_key
+```
+
+## 12. 构建输出目录（不在版本控制中）
 
 ```
 venv/                    # Python 虚拟环境
 .pytest_cache/          # pytest 缓存
 __pycache__/            # Python 字节码缓存
+skills/test_*/          # 测试生成的 Skill 目录
 ```
 
 ## 开发规范
@@ -465,12 +490,12 @@ db_host = config.database.host
 # 访问 LLM 配置
 api_key = config.llm.api_key
 
-# 访问 Skills 配置
-skills = config.skills
+# 获取 MCP 配置
+mcp_config = get_config_manager().get_mcp_config()
 ```
 
 ---
 
-**文档版本**: v1.0
+**文档版本**: v1.1
 **最后更新**: 2025-02-05
 **维护者**: BA-Agent Team

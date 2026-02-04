@@ -161,7 +161,9 @@ class MCPServer:
     def _web_reader(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Handle web reader tool call"""
         url = args.get("url", "")
+        timeout = args.get("timeout", 20)
         return_format = args.get("return_format", "markdown")
+        retain_images = args.get("retain_images", False)
 
         # Generate mock webpage content
         content = f"""# 网页内容
@@ -169,6 +171,8 @@ class MCPServer:
 **来源**: {url}
 **读取时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 **格式**: {return_format}
+**超时时间**: {timeout}秒
+**保留图片**: {'是' if retain_images else '否'}
 
 ## 网页标题
 

@@ -59,7 +59,7 @@ class TestLLMConfig:
         """测试默认值"""
         config = LLMConfig()
         assert config.provider == "anthropic"
-        assert config.model == "claude-3-5-sonnet-20241022"
+        assert config.model == "claude-sonnet-4-5-20250929"
         assert config.temperature == 0.7
         assert config.max_tokens == 4096
 
@@ -237,7 +237,7 @@ class TestConfigManager:
             "environment": "development",
             "llm": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20241022"
+                "model": "claude-sonnet-4-5-20250929"
             }
         }
         config_file.write_text(yaml.dump(config_data))
@@ -402,7 +402,7 @@ class TestEnvironmentOverrides:
             "debug": True,
             "llm": {
                 "provider": "anthropic",
-                "model": "claude-3-5-sonnet-20241022",
+                "model": "claude-sonnet-4-5-20250929",
                 "temperature": 0.7
             },
             "database": {
