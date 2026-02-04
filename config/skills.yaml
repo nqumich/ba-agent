@@ -1,0 +1,175 @@
+# BA-Agent Skills Configuration
+
+skills:
+  # 异动检测分析Skill
+  anomaly_detection:
+    name: 异动检测分析
+    description: |
+      检测数据中的异常波动并分析可能原因。
+      支持统计方法（3-sigma）、历史对比（同比/环比）、AI智能识别。
+
+      使用场景：
+      - "今天GMV有什么异常？"
+      - "检测最近7天的异常波动"
+      - "GMV突然下降是什么原因？"
+    entrypoint: skills/anomaly_detection/main.py
+    function: detect
+    requirements:
+      - pandas>=2.0.0
+      - numpy>=1.24.0
+      - scipy>=1.10.0
+      - anthropic>=0.39.0
+    env:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    config:
+      default_method: statistical
+      methods:
+        - statistical  # 基于3-sigma的统计检测
+        - historical   # 同比/环比历史对比
+        - ai          # 使用Claude AI智能识别
+      threshold: 2.0        # 统计检测的标准差倍数
+      min_data_points: 7  # 最小数据点数
+
+  # 归因分析Skill
+  attribution:
+    name: 归因分析
+    description: |
+      分析指标变化的归因因素，包括维度下钻、事件归因、外部因素分析。
+
+      使用场景：
+      - "为什么GMV增长了？"
+      - "分析本周GMV下降的原因"
+      - "华东地区GMV增长的主要驱动因素是什么？"
+    entrypoint: skills/attribution/main.py
+    function: analyze
+    requirements:
+      - pandas>=2.0.0
+      - numpy>=1.24.0
+      - anthropic>=0.39.0
+    config:
+      dimensions:
+        - region      # 地区维度分析
+        - category    # 品类维度分析
+        - channel     # 渠道维度分析
+        - user_type   # 用户分群分析
+      attribution_methods:
+        - contribution  # 贡献度分析
+        - correlation   # 相关性分析
+        - sequence      # 序列分析
+      external_factors:
+        - holiday      # 节假日因素
+        - weather      # 天气因素
+        - competitor   # 竞品动作
+
+  # 报告生成Skill
+  report_gen:
+    name: 报告生成
+    description: |
+      自动生成业务分析报告，支持日报、周报、月报。
+
+      使用场景：
+      - "帮我生成本周的业务周报"
+      - "生成GMV月度分析报告"
+      - "自动生成每日业务简报"
+    entrypoint: skills/report_gen/main.py
+    function: generate
+    requirements:
+      - python-docx>=1.1.0
+      - reportlab>=4.0.0
+      - matplotlib>=3.7.0
+      - anthropic>=0.39.0
+    config:
+      templates:
+        daily:
+          name: 日报模板
+          sections:
+            - 核心指标概览
+            - 关键异动提醒
+            - 今日重点关注
+            - 明日建议
+        weekly:
+          name: 周报模板
+          sections:
+            - 本周经营概况
+            - 核心指标趋势
+            - 异动分析
+            - 下周策略建议
+        monthly:
+          name: 月报模板
+          sections:
+            - 月度经营总结
+            - 关键指标分析
+            - 异动复盘
+            - 下月规划
+      formats:
+        - pdf:     PDF格式报告
+        - docx:    Word格式报告
+        - xlsx:    Excel格式报告（含图表）
+        - markdown: Markdown格式报告
+
+  # 数据可视化Skill
+  visualization:
+    name: 数据可视化
+    description: |
+      根据数据自动生成合适的可视化图表。
+
+      使用场景：
+      - "把最近30天的GMV趋势用图表展示"
+      - "生成各地区GMV占比的饼图"
+      - "展示用户增长的折线图"
+    entrypoint: skills/visualization/main.py
+    function: create_chart
+    requirements:
+      - plotly>=5.24.0
+      - matplotlib>=3.7.0
+      - kaleido>=0.2.1
+      - anthropic>=0.39.0
+    config:
+      chart_types:
+        line:
+          name: 折线图
+          best_for: 时间序列、趋势展示
+          max_data_points: 1000
+        bar:
+          name: 柱状图
+          best_for: 数据对比、排名展示
+          max_categories: 20
+        pie:
+          name: 饼图
+          best_for: 占比分析、部分展示
+          max_categories: 10
+        heatmap:
+          name: 热力图
+          best_for: 多维数据展示
+        map:
+          name: 地图
+          best_for: 地域分布展示
+        table:
+          name: 表格
+          best_for: 详细数据展示
+      auto_select: true  # 自动选择最适合的图表类型
+
+# 全局配置
+config:
+  # 默认语言
+  language: zh-CN
+
+  # 时区
+  timezone: Asia/Shanghai
+
+  # 日期格式
+  date_format: "%Y-%m-%d"
+
+  # 数字格式
+  number_format:
+    thousands_separator: ","
+    decimal_separator: "."
+
+  # 货币
+  default_currency: CNY
+
+  # Agent配置
+  agent:
+    model_temperature: 0.7  # Claude模型温度
+    max_iterations: 10         # Agent最大迭代次数
+    timeout_seconds: 30      # 单次工具调用超时

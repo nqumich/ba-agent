@@ -16,8 +16,8 @@
         "初始化Git仓库并提交初始结构"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "项目基础设施搭建"
+      "passes": true,
+      "notes": "项目基础设施搭建 - COMPLETE"
     },
     {
       "id": "US-002",
