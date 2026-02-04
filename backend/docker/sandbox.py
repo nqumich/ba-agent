@@ -136,32 +136,26 @@ class DockerSandbox:
             执行结果字典
         """
         try:
-            # 容器配置
-            container_config = {
-                'image': self.config.docker.image,
-                'command': command,
-                'mem_limit': memory_limit,
-                'cpu_quota': int(float(cpu_limit) * 100000),
-                'cpu_period': 100000,
-                'network_disabled': network_disabled,
-                'detach': True,
-                'remove': True,
-            }
+            # 使用同步执行来正确捕获输出
+            output = self.client.containers.run(
+                image=self.config.docker.image,
+                command=command,
+                mem_limit=memory_limit,
+                cpu_quota=int(float(cpu_limit) * 100000),
+                cpu_period=100000,
+                network_disabled=network_disabled,
+                remove=True,
+                # 不使用 detach，这样可以直接获取输出
+            )
 
-            # 创建并启动容器
-            container = self.client.containers.run(**container_config)
-
-            # 等待容器完成
-            result = container.wait(timeout=timeout)
-
-            # 获取日志
-            logs = container.logs().decode('utf-8')
+            # output 是字节串
+            stdout = output.decode('utf-8').strip()
 
             return {
-                'success': result['StatusCode'] == 0,
-                'stdout': logs,
+                'success': True,
+                'stdout': stdout,
                 'stderr': '',
-                'exit_code': result['StatusCode'],
+                'exit_code': 0,
             }
 
         except docker.errors.ContainerError as e:
