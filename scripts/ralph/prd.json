@@ -52,15 +52,16 @@
       "id": "US-004",
       "title": "LangChain Agent基础框架",
       "acceptanceCriteria": [
-        "创建agents/agent.py主Agent类",
+        "创建backend/agents/agent.py主Agent类",
         "初始化ChatAnthropic (Claude 3.5 Sonnet)",
         "创建Agent prompt template (system message定义)",
-        "实现AgentExecutor (LangChain工具调用)",
+        "实现AgentExecutor: 使用 langchain.agents.create_agent (LangChain 1.2.8+ 推荐方式)",
+        "添加 MemorySaver checkpointer 支持对话历史",
         "添加基础测试验证Agent可正常响应"
       ],
       "priority": 1,
       "passes": false,
-      "notes": "核心Agent框架"
+      "notes": "核心Agent框架 - 使用 langchain.agents.create_agent API"
     },
     {
       "id": "US-005",
@@ -81,7 +82,7 @@
       "title": "命令行工具 (LangChain Tool)",
       "acceptanceCriteria": [
         "创建tools/command_line.py",
-        "继承StructuredTool from langchain",
+        "继承StructuredTool from langchain_core.tools",
         "实现_execute方法 (Docker隔离执行命令)",
         "实现命令白名单验证机制",
         "实现超时控制",
@@ -97,7 +98,7 @@
       "title": "Python沙盒工具 (LangChain Tool) - 核心",
       "acceptanceCriteria": [
         "创建tools/python_sandbox.py",
-        "继承StructuredTool from langchain",
+        "继承StructuredTool from langchain_core.tools",
         "实现_run_python方法 (Docker隔离执行Python代码)",
         "实现import白名单 (pandas, numpy, scipy等数据分析库)",
         "实现资源限制 (内存、超时)",
@@ -113,7 +114,7 @@
       "title": "Web搜索工具 (MCP Tool Wrapper)",
       "acceptanceCriteria": [
         "创建tools/web_search.py作为MCP工具的LangChain包装器",
-        "继承StructuredTool from langchain",
+        "继承StructuredTool from langchain_core.tools",
         "封装mcp__web-search-prime__webSearchPrime调用",
         "实现搜索结果解析和格式化",
         "支持中英文搜索",
@@ -128,7 +129,7 @@
       "title": "Web Reader工具 (MCP Tool Wrapper)",
       "acceptanceCriteria": [
         "创建tools/web_reader.py作为MCP工具的LangChain包装器",
-        "继承StructuredTool from langchain",
+        "继承StructuredTool from langchain_core.tools",
         "封装mcp__web_reader__webReader调用",
         "实现网页内容提取和清理",
         "支持Markdown格式输出",
@@ -143,7 +144,7 @@
       "title": "文件读取工具 (LangChain Tool)",
       "acceptanceCriteria": [
         "创建tools/file_reader.py",
-        "继承StructuredTool from langchain",
+        "继承StructuredTool from langchain_core.tools",
         "实现_read方法 (支持CSV/Excel/JSON/文本)",
         "实现路径安全检查 (allowed_paths配置)",
         "添加args_schema",
@@ -158,7 +159,7 @@
       "title": "SQL查询工具 (LangChain Tool)",
       "acceptanceCriteria": [
         "创建tools/database.py",
-        "继承StructuredTool from langchain",
+        "继承StructuredTool from langchain_core.tools",
         "实现_query方法 (SQLAlchemy集成)",
         "实现SQL注入防护 (参数化查询)",
         "支持多数据库连接配置",
@@ -174,7 +175,7 @@
       "title": "向量检索工具 (LangChain Tool)",
       "acceptanceCriteria": [
         "创建tools/vector_search.py",
-        "继承StructuredTool from langchain",
+        "继承StructuredTool from langchain_core.tools",
         "实现_search方法 (Chroma集成)",
         "实现指标/维度定义检索",
         "实现文档向量化和存储",
@@ -190,7 +191,7 @@
       "title": "Skill调用工具 (LangChain Tool) - 核心",
       "acceptanceCriteria": [
         "创建tools/skill_invoker.py",
-        "继承StructuredTool from langchain",
+        "继承StructuredTool from langchain_core.tools",
         "实现invoke_skill方法 (读取Skills配置并调用)",
         "实现与run_python工具的桥接 (构建Python代码调用Skill)",
         "支持动态参数传递",

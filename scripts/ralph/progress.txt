@@ -4,7 +4,8 @@ Started: 2025-02-04
 
 ## Codebase Patterns
 - 项目结构：backend/ (核心代码), config/ (配置), skills/ (可配置Skills), docs/ (文档)
-- 所有工具继承自 `langchain.tools.StructuredTool`
+- 所有工具继承自 `langchain_core.tools.StructuredTool` (注意：不是 langchain.tools)
+- Agent创建使用 `langgraph.prebuilt.create_react_agent` (LangChain 1.2.x 推荐方式)
 - 所有Skills通过 `config/skills.yaml` 注册
 - 使用 Pydantic 定义所有数据模型
 - Docker隔离用于代码执行
@@ -25,6 +26,25 @@ Started: 2025-02-04
 - backend/tools/ (基础工具)
 - skills/ (可配置分析Skills)
 - config/skills.yaml (Skills配置)
+
+---
+
+## [2025-02-04] - LangChain 1.2.x API 修复完成
+- **任务**: 修复 LangChain 1.2.x API 兼容性问题
+- **文件变更**: requirements.txt, scripts/ralph/prd.json, scripts/ralph/prompt.md
+- **完成标准**:
+  - ✅ 安装 langchain>=0.3.0, langgraph>=0.2.0, langchain-anthropic>=0.2.0
+  - ✅ 更新 US-004 使用 langchain.agents.create_agent (新推荐方式)
+  - ✅ 更新所有工具的 US-006~US-013 使用 langchain_core.tools.StructuredTool
+  - ✅ 更新 prompt.md 添加正确的 LangChain 1.2.8+ API 示例
+  - ✅ 验证所有 API 导入和创建正常工作
+- **Learnings**:
+  - LangChain 1.2.x 弃用了 langchain.agents.AgentExecutor
+  - 新推荐方式: `langchain.agents.create_agent`
+  - 备选方式: `langgraph.prebuilt.create_react_agent` (有弃用警告但仍可用)
+  - StructuredTool 从 langchain.tools 移至 langchain_core.tools
+  - 需要使用 MemorySaver checkpointer 支持对话历史
+  - 必须安装完整的 langchain 包 (不只是 langchain-core)
 
 ---
 

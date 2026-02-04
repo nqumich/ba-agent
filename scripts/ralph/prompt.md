@@ -88,10 +88,69 @@ for story in prd['userStories']:
 ```markdown
 ## Codebase Patterns
 - 项目结构：backend/ (核心代码), config/ (配置), skills/ (可配置Skills), docs/ (文档)
-- 所有工具继承自 `langchain.tools.StructuredTool`
+- 所有工具继承自 `langchain_core.tools.StructuredTool` (注意：不是 langchain.tools)
+- Agent创建使用 `langgraph.prebuilt.create_react_agent` (LangChain 1.2.x 推荐方式)
 - 所有Skills通过 `config/skills.yaml` 注册
 - 使用 Pydantic 定义所有数据模型
 - Docker隔离用于代码执行
+```
+
+## LangChain/LangGraph API 重要提示
+
+⚠️ **LangChain 1.2.x API 变更**：
+- ❌ 旧API (已弃用): `langchain.agents.AgentExecutor`, `langchain.agents.create_react_agent`
+- ✅ 新API (推荐方式): `langchain.agents.create_agent`
+- ✅ 备选方式: `langgraph.prebuilt.create_react_agent` (仍可用，但有弃用警告)
+
+**推荐的 Agent 创建模式 (LangChain 1.2.8+)**：
+```python
+# 导入
+from langchain_anthropic import ChatAnthropic
+from langchain_core.tools import StructuredTool
+from langchain.agents import create_agent  # 新推荐位置
+from langgraph.checkpoint.memory import MemorySaver
+
+# 创建工具
+from langchain_core.tools import tool
+
+@tool
+def my_tool(query: str) -> str:
+    """工具描述"""
+    return "结果"
+
+tools = [my_tool]
+
+# 创建模型
+model = ChatAnthropic(model="claude-3-5-sonnet-20240620")
+
+# 创建 Agent (推荐方式)
+memory = MemorySaver()
+agent_executor = create_agent(model, tools, checkpointer=memory)
+
+# 使用 Agent
+config = {"configurable": {"thread_id": "session-123"}}
+response = agent_executor.invoke({"messages": [("user", "用户问题")]}, config)
+```
+
+**工具定义模式**：
+```python
+from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
+
+class ToolInput(BaseModel):
+    """工具输入"""
+    query: str = Field(..., description="查询内容")
+
+def my_function(input: ToolInput) -> str:
+    """工具实现"""
+    return f"结果: {input.query}"
+
+tool = StructuredTool.from_function(
+    func=my_function,
+    name="my_tool",
+    description="工具描述",
+    args_schema=ToolInput
+)
 ```
 
 ## 停止条件
@@ -122,10 +181,10 @@ for story in prd['userStories']:
 ## 开发顺序建议
 
 Priority 1 (基础设施):
-1. US-001: 项目初始化
-2. US-002: 核心数据模型
+1. US-001: 项目初始化 ✅ (已完成)
+2. US-002: 核心数据模型 (Pydantic)
 3. US-003: 配置管理
-4. US-004: LangChain Agent框架
+4. US-004: LangGraph Agent框架 (使用 create_react_agent)
 5. US-005: Docker环境配置
 
 Priority 2 (核心工具):
