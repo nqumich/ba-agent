@@ -10,10 +10,38 @@ Started: 2025-02-04
 - Docker隔离用于代码执行
 - 本地隔离环境替代云端虚拟机
 
+## MCP Tools (已配置)
+- `mcp__web-search-prime__webSearchPrime`: Web搜索功能
+- `mcp__web_reader__webReader`: 网页内容提取功能
+
+## Supported AI Models
+- Claude (Anthropic): anthropic>=0.40.0
+- OpenAI (GPT): openai>=1.0.0
+- Google Gemini: google-genai>=1.0.0
+- 智谱 AI (GLM-4.7): zhipuai>=2.0.0
+
 ## Key Files
 - backend/agents/agent.py (主Agent)
 - backend/tools/ (基础工具)
 - skills/ (可配置分析Skills)
 - config/skills.yaml (Skills配置)
+
+---
+
+## [2025-02-04] - 依赖安装完成
+- **任务**: 安装所有Python依赖
+- **文件变更**: requirements.txt, .env.example
+- **完成标准**:
+  - ✅ 核心框架: langchain, anthropic, fastapi
+  - ✅ AI模型: Claude, OpenAI, Gemini, GLM-4.7 (zhipuai)
+  - ✅ 数据分析: pandas, numpy, scipy
+  - ✅ 科学统计: statsmodels, scikit-learn, sympy, patsy
+  - ✅ Excel处理: openpyxl, xlrd, xlwt, xlsxwriter
+  - ✅ 可视化: plotly, matplotlib, kaleido
+  - ✅ 报告生成: python-docx, reportlab
+- **Learnings**:
+  - 使用清华 PyPI 镜像源加速安装
+  - google-genai (新SDK) 替代已弃用的 google-generativeai
+  - Python 3.14 ARM64 暂不支持 chromadb (缺少 onnxruntime)
 
 ---

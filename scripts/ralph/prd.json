@@ -110,33 +110,33 @@
     },
     {
       "id": "US-008",
-      "title": "Web搜索工具 (LangChain Tool)",
+      "title": "Web搜索工具 (MCP Tool Wrapper)",
       "acceptanceCriteria": [
-        "创建tools/web_search.py",
+        "创建tools/web_search.py作为MCP工具的LangChain包装器",
         "继承StructuredTool from langchain",
-        "实现_search方法 (对接搜索API)",
-        "实现结果解析和过滤",
-        "添加args_schema",
-        "编写单元测试"
+        "封装mcp__web-search-prime__webSearchPrime调用",
+        "实现搜索结果解析和格式化",
+        "支持中英文搜索",
+        "添加args_schema (WebSearchInput模型)"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "tool: web_search"
+      "notes": "tool: web_search - 使用Z.ai MCP工具"
     },
     {
       "id": "US-009",
-      "title": "Web Reader工具 (LangChain Tool)",
+      "title": "Web Reader工具 (MCP Tool Wrapper)",
       "acceptanceCriteria": [
-        "创建tools/web_reader.py",
+        "创建tools/web_reader.py作为MCP工具的LangChain包装器",
         "继承StructuredTool from langchain",
-        "实现_read方法 (网页内容提取)",
-        "支持多种内容类型 (article, news, general)",
-        "添加args_schema",
-        "编写单元测试"
+        "封装mcp__web_reader__webReader调用",
+        "实现网页内容提取和清理",
+        "支持Markdown格式输出",
+        "添加args_schema (WebReaderInput模型)"
       ],
       "priority": 2,
       "passes": false,
-      "notes": "tool: read_webpage"
+      "notes": "tool: read_webpage - 使用Z.ai MCP工具"
     },
     {
       "id": "US-010",
