@@ -78,14 +78,16 @@ def web_search_impl(
     Returns:
         搜索结果字符串
     """
-    # 检查是否在 MCP 环境中
-    if os.environ.get('MCP_AVAILABLE') == 'true':
-        # MCP 环境中，通过 Claude Code 调用 MCP 工具
-        # 实际的 MCP 工具名: mcp__web-search-prime__webSearchPrime
-        # 这里需要返回提示，让 Claude Code 调用正确的 MCP 工具
+    # 检查是否在真实的 MCP 环境中（通过检查是否在 Claude Code 环境中运行）
+    # 注意：仅当实际在 Claude Code 中调用 MCP 工具时才使用此分支
+    # 单元测试和集成测试应使用 mock 实现
+    is_real_mcp = os.environ.get('MCP_REAL_MODE', 'false').lower() == 'true'
+
+    if is_real_mcp:
+        # 真实 MCP 模式：返回提示，让 Claude Code 调用 MCP 工具
         return f"[MCP MODE] 请使用 mcp__web-search-prime__webSearchPrime 工具执行搜索: query={query}, recency={recency}, max_results={max_results}"
 
-    # 模拟搜索结果（用于非 MCP 环境）
+    # 模拟搜索结果（默认，用于测试）
     mock_results = [
         f"1. 标题: 关于 '{query}' 的搜索结果 1",
         f"   URL: https://example.com/result1",

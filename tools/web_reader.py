@@ -88,14 +88,14 @@ def web_reader_impl(
     Returns:
         网页内容字符串
     """
-    # 检查是否在 MCP 环境中
-    if os.environ.get('MCP_AVAILABLE') == 'true':
-        # MCP 环境中，通过 Claude Code 调用 MCP 工具
-        # 实际的 MCP 工具名: mcp__web_reader__webReader
-        # 这里需要返回提示，让 Claude Code 调用正确的 MCP 工具
+    # 检查是否在真实的 MCP 环境中（仅 Claude Code 实际调用时）
+    is_real_mcp = os.environ.get('MCP_REAL_MODE', 'false').lower() == 'true'
+
+    if is_real_mcp:
+        # 真实 MCP 模式：返回提示，让 Claude Code 调用 MCP 工具
         return f"[MCP MODE] 请使用 mcp__web_reader__webReader 工具读取网页: url={url}, timeout={timeout}, return_format={return_format}"
 
-    # 模拟网页内容（用于非 MCP 环境）
+    # 模拟网页内容（默认，用于测试）
     mock_content = f"""# 网页内容
 
 来源: {url}
