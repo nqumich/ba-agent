@@ -311,8 +311,8 @@
         "编写单元测试"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "tool: search_knowledge"
+      "passes": true,
+      "notes": "tool: search_knowledge - 51 测试通过 - 支持 ChromaDB 集成和内存回退方案，包含指标/维度定义"
     },
     {
       "id": "US-013",

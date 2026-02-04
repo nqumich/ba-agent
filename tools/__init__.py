@@ -43,6 +43,14 @@ from .database import (
     query_database_tool,
 )
 
+from .vector_search import (
+    VectorSearchInput,
+    vector_search_impl,
+    vector_search_tool,
+    InMemoryVectorStore,
+    ChromaDBVectorStore,
+)
+
 from .base import (
     unified_tool,
     ToolOutputParser,
@@ -72,6 +80,11 @@ __all__ = [
     "DatabaseQueryInput",
     "query_database_impl",
     "query_database_tool",
+    "VectorSearchInput",
+    "vector_search_impl",
+    "vector_search_tool",
+    "InMemoryVectorStore",
+    "ChromaDBVectorStore",
     "unified_tool",
     "ToolOutputParser",
     "ReActFormatter",
