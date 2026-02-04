@@ -18,6 +18,12 @@ from .python_sandbox import (
     ALLOWED_IMPORTS,
 )
 
+from .web_search import (
+    WebSearchInput,
+    web_search_impl,
+    web_search_tool,
+)
+
 __all__ = [
     "ExecuteCommandInput",
     "execute_command_impl",
@@ -27,4 +33,7 @@ __all__ = [
     "run_python_tool",
     "get_allowed_imports",
     "ALLOWED_IMPORTS",
+    "WebSearchInput",
+    "web_search_impl",
+    "web_search_tool",
 ]
