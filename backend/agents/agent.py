@@ -112,14 +112,24 @@ class BAAgent:
                 "Please set ANTHROPIC_API_KEY environment variable or BA_ANTHROPIC_API_KEY."
             )
 
+        # 获取自定义 API 端点（可选）
+        # 优先级: 1. 环境变量 ANTHROPIC_BASE_URL 2. 配置文件中的 base_url
+        base_url = os.environ.get("ANTHROPIC_BASE_URL") or self.app_config.llm.base_url
+
         # 创建 ChatAnthropic 实例
-        llm = ChatAnthropic(
-            model=self.config.model,
-            temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
-            api_key=api_key,
-            timeout=self.app_config.llm.timeout,
-        )
+        llm_kwargs = {
+            "model": self.config.model,
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
+            "api_key": api_key,
+            "timeout": self.app_config.llm.timeout,
+        }
+
+        # 如果有自定义 base_url，添加到参数中
+        if base_url:
+            llm_kwargs["base_url"] = base_url
+
+        llm = ChatAnthropic(**llm_kwargs)
 
         return llm
 

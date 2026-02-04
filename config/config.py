@@ -73,10 +73,10 @@ class DatabaseConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM 模型配置"""
 
-    provider: str = Field(default="anthropic", description="LLM 提供商 (anthropic, openai, zhipuai)")
-    model: str = Field(default="claude-3-5-sonnet-20241022", description="模型名称")
+    provider: str = Field(default="anthropic", description="LLM 提供商 (anthropic, openai, zhipuai, google)")
+    model: str = Field(default="claude-sonnet-4-5-20250929", description="模型名称")
     api_key: str = Field(default="", description="API 密钥")
-    base_url: Optional[str] = Field(default=None, description="API 基础 URL")
+    base_url: Optional[str] = Field(default=None, description="API 基础 URL (例如: https://api.lingyaai.cn/v1/messages)")
     temperature: float = Field(default=0.7, ge=0.0, le=1.0, description="温度参数")
     max_tokens: int = Field(default=4096, description="最大生成 tokens")
     timeout: int = Field(default=120, description="请求超时时间（秒）")

@@ -172,35 +172,7 @@ class TestWebSearchTool:
         assert "测试搜索" in result
 
 
-class TestWebSearchIntegration:
-    """集成测试（需要 MCP 服务）"""
-
-    @pytest.mark.slow
-    def test_real_mcp_search(self):
-        """测试真实 MCP 搜索（需要 MCP 环境）"""
-        # 这个测试需要 MCP 服务支持
-        # 跳过如果 MCP 不可用
-        if os.environ.get('MCP_AVAILABLE') != 'true':
-            pytest.skip("需要 MCP 环境")
-
-        result = web_search_impl(
-            query="Python",
-            max_results=5
-        )
-        assert result is not None
-
-    @pytest.mark.slow
-    def test_real_mcp_search_with_recency(self):
-        """测试带时间过滤的真实 MCP 搜索"""
-        if os.environ.get('MCP_AVAILABLE') != 'true':
-            pytest.skip("需要 MCP 环境")
-
-        result = web_search_impl(
-            query="AI 新闻",
-            recency="oneDay"
-        )
-        assert result is not None
-
+# 集成测试已移至 test_web_search_integration.py
 
 class TestWebSearchParams:
     """测试搜索参数组合"""

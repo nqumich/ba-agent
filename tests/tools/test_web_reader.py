@@ -197,33 +197,7 @@ class TestWebReaderTool:
         assert result is not None
 
 
-class TestWebReaderIntegration:
-    """集成测试（需要 MCP 服务）"""
-
-    @pytest.mark.slow
-    def test_real_mcp_read(self):
-        """测试真实 MCP 读取（需要 MCP 环境）"""
-        if os.environ.get('MCP_AVAILABLE') != 'true':
-            pytest.skip("需要 MCP 环境")
-
-        result = web_reader_impl(
-            url="https://example.com",
-            timeout=30
-        )
-        assert result is not None
-
-    @pytest.mark.slow
-    def test_real_mcp_read_with_timeout(self):
-        """测试带超时的真实 MCP 读取"""
-        if os.environ.get('MCP_AVAILABLE') != 'true':
-            pytest.skip("需要 MCP 环境")
-
-        result = web_reader_impl(
-            url="https://example.com",
-            timeout=60
-        )
-        assert result is not None
-
+# 集成测试已移至 test_web_reader_integration.py
 
 class TestWebReaderParams:
     """测试参数组合"""
