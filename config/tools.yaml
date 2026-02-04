@@ -1,0 +1,98 @@
+# BA-Agent 工具配置
+# 定义工具分组和状态转换规则
+
+# 工具分组 (按前缀)
+tool_groups:
+  # 查询类工具 - 用于获取数据
+  query:
+    - query_database      # SQL 查询
+    - read_file           # 读取文件
+    - web_search          # Web 搜索
+    - read_webpage        # 读取网页
+    - search_knowledge    # 向量检索
+
+  # 执行类工具 - 用于执行代码和命令
+  exec:
+    - execute_command     # 执行命令行
+    - run_python          # 执行 Python 代码
+
+  # Skill 调用 - 调用可配置的分析 Skills
+  skill:
+    - invoke_skill        # 调用 Skill
+
+  # 记忆管理 - 管理三层记忆系统
+  memory:
+    - memory_search       # 搜索记忆
+    - memory_get          # 读取记忆
+    - memory_write        # 写入记忆
+
+# 状态转换规则
+state_transitions:
+  idle:
+    - query              # 空闲 -> 查询
+  query:
+    - analyzing          # 查询 -> 分析
+    - reporting          # 查询 -> 报告
+  analyzing:
+    - analyzing          # 分析 -> 分析 (继续深入)
+    - reporting          # 分析 -> 报告
+  reporting:
+    - idle               # 报告 -> 空闲 (完成一轮)
+    - done               # 报告 -> 完成 (任务结束)
+  done:
+    - idle               # 完成 -> 空闲 (开始新任务)
+
+# 状态到工具组映射
+state_tools:
+  idle: []               # 空闲状态无可用工具
+  query: [query]         # 查询状态可用查询工具
+  analyzing: [exec, skill, query]  # 分析状态可用执行、Skill、查询工具
+  reporting: [skill, memory]       # 报告状态可用Skill、记忆工具
+  done: []               # 完成状态无可用工具
+
+# 工具掩码 (按前缀控制可见性)
+tool_masks:
+  # 在查询阶段只显示查询工具
+  query_phase:
+    - query_*
+
+  # 在分析阶段显示执行和查询工具
+  analysis_phase:
+    - exec_*
+    - query_*
+    - skill_*
+
+  # 在报告阶段显示 Skill 和记忆工具
+  reporting_phase:
+    - skill_*
+    - memory_*
+
+# 工具调用限制
+tool_limits:
+  # 每种工具的最大调用次数 (防止无限循环)
+  execute_command: 10
+  run_python: 50
+  invoke_skill: 20
+  web_search: 10
+
+  # 超时时间 (秒)
+  execute_command: 30
+  run_python: 120
+  web_search: 30
+  query_database: 60
+
+# 工具优先级 (当多个工具可用时)
+tool_priority:
+  query:
+    1: search_knowledge    # 优先搜索知识库
+    2: query_database      # 然后查询数据库
+    3: read_file           # 然后读取文件
+    4: web_search          # 最后搜索网络
+
+  analysis:
+    1: invoke_skill        # 优先调用 Skill
+    2: run_python          # 然后执行 Python
+
+  reporting:
+    1: invoke_skill        # 优先调用 Skill (报告生成)
+    2: memory_write        # 然后写入记忆

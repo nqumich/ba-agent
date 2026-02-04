@@ -29,6 +29,33 @@ Started: 2025-02-04
 
 ---
 
+## [2025-02-04] - 渐进式工具使用系统实现
+- **任务**: 实现 BA-Agent 渐进式工具使用系统
+- **文件变更**:
+  - 新增: backend/orchestration/tool_orchestrator.py (工具编排器)
+  - 新增: backend/orchestration/focus_manager.py (焦点管理器)
+  - 新增: backend/hooks/hook_manager.py (Hooks管理器)
+  - 新增: config/tools.yaml (工具配置)
+  - 新增: .claude/hooks.json (Hooks配置)
+  - 新增: .claude/hooks/*.sh (Hook脚本)
+  - 更新: scripts/ralph/prompt.md (添加渐进式工具使用说明)
+  - 更新: scripts/ralph/prd.json (添加渐进式工具使用任务)
+- **完成标准**:
+  - ✅ Tool Orchestrator - 状态机工具选择
+  - ✅ Focus Manager - 定期重新聚焦 (每5步)
+  - ✅ Hooks Manager - PreToolUse, PostToolUse, Stop 事件
+  - ✅ 工具分组 (query_*, exec_*, skill_*, memory_*)
+  - ✅ 状态转换 (idle → query → analyzing → reporting → done)
+  - ✅ Hook脚本示例 (check-permissions, update-progress, check-completion)
+- **Learnings**:
+  - Clawdbot 的工具掩码策略 (按前缀分组，KV-cache 友好)
+  - Manus AI 的注意力操控 (定期重读计划避免目标漂移)
+  - Hooks 系统 (中间件模式，可阻止/修改操作)
+  - 状态机工具选择 (动态控制工具可见性)
+  - 上下文压缩和恢复 (保留 URL/路径，压缩长内容)
+
+---
+
 ## [2025-02-04] - 三层记忆管理系统实现
 - **任务**: 实现 BA-Agent 三层记忆管理系统
 - **文件变更**:

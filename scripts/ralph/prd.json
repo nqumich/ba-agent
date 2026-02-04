@@ -158,6 +158,52 @@
       "notes": "Hooks系统 - PreToolUse, PostToolUse, Stop"
     },
     {
+      "id": "US-005-TOOL-01",
+      "title": "Tool Orchestrator (工具编排器)",
+      "acceptanceCriteria": [
+        "创建backend/orchestration/tool_orchestrator.py",
+        "实现状态机工具选择 (idle → query → analyzing → reporting → done)",
+        "实现工具掩码 (按前缀分组: query_*, exec_*, skill_*, memory_*)",
+        "实现动态工具可见性控制",
+        "KV-cache 友好设计",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "渐进式工具使用核心"
+    },
+    {
+      "id": "US-005-TOOL-02",
+      "title": "Focus Manager (焦点管理器)",
+      "acceptanceCriteria": [
+        "创建backend/orchestration/focus_manager.py",
+        "实现定期重新聚焦 (每5步重新读取task_plan.md)",
+        "实现上下文压缩和恢复策略",
+        "实现进度追踪 (更新task_plan.md, findings.md, progress.md)",
+        "避免目标漂移 (Goal Drift)",
+        "编写单元测试"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "注意力操控核心"
+    },
+    {
+      "id": "US-005-TOOL-03",
+      "title": "Hooks配置和脚本",
+      "acceptanceCriteria": [
+        "创建.claude/hooks.json配置文件",
+        "创建.claude/hooks/check-permissions.sh (检查执行权限)",
+        "创建.claude/hooks/update-progress.sh (更新进度)",
+        "创建.claude/hooks/check-completion.sh (检查完成度)",
+        "创建backend/hooks/hook_manager.py (Hooks管理器)",
+        "支持PreToolUse, PostToolUse, Stop事件",
+        "设置hooks可执行权限"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Hooks系统配置"
+    },
+    {
       "id": "US-006",
       "title": "命令行工具 (LangChain Tool)",
       "acceptanceCriteria": [

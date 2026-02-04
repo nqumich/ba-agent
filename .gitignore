@@ -45,8 +45,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Claude
-.claude/
+# Claude (share configuration, but ignore local files)
+.claude/*.local.md
+.claude/cache/
+.claude/session*.jsonl
+.claude/projects/
 
 # Memory Management (Local files, not shared)
 CLAUDE.local.md

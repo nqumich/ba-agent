@@ -1,0 +1,74 @@
+{
+  "hooks": [
+    {
+      "eventName": "PreToolUse",
+      "matcher": {
+        "toolName": ["execute_command", "run_python"]
+      },
+      "hook": "bash .claude/hooks/check-permissions.sh",
+      "description": "检查执行权限 - 在执行命令或Python代码前"
+    },
+    {
+      "eventName": "PreToolUse",
+      "matcher": {
+        "toolName": ["write", "edit", "create"]
+      },
+      "hook": "bash .claude/hooks/check-path-whitelist.sh",
+      "description": "检查路径白名单 - 在写入文件前"
+    },
+    {
+      "eventName": "PreToolUse",
+      "matcher": {
+        "toolName": ["query_database"]
+      },
+      "hook": "bash .claude/hooks/check-sql-injection.sh",
+      "description": "检查SQL注入 - 在查询数据库前"
+    },
+    {
+      "eventName": "PostToolUse",
+      "matcher": {
+        "toolName": ["invoke_skill"]
+      },
+      "hook": "bash .claude/hooks/update-progress.sh",
+      "description": "更新进度 - Skill执行后更新task_plan.md"
+    },
+    {
+      "eventName": "PostToolUse",
+      "matcher": {
+        "toolName": ["run_python"]
+      },
+      "hook": "bash .claude/hooks/summarize-python-output.sh",
+      "description": "总结Python输出 - Python执行后自动总结结果"
+    },
+    {
+      "eventName": "PostToolUse",
+      "matcher": {
+        "toolName": ["query_database"]
+      },
+      "hook": "bash .claude/hooks/log-query.sh",
+      "description": "记录查询 - 记录数据库查询到progress.md"
+    },
+    {
+      "eventName": "PostToolUse",
+      "action": "every",
+      "count": 2,
+      "hook": "bash .claude/hooks/prompt-save-finding.sh",
+      "description": "提示保存发现 - 每2次工具调用后"
+    },
+    {
+      "eventName": "Stop",
+      "hook": "bash .claude/hooks/check-completion.sh",
+      "description": "检查完成度 - 会话结束时检查任务完成状态"
+    },
+    {
+      "eventName": "Stop",
+      "hook": "bash .claude/hooks/save-session-summary.sh",
+      "description": "保存会话摘要 - 会话结束时保存到memory/"
+    },
+    {
+      "eventName": "UserPromptSubmit",
+      "hook": "bash .claude/hooks/validate-input.sh",
+      "description": "验证输入 - 用户提交提示时验证"
+    }
+  ]
+}
