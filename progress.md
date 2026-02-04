@@ -74,7 +74,16 @@
 - ✅ 配置 Docker 网络隔离 (独立 bridge 网络)
 - ✅ 实现容器资源限制 (CPU quota + memory limit)
 - ✅ 创建 DockerSandbox 沙盒执行器
-- ✅ 添加 13 个单元测试 (7 个通过, 6 个需要 Docker daemon)
+- ✅ 添加 13 个单元测试 (13/13 通过)
+
+#### 01:00 - US-006: 命令行工具完成
+- ✅ 创建 tools/execute_command.py
+- ✅ 继承 StructuredTool from langchain_core.tools
+- ✅ 实现 Docker 隔离的命令执行
+- ✅ 支持命令白名单验证 (ls, cat, echo, grep, head, tail, wc)
+- ✅ 添加 ExecuteCommandInput Pydantic 模型
+- ✅ 创建 16 个单元测试 (16/16 通过)
+- ✅ 修复 tests 目录缺少 __init__.py 导致的导入问题
 
 ---
 
@@ -132,6 +141,7 @@ agent = create_agent(model, [test_tool], checkpointer=memory)
 | LangChain 1.2.x API 不可用 | 使用 langchain.agents.create_agent | 2025-02-04 |
 | google-generativeai 已弃用 | 安装 google-genai | 2025-02-04 |
 | StructuredTool 导入错误 | 使用 langchain_core.tools.StructuredTool | 2025-02-04 |
+| pytest 无法导入 tools 模块 | 在 tests/ 目录添加 __init__.py | 2025-02-04 |
 
 ### 待解决问题
 
@@ -173,4 +183,4 @@ agent = create_agent(model, [test_tool], checkpointer=memory)
 
 ---
 
-**最后更新**: 2025-02-04 23:45
+**最后更新**: 2025-02-05 01:00
