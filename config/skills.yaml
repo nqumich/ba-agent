@@ -111,7 +111,7 @@ skills:
   visualization:
     name: 数据可视化
     description: |
-      根据数据自动生成合适的可视化图表。
+      使用 AI (Gemini 3 Pro) 自动生成 ECharts 可视化代码，经校验后返回前端渲染。
 
       使用场景：
       - "把最近30天的GMV趋势用图表展示"
@@ -120,34 +120,36 @@ skills:
     entrypoint: skills/visualization/main.py
     function: create_chart
     requirements:
-      - plotly>=5.24.0
-      - matplotlib>=3.7.0
-      - kaleido>=0.2.1
-      - anthropic>=0.39.0
+      - google-generativeai>=0.3.0  # Gemini API
+      - anthropic>=0.39.0            # Claude - 辅助分析
+      - pandas>=2.0.0                # 数据处理
+    env:
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     config:
-      chart_types:
-        line:
-          name: 折线图
-          best_for: 时间序列、趋势展示
-          max_data_points: 1000
-        bar:
-          name: 柱状图
-          best_for: 数据对比、排名展示
-          max_categories: 20
-        pie:
-          name: 饼图
-          best_for: 占比分析、部分展示
-          max_categories: 10
-        heatmap:
-          name: 热力图
-          best_for: 多维数据展示
-        map:
-          name: 地图
-          best_for: 地域分布展示
-        table:
-          name: 表格
-          best_for: 详细数据展示
-      auto_select: true  # 自动选择最适合的图表类型
+      gemini:
+        model: gemini-1.5-pro
+        temperature: 0.3
+        max_tokens: 4096
+      supported_charts:
+        line: 折线图 - 趋势展示
+        bar: 柱状图 - 对比展示
+        pie: 饼图 - 占比展示
+        scatter: 散点图 - 分布展示
+        heatmap: 热力图 - 多维数据
+        map: 地图 - 地域分布
+        gauge: 仪表盘 - KPI展示
+        funnel: 漏斗图 - 转化分析
+      themes:
+        - default
+        - dark
+        - macarons
+        - vintage
+      chart_limits:
+        max_series: 10
+        max_data_points: 10000
+        max_categories: 50
+      output_format: echarts_json  # 输出 ECharts JSON 配置
 
 # 全局配置
 config:
