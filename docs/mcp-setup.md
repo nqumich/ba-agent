@@ -47,9 +47,9 @@ claude mcp add -s user -t http web-search-prime \
   https://open.bigmodel.cn/api/mcp/web_search_prime/mcp \
   --header "Authorization: Bearer ${ZAI_MCP_API_KEY}"
 
-# 添加 Web Reader (如果可用)
+# 添加 Web Reader
 claude mcp add -s user -t http web-reader \
-  https://open.bigmodel.cn/api/mcp/web_read_prime/mcp \
+  https://open.bigmodel.cn/api/mcp/web_reader/mcp \
   --header "Authorization: Bearer ${ZAI_MCP_API_KEY}"
 ```
 

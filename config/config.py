@@ -380,7 +380,7 @@ class ConfigManager:
             "api_key": os.environ.get("ZAI_MCP_API_KEY", ""),
             "available": os.environ.get("MCP_AVAILABLE", "false").lower() == "true",
             "web_search_url": "https://open.bigmodel.cn/api/mcp/web_search_prime/mcp",
-            "web_reader_url": "https://open.bigmodel.cn/api/mcp/web_read_prime/mcp",
+            "web_reader_url": "https://open.bigmodel.cn/api/mcp/web_reader/mcp",
         }
 
     def save(self, path: Optional[str] = None) -> None:
