@@ -327,8 +327,8 @@
         "编写单元测试"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "tool: invoke_skill - 桥接Agent和Skills的核心工具"
+      "passes": true,
+      "notes": "tool: invoke_skill - 43 测试通过 - 桥接 Agent 和 Skills 的核心工具"
     },
     {
       "id": "US-014",
@@ -342,8 +342,8 @@
         "编写单元测试"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "可配置Skills系统"
+      "passes": true,
+      "notes": "Skills 配置系统基础 - skills.yaml 配置文件和加载器"
     },
     {
       "id": "US-015",

@@ -51,6 +51,13 @@ from .vector_search import (
     ChromaDBVectorStore,
 )
 
+from .skill_invoker import (
+    InvokeSkillInput,
+    invoke_skill_impl,
+    invoke_skill_tool,
+    SkillConfig,
+)
+
 from .base import (
     unified_tool,
     ToolOutputParser,
@@ -85,6 +92,10 @@ __all__ = [
     "vector_search_tool",
     "InMemoryVectorStore",
     "ChromaDBVectorStore",
+    "InvokeSkillInput",
+    "invoke_skill_impl",
+    "invoke_skill_tool",
+    "SkillConfig",
     "unified_tool",
     "ToolOutputParser",
     "ReActFormatter",
