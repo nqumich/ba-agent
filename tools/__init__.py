@@ -24,6 +24,12 @@ from .web_search import (
     web_search_tool,
 )
 
+from .web_reader import (
+    WebReaderInput,
+    web_reader_impl,
+    web_reader_tool,
+)
+
 __all__ = [
     "ExecuteCommandInput",
     "execute_command_impl",
@@ -36,4 +42,7 @@ __all__ = [
     "WebSearchInput",
     "web_search_impl",
     "web_search_tool",
+    "WebReaderInput",
+    "web_reader_impl",
+    "web_reader_tool",
 ]
