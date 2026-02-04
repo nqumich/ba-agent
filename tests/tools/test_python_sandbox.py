@@ -13,7 +13,7 @@ from tools.python_sandbox import (
     ALLOWED_IMPORTS,
     get_allowed_imports,
 )
-from backend.docker.sandbox import reset_sandbox
+from backend.docker.sandbox import reset_sandbox, DockerSandbox
 
 
 class TestPythonCodeInput:
@@ -323,18 +323,50 @@ class TestPythonSandboxIntegration:
     @pytest.mark.slow
     @pytest.mark.docker
     def test_real_docker_pandas_basic(self):
-        """测试 pandas 基本操作（需要安装数据分析库的镜像）"""
-        # 跳过此测试，因为 python:3.12-slim 不包含 pandas
-        # TODO: 创建包含数据分析库的自定义 Docker 镜像
-        pytest.skip("需要自定义 Docker 镜像，包含 numpy/pandas/scipy 等库")
+        """测试 pandas 基本操作（使用自定义镜像）"""
+        # 使用包含数据分析库的自定义镜像
+        sandbox = DockerSandbox()
+        original_image = sandbox.config.docker.image
+        sandbox.config.docker.image = "ba-agent/python-sandbox:latest"
+
+        code = """
+import pandas as pd
+df = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
+print(df.to_string())
+"""
+        result = sandbox.execute_python(code, timeout=60)
+        # execute_python 返回字典
+        assert result['success'] == True
+        assert "a" in result['stdout']
+        assert "1" in result['stdout']
+        assert "4" in result['stdout']
+
+        # 恢复原始镜像
+        sandbox.config.docker.image = original_image
 
     @pytest.mark.slow
     @pytest.mark.docker
     def test_real_docker_numpy_calculation(self):
-        """测试 numpy 计算（需要安装数据分析库的镜像）"""
-        # 跳过此测试，因为 python:3.12-slim 不包含 numpy
-        # TODO: 创建包含数据分析库的自定义 Docker 镜像
-        pytest.skip("需要自定义 Docker 镜像，包含 numpy/pandas/scipy 等库")
+        """测试 numpy 计算（使用自定义镜像）"""
+        # 使用包含数据分析库的自定义镜像
+        sandbox = DockerSandbox()
+        original_image = sandbox.config.docker.image
+        sandbox.config.docker.image = "ba-agent/python-sandbox:latest"
+
+        code = """
+import numpy as np
+arr = np.array([1, 2, 3, 4, 5])
+print(f"Mean: {arr.mean()}")
+print(f"Sum: {arr.sum()}")
+"""
+        result = sandbox.execute_python(code, timeout=60)
+        # execute_python 返回字典
+        assert result['success'] == True
+        assert "Mean: 3.0" in result['stdout']
+        assert "Sum: 15" in result['stdout']
+
+        # 恢复原始镜像
+        sandbox.config.docker.image = original_image
 
     @pytest.mark.slow
     @pytest.mark.docker

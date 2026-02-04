@@ -1,0 +1,35 @@
+# BA-Agent Python 沙盒镜像
+#
+# 包含数据分析所需的所有库
+# 用于安全执行 Python 代码
+
+FROM python:3.12-slim
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装 Python 数据分析库（使用清华镜像源，不需要系统依赖）
+RUN pip install --no-cache-dir --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --no-cache-dir \
+    pandas \
+    numpy \
+    scipy \
+    statsmodels \
+    scikit-learn \
+    openpyxl \
+    xlrd \
+    xlsxwriter \
+    matplotlib \
+    seaborn \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 创建非 root 用户
+RUN useradd -m -u 1000 baagent && \
+    chown -R baagent:baagent /app
+
+USER baagent
+
+# 验证安装
+RUN python -c "import pandas, numpy, scipy, statsmodels, openpyxl; print('All libraries installed successfully')"
+
+CMD ["python", "--version"]

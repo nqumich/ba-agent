@@ -92,9 +92,17 @@
 - ✅ 实现 import 白名单验证 (pandas, numpy, scipy, statsmodels 等)
 - ✅ 使用 AST 分析检测危险操作 (os, subprocess, exec, eval, 文件写入)
 - ✅ 添加 PythonCodeInput Pydantic 模型
-- ✅ 创建 29 个单元测试 (27/27 通过, 2 skipped 需要自定义 Docker 镜像)
+- ✅ 创建 29 个单元测试 (29/29 通过)
 - ✅ 修复 DockerSandbox.execute_python 超时和日志捕获问题
 - ✅ 添加 reset_sandbox() 函数用于测试隔离
+
+#### 03:00 - 自定义 Docker 镜像完成
+- ✅ 创建 Dockerfile.sandbox
+- ✅ 包含数据分析库 (pandas, numpy, scipy, statsmodels, scikit-learn, openpyxl, xlrd, xlsxwriter, matplotlib, seaborn)
+- ✅ 使用清华 PyPI 镜像源加速安装
+- ✅ 构建 ba-agent/python-sandbox:latest 镜像
+- ✅ 更新集成测试使用新镜像
+- ✅ 所有 58 个测试通过 (包括 pandas/numpy 测试)
 
 ---
 
