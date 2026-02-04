@@ -3,20 +3,23 @@
 # Session Manager Hook: 统一会话管理和进度跟踪
 # 整合会话摘要保存、完成度检查、Skill执行进度更新
 
+# Python JSON 辅助脚本路径
+JSON_HELPER="$(dirname "$0")/json_helper.py"
+
 # 从 stdin 读取上下文
 CONTEXT=$(cat)
 
 # 提取事件类型
-EVENT=$(echo "$CONTEXT" | jq -r '.eventName // ""')
+EVENT=$(echo "$CONTEXT" | python3 "$JSON_HELPER" ".eventName" "")
 
 case "$EVENT" in
     PostToolUse)
         # PostToolUse: 更新 skill_invoker 执行进度
-        TOOL_NAME=$(echo "$CONTEXT" | jq -r '.toolName // ""')
+        TOOL_NAME=$(echo "$CONTEXT" | python3 "$JSON_HELPER" ".toolName" "")
 
         if [ "$TOOL_NAME" = "skill_invoker" ]; then
-            TOOL_ARGS=$(echo "$CONTEXT" | jq -r '.toolArgs // {}')
-            SKILL_NAME=$(echo "$TOOL_ARGS" | jq -r '.skill // ""')
+            TOOL_ARGS=$(echo "$CONTEXT" | python3 "$JSON_HELPER" ".toolArgs" "{}")
+            SKILL_NAME=$(echo "$TOOL_ARGS" | python3 "$JSON_HELPER" ".skill" "")
             TIMESTAMP=$(date '+%Y-%m-%d %H:%M')
 
             # 记录 Skill 执行到 progress.md
@@ -26,14 +29,11 @@ case "$EVENT" in
                 echo ""
                 echo "执行 Skill: **$SKILL_NAME**"
                 echo "参数: \`$TOOL_ARGS\`"
-                echo "结果: $(echo "$CONTEXT" | jq -r '.result // "Success"')"
+                echo "结果: $(echo "$CONTEXT" | python3 "$JSON_HELPER" ".result" "Success" "")"
                 echo ""
             } >> progress.md
-
-            # 可选: 根据 Skill 结果更新 task_plan.md
-            # 这里可以添加更复杂的逻辑来自动更新计划状态
         fi
-        jq -n '{tracked: true}'
+        python3 -c 'import json; print(json.dumps({"tracked": True}))'
         ;;
 
     Stop)
@@ -81,10 +81,10 @@ EOF
 
         # 检查 task_plan.md 完成度
         if [ -f "task_plan.md" ]; then
-            UNDONE=$(grep -c "^\- \[ \]" task_plan.md || echo "0")
-            TOTAL=$(grep -c "^\- \[" task_plan.md || echo "0")
+            UNDONE=$(grep -c "^\- \[ \]" task_plan.md 2>/dev/null || echo "0")
+            TOTAL=$(grep -c "^\- \[" task_plan.md 2>/dev/null || echo "0")
 
-            if [ "$UNDONE" -gt 0 ]; then
+            if [ "$UNDONE" -gt 0 ] && [ "$TOTAL" -gt 0 ]; then
                 PERCENT=$(( ($TOTAL - $UNDONE) * 100 / $TOTAL ))
 
                 # 追加完成度检查结果
@@ -123,14 +123,12 @@ EOF
                     echo "建议: 请继续完成未完成的任务，或更新 task_plan.md 调整计划。"
                 } > .claude/stop-message.txt
 
-                jq -n \
-                    --arg warning "$UNDONE tasks remaining" \
-                    '{saved: true, file: "'"$MEMORY_FILE"'", warning: $warning}'
+                python3 -c "import json; print(json.dumps({'saved': True, 'file': '$MEMORY_FILE', 'warning': '$UNDONE tasks remaining'}, ensure_ascii=False))"
             else
-                jq -n '{saved: true, file: "'"$MEMORY_FILE"'", message: "All tasks completed!"}'
+                python3 -c "import json; print(json.dumps({'saved': True, 'file': '$MEMORY_FILE', 'message': 'All tasks completed!'}, ensure_ascii=False))"
             fi
         else
-            jq -n '{saved: true, file: "'"$MEMORY_FILE"'"}'
+            python3 -c "import json; print(json.dumps({'saved': True, 'file': '$MEMORY_FILE'}, ensure_ascii=False))"
         fi
         ;;
 esac

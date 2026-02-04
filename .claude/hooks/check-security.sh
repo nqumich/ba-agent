@@ -1,131 +1,104 @@
 #!/bin/bash
 
 # PreToolUse Hook: 统一安全检查
-# 整合权限、SQL注入、Skill安装验证
+# 检查命令权限、SQL注入、Skill安装来源
+
+# Python JSON 辅助脚本路径
+JSON_HELPER="$(dirname "$0")/json_helper.py"
 
 # 从 stdin 读取上下文
 CONTEXT=$(cat)
 
-# 提取工具名称
-TOOL_NAME=$(echo "$CONTEXT" | jq -r '.toolName // ""')
+# 提取工具名称和参数
+TOOL_NAME=$(echo "$CONTEXT" | python3 "$JSON_HELPER" ".toolName" "")
+TOOL_ARGS=$(echo "$CONTEXT" | python3 "$JSON_HELPER" ".toolArgs" "{}")
 
-# 提取工具参数
-TOOL_ARGS=$(echo "$CONTEXT" | jq -r '.toolArgs // {}')
+# 安全检查结果
+SECURITY_ISSUES=""
 
-# 根据工具类型执行相应的安全检查
 case "$TOOL_NAME" in
     execute_command)
-        # 提取要执行的命令
-        COMMAND=$(echo "$TOOL_ARGS" | jq -r '.command // ""')
+        COMMAND=$(echo "$TOOL_ARGS" | python3 "$JSON_HELPER" ".command" "")
 
-        # 检查命令白名单
-        ALLOWED_COMMANDS=("ls" "cat" "grep" "find" "head" "tail" "wc" "sort" "uniq")
+        # 命令白名单检查
+        ALLOWED_COMMANDS="ls cat echo grep head tail wc find pwd date"
         CMD_BASE=$(echo "$COMMAND" | awk '{print $1}')
 
-        if [[ ! " ${ALLOWED_COMMANDS[@]} " =~ " ${CMD_BASE} " ]]; then
-            jq -n \
-                --arg reason "Command '$CMD_BASE' is not in the allowed list" \
-                '{block: true, reason: $reason}'
-            exit 0
-        fi
-        ;;
-
-    python_sandbox)
-        # Python 代码执行总是允许的 (Docker 隔离)
-        # 检查代码长度限制
-        CODE=$(echo "$TOOL_ARGS" | jq -r '.code // ""')
-        CODE_LENGTH=${#CODE}
-
-        MAX_CODE_LENGTH=10000
-        if [ $CODE_LENGTH -gt $MAX_CODE_LENGTH ]; then
-            jq -n \
-                --arg reason "Python code too long (max $MAX_CODE_LENGTH characters)" \
-                '{block: true, reason: $reason}'
-            exit 0
+        if ! echo " $ALLOWED_COMMANDS " | grep -q " $CMD_BASE "; then
+            SECURITY_ISSUES="命令 '$CMD_BASE' 不在白名单中"
         fi
         ;;
 
     database)
-        # SQL 注入检查
-        QUERY=$(echo "$TOOL_ARGS" | jq -r '.query // ""')
+        QUERY=$(echo "$TOOL_ARGS" | python3 "$JSON_HELPER" ".query" "")
+
+        # SQL 注入检查 - 只允许 SELECT 和 WITH
         QUERY_UPPER=$(echo "$QUERY" | tr '[:lower:]' '[:upper:]')
 
-        # 允许的关键字开头
-        ALLOWED_PREFIXES=("SELECT" "WITH" "SHOW" "DESCRIBE" "EXPLAIN")
-        IS_SAFE=false
-
-        for prefix in "${ALLOWED_PREFIXES[@]}"; do
-            if [[ "$QUERY_UPPER" == "$prefix"* ]]; then
-                IS_SAFE=true
+        # 检查危险关键字
+        DANGEROUS_KEYWORDS="DROP DELETE UPDATE INSERT ALTER CREATE TRUNCATE GRANT REVOKE EXEC"
+        for keyword in $DANGEROUS_KEYWORDS; do
+            if echo "$QUERY_UPPER" | grep -qE "$keyword"; then
+                SECURITY_ISSUES="SQL 查询包含危险关键字: $keyword"
                 break
             fi
         done
 
-        # 检查危险关键字
-        DANGEROUS_KEYWORDS=("DROP" "DELETE" "UPDATE" "INSERT" "CREATE" "ALTER" "GRANT" "REVOKE" "TRUNCATE")
-
-        for keyword in "${DANGEROUS_KEYWORDS[@]}"; do
-            if [[ "$QUERY_UPPER" == *"$keyword"* ]]; then
-                jq -n \
-                    --arg reason "Query contains dangerous keyword '$keyword'. Only SELECT/WITH queries are allowed." \
-                    '{block: true, reason: $reason}'
-                exit 0
+        # 如果没有危险关键字，检查是否以 SELECT 或 WITH 开头
+        if [ -z "$SECURITY_ISSUES" ]; then
+            if ! echo "$QUERY_UPPER" | grep -qE "^(SELECT|WITH|SHOW|DESCRIBE|EXPLAIN)"; then
+                SECURITY_ISSUES="SQL 查询必须以 SELECT、WITH、SHOW 等开头"
             fi
-        done
-
-        if [ "$IS_SAFE" = false ]; then
-            jq -n \
-                --arg reason "Query must start with SELECT, WITH, SHOW, DESCRIBE, or EXPLAIN" \
-                '{block: true, reason: $reason}'
-            exit 0
         fi
         ;;
 
     skill_manager)
-        # Skill 安装检查
-        ACTION=$(echo "$TOOL_ARGS" | jq -r '.action // ""')
+        ACTION=$(echo "$TOOL_ARGS" | python3 "$JSON_HELPER" ".action" "")
 
-        # 只对 install 操作进行检查
-        if [ "$ACTION" != "install" ]; then
-            jq -n '{block: false}'
-            exit 0
-        fi
+        if [ "$ACTION" = "install" ]; then
+            SOURCE=$(echo "$TOOL_ARGS" | python3 "$JSON_HELPER" ".source" "")
 
-        SOURCE=$(echo "$TOOL_ARGS" | jq -r '.source // ""')
-
-        if [[ -z "$SOURCE" ]]; then
-            jq -n \
-                --arg reason "Skill install requires a source parameter" \
-                '{block: true, reason: $reason}'
-            exit 0
-        fi
-
-        # 检查来源安全性
-        case "$SOURCE" in
-            *.git|github:*)
-                # GitHub 来源 - 允许
-                ;;
-            http://*|https://*)
-                # URL 来源 - 只允许 GitHub
-                if [[ "$SOURCE" != *"github.com"* ]]; then
-                    jq -n \
-                        --arg reason "Only GitHub URLs are currently supported for Skill installation" \
-                        '{block: true, reason: $reason}'
-                    exit 0
+            # 检查 Skill 来源
+            if echo "$SOURCE" | grep -qE "^(http|https)://"; then
+                # HTTP URL - 检查是否为可信来源
+                if ! echo "$SOURCE" | grep -qE "github\.com|gitlab\.com|bitbucket\.org"; then
+                    SECURITY_ISSUES=" Skill 安装来源不是可信的 Git 托管平台: $SOURCE"
                 fi
-                ;;
-            /*)
-                # 本地路径 - 检查是否存在
-                if [ ! -d "$SOURCE" ] && [ ! -f "$SOURCE" ]; then
-                    jq -n \
-                        --arg reason "Local source path does not exist: $SOURCE" \
-                        '{block: true, reason: $reason}'
-                    exit 0
+            elif echo "$SOURCE" | grep -qE "\\.zip$"; then
+                # ZIP 文件 - 检查路径
+                if echo "$SOURCE" | grep -qE "\.\./|\${HOME}|~"; then
+                    SECURITY_ISSUES="ZIP 文件路径包含可疑的路径遍历"
                 fi
-                ;;
-        esac
+            fi
+        fi
+        ;;
+
+    python_sandbox)
+        CODE=$(echo "$TOOL_ARGS" | python3 "$JSON_HELPER" ".code" "")
+
+        # Python 代码安全检查
+        DANGEROUS_IMPORTS="os\. subprocess\. exec\. eval\\. open\\. __import__"
+        for imp in $DANGEROUS_IMPORTS; do
+            if echo "$CODE" | grep -qE "$imp"; then
+                SECURITY_ISSUES="Python 代码包含危险导入: $imp"
+                break
+            fi
+        done
+
+        # 如果没有危险导入，检查文件写入操作
+        if [ -z "$SECURITY_ISSUES" ]; then
+            if echo "$CODE" | grep -qE "open\([^)]*['\"]w"; then
+                SECURITY_ISSUES="Python 代码包含文件写入操作"
+            fi
+        fi
         ;;
 esac
 
-# 允许执行
-jq -n '{block: false}'
+# 返回检查结果
+if [ -n "$SECURITY_ISSUES" ]; then
+    # 有安全问题，返回错误
+    python3 -c "import json; print(json.dumps({'allowed': False, 'reason': '$SECURITY_ISSUES'}, ensure_ascii=False))"
+else
+    # 安全检查通过
+    python3 -c 'import json; print(json.dumps({"allowed": True}))'
+fi

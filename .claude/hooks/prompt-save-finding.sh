@@ -1,19 +1,28 @@
 #!/bin/bash
 
 # PostToolUse Hook: 提示保存发现
-# 每N次工具调用后提示保存重要发现
+# 每5次工具调用后提示保存重要发现
+
+# Python JSON 辅助脚本路径
+JSON_HELPER="$(dirname "$0")/json_helper.py"
 
 # 从 stdin 读取上下文
 CONTEXT=$(cat)
 
-# 提取工具调用计数（如果有的话）
-CALL_COUNT=$(echo "$CONTEXT" | jq -r '.callCount // "1"')
+# 提取调用计数（从 hook 的 count 属性获取）
+# 注意：这个值由 Claude CLI 传入，表示当前是第几次触发
+COUNT=$(echo "$CONTEXT" | python3 "$JSON_HELPER" ".count" "0")
+
+# 提取最近的工具名称
+TOOL_NAME=$(echo "$CONTEXT" | python3 "$JSON_HELPER" ".toolName" "")
 
 # 每5次提示一次
-if [ $((CALL_COUNT % 5)) -eq 0 ]; then
-    jq -n \
-        --arg message "💡 提示: 已完成 $CALL_COUNT 次工具调用。如果有重要的发现或学习，请考虑保存到 findings.md 或 memory/ 目录中。" \
-        '{prompt: $message}'
+if [ $((COUNT % 5)) -eq 0 ]; then
+    # 生成提示消息
+    MESSAGE="📝 **提示**: 你已经执行了 $COUNT 次工具调用。如果有重要的发现或决策，建议保存到 progress.md 或 MEMORY.md。"
+
+    # 返回消息
+    python3 -c "import json; print(json.dumps({'prompt': '$MESSAGE'}, ensure_ascii=False))"
 else
-    jq -n '{prompt: null}'
+    python3 -c 'import json; print(json.dumps({}))'
 fi
