@@ -369,6 +369,20 @@ class ConfigManager:
                 keys[provider] = key
         return keys
 
+    def get_mcp_config(self) -> Dict[str, Any]:
+        """
+        获取 MCP 服务器配置
+
+        Returns:
+            MCP 配置字典，包含 api_key, available 状态等
+        """
+        return {
+            "api_key": os.environ.get("ZAI_MCP_API_KEY", ""),
+            "available": os.environ.get("MCP_AVAILABLE", "false").lower() == "true",
+            "web_search_url": "https://open.bigmodel.cn/api/mcp/web_search_prime/mcp",
+            "web_reader_url": "https://open.bigmodel.cn/api/mcp/web_read_prime/mcp",
+        }
+
     def save(self, path: Optional[str] = None) -> None:
         """
         保存当前配置到 YAML 文件
