@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from langchain_core.tools import StructuredTool
 
 from config import get_config
-from models.tool_output import ToolOutput, ToolTelemetry, ResponseFormat
+from backend.models.tool_output import ToolOutput, ToolTelemetry, ResponseFormat
 
 
 # Skill 注册表文件

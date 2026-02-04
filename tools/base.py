@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Optional, TypeVar
 
 from pydantic import ValidationError
 
-from models.tool_output import (
+from backend.models.tool_output import (
     ResponseFormat,
     ToolOutput,
     ToolTelemetry,

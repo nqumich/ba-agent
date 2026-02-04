@@ -11,7 +11,7 @@ from tools.database import (
     query_database_tool,
     _format_result,
 )
-from models.tool_output import ToolOutput
+from backend.models.tool_output import ToolOutput
 
 
 class TestDatabaseQueryInput:

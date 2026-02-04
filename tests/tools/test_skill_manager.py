@@ -436,7 +436,7 @@ class TestSkillPackageImpl:
     def test_action_list(self):
         """测试列出 Skills"""
         result_json = skill_package_impl(action="list")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
         assert "成功" in result.summary or "找到" in result.summary
@@ -446,7 +446,7 @@ class TestSkillPackageImpl:
     def test_action_search(self):
         """测试搜索推荐 Skills"""
         result_json = skill_package_impl(action="search")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
         assert "推荐" in result.summary or "找到" in result.summary
@@ -456,7 +456,7 @@ class TestSkillPackageImpl:
     def test_install_missing_source(self):
         """测试缺少 source 参数"""
         result_json = skill_package_impl(action="install")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert not result.telemetry.success
         assert "失败" in result.summary or "错误" in result.summary
@@ -464,7 +464,7 @@ class TestSkillPackageImpl:
     def test_uninstall_missing_skill_name(self):
         """测试缺少 skill_name 参数"""
         result_json = skill_package_impl(action="uninstall")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert not result.telemetry.success
         assert "失败" in result.summary or "错误" in result.summary
@@ -475,7 +475,7 @@ class TestSkillPackageImpl:
             action="list",
             response_format="concise"
         )
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
 
@@ -485,7 +485,7 @@ class TestSkillPackageImpl:
             action="list",
             response_format="standard"
         )
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
         assert result.result is not None
@@ -514,7 +514,7 @@ class TestSkillPackageTool:
             "action": "list"
         })
 
-        ToolOutput = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput
+        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
         output = ToolOutput.model_validate_json(result)
         assert output.telemetry.success
 
@@ -524,7 +524,7 @@ class TestSkillPackageTool:
             "action": "search"
         })
 
-        ToolOutput = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput
+        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
         output = ToolOutput.model_validate_json(result)
         assert output.telemetry.success
 

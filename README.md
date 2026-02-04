@@ -49,51 +49,66 @@
 
 ```
 ba-agent/
-├── backend/                # 后端核心
-│   ├── agents/            # Agent 实现 (BAAgent)
-│   ├── docker/            # Docker 沙盒 (DockerSandbox)
-│   └── models/            # Pydantic 数据模型
-├── tools/                 # LangChain 工具
-│   ├── base.py            # 统一工具输出格式包装器
-│   ├── execute_command.py # 命令行执行
-│   ├── python_sandbox.py  # Python 沙盒
-│   ├── web_search.py      # Web 搜索 (MCP)
-│   ├── web_reader.py      # Web Reader (MCP)
-│   ├── file_reader.py     # 文件读取 (含 Python/SQL 解析)
-│   ├── database.py        # SQL 查询 (SQLAlchemy 集成)
-│   ├── vector_search.py   # 向量检索 (ChromaDB/内存回退)
-│   ├── skill_invoker.py   # Skill 调用 (桥接 Skills)
-│   └── skill_manager.py   # Skill 包管理 (外部 Skill 导入)
-├── skills/                # Skills 目录
+├── backend/                    # 后端核心
+│   ├── agents/                # Agent 实现 (BAAgent)
+│   ├── docker/                # Docker 沙盒 (DockerSandbox)
+│   ├── hooks/                 # 系统钩子
+│   ├── orchestration/         # 任务编排
+│   └── models/                # Pydantic 数据模型（统一位置）
+│       ├── agent.py           # Agent 模型
+│       ├── analysis.py        # 分析模型
+│       ├── base.py            # 基础模型
+│       ├── memory.py          # 记忆模型
+│       ├── query.py           # 查询模型
+│       ├── report.py          # 报告模型
+│       ├── skill.py           # Skill 模型
+│       ├── tool.py            # 工具模型
+│       └── tool_output.py     # 工具输出格式模型
+├── tools/                     # LangChain 工具
+│   ├── base.py                # 统一工具输出格式包装器
+│   ├── execute_command.py     # 命令行执行
+│   ├── python_sandbox.py      # Python 沙盒
+│   ├── web_search.py          # Web 搜索 (MCP)
+│   ├── web_reader.py          # Web Reader (MCP)
+│   ├── file_reader.py         # 文件读取 (含 Python/SQL 解析)
+│   ├── database.py            # SQL 查询 (SQLAlchemy 集成)
+│   ├── vector_search.py       # 向量检索 (ChromaDB/内存回退)
+│   ├── skill_invoker.py       # Skill 调用 (桥接 Skills)
+│   └── skill_manager.py       # Skill 包管理 (外部 Skill 导入)
+├── skills/                    # Skills 目录
 │   ├── __init__.py
-│   ├── anomaly_detection/ # 异动检测 Skill
-│   ├── attribution/       # 归因分析 Skill
-│   ├── report_gen/        # 报告生成 Skill
-│   └── visualization/     # 数据可视化 Skill
-├── config/                # 配置文件
-│   ├── settings.yaml      # 主配置
-│   ├── skills.yaml        # Skills 配置
-│   ├── skills_registry.json # Skills 注册表
-│   └── tools.yaml         # 工具配置
-├── config/                # 配置文件
-│   ├── settings.yaml      # 主配置
-│   ├── skills.yaml        # Skills 配置
-│   └── tools.yaml         # 工具配置
-├── tests/                 # 测试 (278 个测试全部通过)
-│   ├── test_docker/       # Docker 沙盒测试
-│   ├── tools/             # 工具测试
-│   └── models/            # 模型测试
-├── memory/                # 三层记忆系统
-│   ├── 2025-02-04.md      # 每日日志
-│   ├── MEMORY.md          # 长期知识
-│   ├── CLAUDE.md          # 项目级记忆
-│   ├── AGENTS.md          # Agent 系统指令
-│   └── USER.md            # 用户信息
-├── docs/                  # 文档
-├── scripts/ralph/         # Ralph Loop 脚本
-├── Dockerfile             # 主服务镜像
-├── Dockerfile.sandbox     # Python 沙盒镜像 (含数据分析库)
-└── docker-compose.yml     # 开发环境编排
+│   ├── anomaly_detection/     # 异动检测 Skill
+│   │   ├── __init__.py
+│   │   ├── SKILL.md
+│   │   └── main.py
+│   ├── attribution/           # 归因分析 Skill
+│   ├── report_gen/            # 报告生成 Skill
+│   └── visualization/         # 数据可视化 Skill
+├── config/                    # 配置文件
+│   ├── config.py              # 配置管理核心
+│   ├── settings.yaml          # 主配置（数据库、LLM、Docker 等）
+│   ├── skills.yaml            # Skills 运行时配置
+│   ├── skills_registry.json   # Skills 注册表
+│   └── tools.yaml             # 工具配置
+├── tests/                     # 测试套件
+│   ├── test_agents/           # Agent 测试
+│   ├── test_config/           # 配置测试
+│   ├── test_docker/           # Docker 沙盒测试
+│   ├── tools/                 # 工具测试
+│   └── models/                # 模型测试
+├── memory/                    # 三层记忆系统
+│   ├── 2025-02-04.md          # 每日日志
+│   ├── MEMORY.md              # 长期知识
+│   ├── CLAUDE.md              # 项目级记忆
+│   ├── AGENTS.md              # Agent 系统指令
+│   └── USER.md                # 用户信息
+├── docs/                      # 文档
+│   ├── PRD.md                 # 产品需求文档
+│   └── tool-output-format-design.md  # 工具输出格式设计
+├── scripts/ralph/             # Ralph Loop 脚本
+├── Dockerfile                 # 主服务镜像
+├── Dockerfile.sandbox         # Python 沙盒镜像 (含数据分析库)
+└── docker-compose.yml         # 开发环境编排
 ```
 
 ## 🚀 快速开始

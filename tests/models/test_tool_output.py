@@ -5,7 +5,7 @@
 import json
 import pytest
 
-from models.tool_output import (
+from backend.models.tool_output import (
     ResponseFormat,
     ToolTelemetry,
     ToolOutput,

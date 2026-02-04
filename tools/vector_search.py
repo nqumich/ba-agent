@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import StructuredTool
 
 from config import get_config
-from models.tool_output import ToolOutput, ToolTelemetry, ResponseFormat
+from backend.models.tool_output import ToolOutput, ToolTelemetry, ResponseFormat
 
 
 # 尝试导入 ChromaDB，如果失败则使用内存回退

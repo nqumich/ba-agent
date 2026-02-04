@@ -200,7 +200,7 @@ class TestInvokeSkillImpl:
     def test_invoke_anomaly_detection(self):
         """测试调用异动检测 Skill"""
         result_json = invoke_skill_impl(skill_name="anomaly_detection")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
         assert "成功" in result.summary or "执行" in result.summary
@@ -210,7 +210,7 @@ class TestInvokeSkillImpl:
     def test_invoke_attribution(self):
         """测试调用归因分析 Skill"""
         result_json = invoke_skill_impl(skill_name="attribution")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
         assert result.result["skill_name"] == "attribution"
@@ -218,7 +218,7 @@ class TestInvokeSkillImpl:
     def test_invoke_report_gen(self):
         """测试调用报告生成 Skill"""
         result_json = invoke_skill_impl(skill_name="report_gen")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
         assert result.result["skill_name"] == "report_gen"
@@ -226,7 +226,7 @@ class TestInvokeSkillImpl:
     def test_invoke_visualization(self):
         """测试调用数据可视化 Skill"""
         result_json = invoke_skill_impl(skill_name="visualization")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
         assert result.result["skill_name"] == "visualization"
@@ -237,7 +237,7 @@ class TestInvokeSkillImpl:
             skill_name="anomaly_detection",
             params={"threshold": 2.5, "min_data_points": 20}
         )
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
 
@@ -247,7 +247,7 @@ class TestInvokeSkillImpl:
             skill_name="attribution",
             timeout=90
         )
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
 
@@ -257,7 +257,7 @@ class TestInvokeSkillImpl:
             skill_name="anomaly_detection",
             response_format="concise"
         )
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
         # Concise 格式可能不返回详细结果
@@ -269,7 +269,7 @@ class TestInvokeSkillImpl:
             skill_name="anomaly_detection",
             response_format="standard"
         )
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
         assert result.result is not None
@@ -281,14 +281,14 @@ class TestInvokeSkillImpl:
             skill_name="anomaly_detection",
             response_format="detailed"
         )
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.success
 
     def test_observation_format(self):
         """测试 Observation 格式"""
         result_json = invoke_skill_impl(skill_name="anomaly_detection")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert "Observation:" in result.observation
         assert "Status:" in result.observation
@@ -296,7 +296,7 @@ class TestInvokeSkillImpl:
     def test_telemetry_collected(self):
         """测试遥测数据收集"""
         result_json = invoke_skill_impl(skill_name="attribution")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert result.telemetry.tool_name == "invoke_skill"
         assert result.telemetry.latency_ms >= 0
@@ -304,7 +304,7 @@ class TestInvokeSkillImpl:
     def test_execution_result_structure(self):
         """测试执行结果结构"""
         result_json = invoke_skill_impl(skill_name="anomaly_detection")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         assert "skill_name" in result.result
         assert "skill_config" in result.result
@@ -314,7 +314,7 @@ class TestInvokeSkillImpl:
     def test_execution_result_contains_data(self):
         """测试执行结果包含数据"""
         result_json = invoke_skill_impl(skill_name="anomaly_detection")
-        result = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
         exec_result = result.result["execution_result"]
         assert "status" in exec_result
@@ -347,7 +347,7 @@ class TestInvokeSkillTool:
         # 结果应该是 JSON 字符串
         assert isinstance(result, str)
         # 可以解析为 ToolOutput
-        ToolOutput = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput
+        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
         output = ToolOutput.model_validate_json(result)
         assert output.telemetry.success
 
@@ -358,7 +358,7 @@ class TestInvokeSkillTool:
             "params": {"metric": "gmv"}
         })
 
-        ToolOutput = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput
+        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
         output = ToolOutput.model_validate_json(result)
         assert output.telemetry.success
 
@@ -389,7 +389,7 @@ class TestSkillIntegration:
         )
 
         # 3. 解析结果
-        ToolOutput = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput
+        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
         result = ToolOutput.model_validate_json(result_json)
 
         # 4. 验证
@@ -399,7 +399,7 @@ class TestSkillIntegration:
 
     def test_multiple_skill_invocations(self):
         """测试多次调用不同 Skills"""
-        ToolOutput = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput
+        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
 
         skills_to_test = ["anomaly_detection", "attribution", "report_gen"]
 
@@ -412,7 +412,7 @@ class TestSkillIntegration:
 
     def test_skill_params_propagation(self):
         """测试参数传递到 Skill"""
-        ToolOutput = __import__("models.tool_output", fromlist=["ToolOutput"]).ToolOutput
+        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
 
         params = {"custom_param": "custom_value", "threshold": 2.0}
         result = ToolOutput.model_validate_json(
