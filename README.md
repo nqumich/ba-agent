@@ -1,8 +1,6 @@
 # BA-Agent
 
-商业分析助手Agent - Business Analysis Agent
-
-## 项目简介
+> 商业分析助手 Agent - Business Analysis Agent
 
 面向非技术业务人员的智能数据分析助手，通过自然语言交互提供：
 - 🔍 异动检测与解释
@@ -10,69 +8,160 @@
 - 📄 报告自动生成
 - 📈 数据可视化
 
-## 技术架构
+## 🎯 项目状态
 
-- **单Agent**: LangChain + Claude 3.5 Sonnet
-- **基础工具**: 命令行、Python沙盒、Web搜索、Web Reader、文件读取、SQL查询、向量检索
-- **可配置Skills**: 异动检测、归因分析、报告生成、数据可视化（用户可扩展）
+**开发进度**: 30.8% (8/26 User Stories 完成)
 
-## 快速开始
+**最新进展** (2025-02-05):
+- ✅ 完成命令行执行工具 (US-006)
+- ✅ 完成 Python 沙盒工具 (US-007) - 核心
+- ✅ 创建自定义 Docker 镜像包含数据分析库
+- ✅ 58 个测试全部通过
+
+**下一任务**: Web 搜索工具 (US-008)
+
+## 🏗️ 技术架构
+
+### 核心组件
+
+| 组件 | 技术 | 说明 |
+|------|------|------|
+| Agent 框架 | LangGraph + Claude 3.5 Sonnet | 可扩展的 Agent 系统 |
+| 工具框架 | LangChain Core | 结构化工具定义 |
+| 数据分析 | pandas, numpy, scipy | Docker 隔离的 Python 执行 |
+| 容器隔离 | Docker | 安全的命令和代码执行 |
+| 记忆管理 | 三层 Markdown | Clawdbot/Manus 模式 |
+
+### 项目结构
+
+```
+ba-agent/
+├── backend/                # 后端核心
+│   ├── agents/            # Agent 实现 (BAAgent)
+│   ├── docker/            # Docker 沙盒 (DockerSandbox)
+│   └── models/            # Pydantic 数据模型
+├── tools/                 # LangChain 工具
+│   ├── execute_command.py # 命令行执行
+│   └── python_sandbox.py  # Python 沙盒
+├── skills/                # 可配置分析 Skills
+│   ├── anomaly_detection/ # 异动检测
+│   ├── attribution/       # 归因分析
+│   ├── report_gen/        # 报告生成
+│   └── visualization/    # 数据可视化
+├── config/                # 配置文件
+│   ├── settings.yaml      # 主配置
+│   ├── skills.yaml        # Skills 配置
+│   └── tools.yaml         # 工具配置
+├── tests/                 # 测试 (58 个测试全部通过)
+│   ├── test_docker/       # Docker 沙盒测试
+│   └── tools/             # 工具测试
+├── memory/                # 三层记忆系统
+│   ├── 2025-02-04.md      # 每日日志
+│   ├── MEMORY.md          # 长期知识
+│   ├── CLAUDE.md          # 项目级记忆
+│   ├── AGENTS.md          # Agent 系统指令
+│   └── USER.md            # 用户信息
+├── docs/                  # 文档
+├── scripts/ralph/         # Ralph Loop 脚本
+├── Dockerfile             # 主服务镜像
+├── Dockerfile.sandbox     # Python 沙盒镜像 (含数据分析库)
+└── docker-compose.yml     # 开发环境编排
+```
+
+## 🚀 快速开始
+
+### 环境要求
+
+- Python 3.12+
+- Docker & Docker Compose
+- ANTHROPIC_API_KEY
 
 ### 安装
+
 ```bash
 # 克隆项目
 git clone <repository-url>
 cd ba-agent
 
 # 创建虚拟环境
-python3.11 -m venv venv
-source venv/bin/activate
+python3.12 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 安装依赖
 pip install -r requirements.txt
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env 填入API密钥
+# 编辑 .env 填入 ANTHROPIC_API_KEY
 ```
 
-### 运行
+### 运行测试
+
 ```bash
-# 启动API服务
-uvicorn backend.api.main:app --reload
+# 运行所有测试
+pytest
 
-# 运行Ralph Loop自动开发
-bash scripts/ralph/ralph.sh 50
+# 运行特定测试
+pytest tests/test_docker/
+pytest tests/tools/
+
+# 查看测试覆盖率
+pytest --cov=backend --cov=tools --cov-report=html
 ```
 
-## 项目结构
+### 启动开发环境
 
-```
-ba-agent/
-├── backend/
-│   ├── agents/          # Agent实现
-│   ├── tools/           # 基础工具
-│   └── models/          # 数据模型
-├── skills/              # 可配置分析Skills
-│   ├── anomaly_detection/
-│   ├── attribution/
-│   ├── report_gen/
-│   └── visualization/
-├── config/             # 配置文件
-│   ├── settings.yaml
-│   └── skills.yaml
-├── scripts/ralph/      # Ralph Loop脚本
-├── docs/               # 文档
-├── tests/              # 测试
-└── requirements.txt
+```bash
+# 启动 Docker 服务 (PostgreSQL, ClickHouse)
+docker-compose up -d
+
+# 启动 API 服务
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-## 文档
+## 📚 文档
 
-- [产品PRD](docs/PRD.md)
-- [API文档](http://localhost:8000/docs)
-- [开发指南](docs/DEVELOPMENT.md)
+- [产品 PRD](docs/PRD.md) - 产品需求文档
+- [任务计划](task_plan.md) - 开发进度跟踪
+- [开发进度](progress.md) - 详细开发日志
+- [研究发现](findings.md) - 技术研究发现
 
-## 许可证
+## 🔧 已完成的工具
+
+| 工具 | 说明 | 测试 |
+|------|------|------|
+| execute_command | Docker 隔离的命令行执行 | 16/16 ✅ |
+| run_python | Docker 隔离的 Python 代码执行 | 29/29 ✅ |
+
+## 📊 测试覆盖
+
+```
+总计: 58 个测试
+✅ 通过: 58 (100%)
+⏭️  跳过: 0
+❌ 失败: 0
+```
+
+## 🔜 待实现的工具 (Phase 2)
+
+- [ ] Web 搜索工具 (MCP: mcp__web-search-prime__webSearchPrime)
+- [ ] Web Reader 工具 (MCP: mcp__web_reader__webReader)
+- [ ] 文件读取工具 (CSV/Excel/JSON/文本)
+- [ ] SQL 查询工具 (SQLAlchemy)
+- [ ] 向量检索工具 (Chroma)
+- [ ] Skill 调用工具 (核心)
+
+## 🧩 待实现的 Skills (Phase 3)
+
+- [ ] 异动检测 Skill
+- [ ] 归因分析 Skill
+- [ ] 报告生成 Skill
+- [ ] 数据可视化 Skill
+
+## 📝 许可证
 
 MIT License
+
+---
+
+**最后更新**: 2025-02-05

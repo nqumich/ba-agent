@@ -43,8 +43,21 @@
 
 ## 🔧 Phase 2: 核心工具 (Priority 2)
 
-- [ ] **US-006**: 命令行工具 (LangChain Tool)
-- [ ] **US-007**: Python 沙盒工具 (LangChain Tool) - 核心
+- [x] **US-006**: 命令行工具 (LangChain Tool)
+  - [x] 创建 tools/execute_command.py
+  - [x] 继承 StructuredTool from langchain_core.tools
+  - [x] 实现 Docker 隔离的命令执行
+  - [x] 支持命令白名单验证
+  - [x] 添加 ExecuteCommandInput 模型
+  - [x] 16 个单元测试全部通过
+- [x] **US-007**: Python 沙盒工具 (LangChain Tool) - 核心
+  - [x] 创建 tools/python_sandbox.py
+  - [x] 实现 Docker 隔离的 Python 代码执行
+  - [x] 实现 import 白名单验证
+  - [x] 使用 AST 分析检测危险操作
+  - [x] 添加 PythonCodeInput 模型
+  - [x] 29 个单元测试全部通过
+  - [x] 创建自定义 Docker 镜像包含数据分析库
 - [ ] **US-008**: Web 搜索工具 (MCP Tool Wrapper)
 - [ ] **US-009**: Web Reader 工具 (MCP Tool Wrapper)
 - [ ] **US-010**: 文件读取工具 (LangChain Tool)
@@ -99,10 +112,27 @@
 ## 📊 进度统计
 
 - **总任务数**: 26
-- **已完成**: 6 (23.1%)
+- **已完成**: 8 (30.8%)
+  - Phase 1: 5/5 (100%)
+  - Phase 2: 2/8 (25%)
+  - Phase 3: 0/4 (0%)
+  - Phase 4: 0/7 (0%)
+  - 记忆管理: 1/2 (50%)
 - **进行中**: 0 (0%)
-- **待开始**: 20 (76.9%)
+- **待开始**: 18 (69.2%)
+
+**已完成的 User Story**:
+- ✅ US-001: 项目初始化与目录结构创建
+- ✅ US-002: 核心数据模型定义 (Pydantic)
+- ✅ US-003: 配置管理系统
+- ✅ US-004: LangGraph Agent 基础框架
+- ✅ US-005: Docker 隔离环境配置
+- ✅ US-006: 命令行工具 (16 测试通过)
+- ✅ US-007: Python 沙盒工具 (29 测试通过)
+- ✅ US-005-MEM-01: 三层记忆文件结构
+
+**下一任务**: US-008 - Web 搜索工具 (MCP Tool Wrapper)
 
 ---
 
-**最后更新**: 2025-02-05 00:15
+**最后更新**: 2025-02-05 03:00
