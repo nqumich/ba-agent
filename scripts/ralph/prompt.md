@@ -27,7 +27,7 @@ ls -la
 cat scripts/ralph/progress.txt
 
 # 查看待完成任务
-python3 -c "
+python -c "
 import json
 with open('scripts/ralph/prd.json') as f:
     prd = json.load(f)
@@ -60,6 +60,7 @@ for story in prd['userStories']:
 - 在 `scripts/ralph/progress.txt` 中追加本次迭代记录
 - 在 `scripts/ralph/prd.json` 中将任务 `passes` 设为 `true`
 - 提交代码：`git add . && git commit -m "feat: [ID] - [Title]"`
+- 推送到远程：`git push origin master`
 
 ### 7. 记录学习
 - 在 `scripts/ralph/progress.txt` 顶部维护"Codebase Patterns"部分
