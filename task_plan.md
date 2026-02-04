@@ -157,25 +157,29 @@
   - [ ] memory_search - 语义搜索 MEMORY.md + memory/*.md
   - [ ] memory_get - 读取特定内存文件
   - [ ] memory_write - 写入记忆 (自动选择 Layer 1 或 Layer 2)
-- [ ] **实现 Hooks 系统**
-  - [ ] PreToolUse: 使用工具前重新读取计划
-  - [ ] PostToolUse: 每 N 次操作后提示保存发现
-  - [ ] Stop: 验证完成状态
+- [x] **实现 Hooks 系统**
+  - [x] PreToolUse: 统一安全检查 (check-security.sh)
+  - [x] PostToolUse: 日志记录 + 输出总结 (log-and-summarize.sh)
+  - [x] PostToolUse: 每 N 次操作后提示保存发现 (prompt-save-finding.sh)
+  - [x] PostToolUse: Skill 进度更新 (session-manager.sh)
+  - [x] Stop: 会话摘要 + 完成度检查 (session-manager.sh)
+  - [x] UserPromptSubmit: 输入验证 (validate-input.sh)
+  - [x] Hooks 优化: 11个脚本精简至5个 (-54%)
 
 ---
 
 ## 📊 进度统计
 
 - **总任务数**: 27 (新增 US-INFRA-01)
-- **已完成**: 16 (59.3%)
+- **已完成**: 17 (63.0%)
   - Phase 1: 5/5 (100%)
-  - Phase 2: 8/8 (100%) ✅
+  - Phase 2: 9/9 (100%) ✅
   - Phase 3: 1/4 (25%)
   - Phase 4: 0/7 (0%)
   - 基础设施: 1/1 (100%)
-  - 记忆管理: 1/2 (50%)
+  - 记忆管理: 2/2 (100%) ✅
 - **进行中**: 0 (0%)
-- **待开始**: 11 (40.7%)
+- **待开始**: 10 (37.0%)
 
 **已完成的 User Story**:
 - ✅ US-001: 项目初始化与目录结构创建
@@ -193,15 +197,40 @@
 - ✅ US-013: Skill 调用工具 (43 测试通过)
 - ✅ US-014: Skills 配置系统
 - ✅ US-005-MEM-01: 三层记忆文件结构
+- ✅ US-005-MEM-02: Hooks 系统实现与优化 (5个脚本，-54%)
 - ✅ US-INFRA-01: 统一工具输出格式系统 (42 测试通过)
 
-**测试统计**: 426 passed, 6 skipped
+**测试统计**: 469 passed, 6 skipped
 
 **下一任务**: US-015 - 示例 Skill: 异动检测
 
 ---
 
 ## 🎁 额外完成的功能
+
+### Claude Hooks 系统优化 (US-005-MEM-02, 2025-02-05)
+
+基于最佳实践实现的 Claude Code Hooks 系统：
+
+**核心文件**:
+- `.claude/hooks/check-security.sh` - 统一安全检查 (PreToolUse)
+- `.claude/hooks/log-and-summarize.sh` - 日志记录 + 输出总结 (PostToolUse)
+- `.claude/hooks/session-manager.sh` - 会话管理 + 完成度检查 (PostToolUse + Stop)
+- `.claude/hooks/prompt-save-finding.sh` - 保存提示 (每5次)
+- `.claude/hooks/validate-input.sh` - 输入验证 (UserPromptSubmit)
+- `.claude/hooks.json` - Hooks 配置
+
+**功能特性**:
+1. **PreToolUse 安全检查**: 命令白名单、SQL 注入检测、Skill 安装验证
+2. **PostToolUse 活动记录**: 记录所有 9 个工具活动到 progress.md
+3. **PostToolUse 智能总结**: 根据工具类型生成简洁摘要
+4. **Stop 会话管理**: 保存会话摘要到 memory/、检查任务完成度
+5. **输入验证**: 提示长度限制
+
+**优化收益**:
+- 脚本数量: 11 → 5 (-54%)
+- 总行数: ~250 → ~160 (-36%)
+- case 分支: 18 → 9 (-50%)
 
 ### 统一工具输出格式系统 (US-INFRA-01, 2025-02-05)
 
