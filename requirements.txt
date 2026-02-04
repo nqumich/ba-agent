@@ -13,16 +13,19 @@ pydantic-settings>=2.6.0
 python-dotenv>=1.0.0
 
 # ============ LLM & AI ============
-# Claude (主要)
+# Claude (Anthropic) - 主要 LLM
 anthropic>=0.40.0
 langchain-anthropic>=0.2.0
 
-# OpenAI (可选)
+# OpenAI - GPT-4/GPT-3.5
 openai>=1.0.0
 langchain-openai>=0.2.0
 
-# Google Gemini (可视化方案) - 使用新 SDK
+# Google Gemini - 可视化方案 (ECharts 代码生成)
 google-genai>=1.0.0
+
+# 智谱 AI - GLM-4.7
+zhipuai>=2.0.0
 
 # ============ Database ============
 sqlalchemy>=2.0.0
