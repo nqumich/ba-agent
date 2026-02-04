@@ -12,19 +12,19 @@
 ## 🎯 Phase 1: 基础设施 (Priority 1)
 
 - [x] **US-001**: 项目初始化与目录结构创建
-- [ ] **US-002**: 核心数据模型定义 (Pydantic)
-  - [ ] 创建 models/ 目录
-  - [ ] 定义 Query 和 QueryResult 模型
-  - [ ] 定义 ToolInput 和 ToolOutput 模型
-  - [ ] 定义 SkillConfig 和 SkillResult 模型
-  - [ ] 定义 Anomaly, Attribution, Report, ChartConfig 等业务模型
-  - [ ] 添加类型验证和序列化测试
-- [ ] **US-003**: 配置管理系统
-  - [ ] 创建 config/config.py 配置加载类
-  - [ ] 创建 config/settings.yaml 配置文件模板
-  - [ ] 支持环境变量覆盖配置
-  - [ ] 实现密钥管理 (API keys 等)
-  - [ ] 创建 config.py 单元测试
+- [x] **US-002**: 核心数据模型定义 (Pydantic)
+  - [x] 创建 models/ 目录
+  - [x] 定义 Query 和 QueryResult 模型
+  - [x] 定义 ToolInput 和 ToolOutput 模型
+  - [x] 定义 SkillConfig 和 SkillResult 模型
+  - [x] 定义 Anomaly, Attribution, Report, ChartConfig 等业务模型
+  - [x] 添加类型验证和序列化测试
+- [x] **US-003**: 配置管理系统
+  - [x] 创建 config/config.py 配置加载类
+  - [x] 创建 config/settings.yaml 配置文件模板
+  - [x] 支持环境变量覆盖配置
+  - [x] 实现密钥管理 (API keys 等)
+  - [x] 创建 config.py 单元测试
 - [ ] **US-004**: LangGraph Agent 基础框架
   - [ ] 创建 backend/agents/agent.py 主 Agent 类
   - [ ] 初始化 ChatAnthropic (Claude 3.5 Sonnet)
@@ -99,10 +99,10 @@
 ## 📊 进度统计
 
 - **总任务数**: 26
-- **已完成**: 2 (7.7%)
-- **进行中**: 1 (3.8%)
-- **待开始**: 23 (88.5%)
+- **已完成**: 4 (15.4%)
+- **进行中**: 0 (0%)
+- **待开始**: 22 (84.6%)
 
 ---
 
-**最后更新**: 2025-02-04 15:30
+**最后更新**: 2025-02-04 23:15

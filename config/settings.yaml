@@ -1,0 +1,87 @@
+# BA-Agent 配置文件
+#
+# 支持环境变量覆盖：
+# - 使用 BA_ 前缀，例如 BA_DATABASE_HOST
+# - 嵌套配置使用 __ 分隔，例如 BA_DATABASE__HOST
+# - API 密钥使用 BA_{PROVIDER}_API_KEY，例如 BA_ANTHROPIC_API_KEY
+
+# 环境配置
+environment: development  # development, production, test
+debug: true
+
+# 数据库配置
+database:
+  host: localhost
+  port: 5432
+  username: postgres
+  password: ""
+  database: ba_agent
+  pool_size: 10
+  max_overflow: 20
+
+# LLM 模型配置
+llm:
+  provider: anthropic  # anthropic, openai, zhipuai
+  model: claude-3-5-sonnet-20241022
+  api_key: ""  # 建议通过环境变量 BA_ANTHROPIC_API_KEY 设置
+  base_url: null
+  temperature: 0.7
+  max_tokens: 4096
+  timeout: 120
+
+# 向量数据库配置
+vector_store:
+  type: chroma
+  persist_directory: ./data/vector_db
+  embedding_model: text-embedding-ada-002
+  collection_name: ba_agent
+
+# Docker 隔离环境配置
+docker:
+  enabled: true
+  image: python:3.12-slim
+  memory_limit: 512m
+  cpu_limit: "1.0"
+  timeout: 300
+  network_disabled: true
+
+# 记忆管理配置
+memory:
+  enabled: true
+  memory_dir: ./memory
+  daily_log_format: "%Y-%m-%d"
+  max_context_tokens: 8000
+
+# 日志配置
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: ./logs/ba_agent.log
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# 安全配置
+security:
+  allowed_hosts:
+    - localhost
+    - 127.0.0.1
+  api_key_required: true
+  rate_limit_enabled: true
+  rate_limit_per_minute: 60
+  command_whitelist:
+    - ls
+    - cat
+    - echo
+    - grep
+    - head
+    - tail
+    - wc
+
+# API 服务配置
+api:
+  host: 0.0.0.0
+  port: 8000
+  workers: 1
+  reload: false
+  cors_origins:
+    - http://localhost:3000
