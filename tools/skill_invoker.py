@@ -82,6 +82,7 @@ def _load_skills_config() -> Dict[str, Any]:
     """
     加载 Skills 配置
 
+    优先从 skills_registry.json 加载 Skills，从 skills.yaml 加载 global 配置
     使用缓存避免重复读取文件
     """
     global _skills_config_cache
@@ -89,23 +90,60 @@ def _load_skills_config() -> Dict[str, Any]:
     if _skills_config_cache is not None:
         return _skills_config_cache
 
-    config = get_config()
+    # 初始化配置
+    config = {"skills": {}, "global": {}}
 
-    # 尝试从配置文件加载
+    # 1. 从 skills_registry.json 加载 Skills
+    registry_path = Path("config/skills_registry.json")
+    if registry_path.exists():
+        try:
+            with open(registry_path, "r", encoding="utf-8") as f:
+                registry = json.load(f)
+                installed_skills = registry.get("installed", {})
+
+                # 转换为旧格式以保持兼容性
+                skills_config = {}
+                for skill_name, skill_info in installed_skills.items():
+                    skills_config[skill_name] = {
+                        "name": skill_info.get("display_name", skill_name),
+                        "description": skill_info.get("description", ""),
+                        "entrypoint": skill_info.get("entrypoint", f"skills/{skill_name}/main.py"),
+                        "function": skill_info.get("function", "main"),
+                        "requirements": skill_info.get("requirements", []),
+                        "config": skill_info.get("config", {})
+                    }
+                config["skills"] = skills_config
+        except Exception:
+            pass
+
+    # 2. 从 skills.yaml 加载 global 配置
     skills_config_path = Path("config/skills.yaml")
-
     if skills_config_path.exists():
         try:
             import yaml
             with open(skills_config_path, "r", encoding="utf-8") as f:
-                _skills_config_cache = yaml.safe_load(f) or {}
-        except Exception as e:
-            # 加载失败，返回默认配置
-            _skills_config_cache = _get_default_skills_config()
-    else:
-        # 配置文件不存在，返回默认配置
-        _skills_config_cache = _get_default_skills_config()
+                yaml_config = yaml.safe_load(f) or {}
 
+                # 加载 global 配置
+                if "global" in yaml_config:
+                    config["global"] = yaml_config["global"]
+
+                # 如果 registry 为空，尝试从 YAML 的 skills_config 加载
+                if not config["skills"] and "skills_config" in yaml_config:
+                    # 新格式: skills_config 只是运行时配置，不包含技能列表
+                    # 保持空的 skills 字典
+                    pass
+                elif not config["skills"] and "skills" in yaml_config:
+                    # 旧格式
+                    config["skills"] = yaml_config["skills"]
+        except Exception:
+            pass
+
+    # 3. 如果仍然没有 Skills，使用默认配置
+    if not config["skills"]:
+        config = _get_default_skills_config()
+
+    _skills_config_cache = config
     return _skills_config_cache
 
 

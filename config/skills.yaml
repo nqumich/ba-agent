@@ -1,65 +1,78 @@
 # BA-Agent Skills 配置文件
 #
-# 每个 Skill 是一个独立的分析能力模块
-# 通过 invoke_skill 工具调用
-
-skills:
-  # 异动检测 Skill
-  anomaly_detection:
-    name: "异动检测"
-    description: "检测数据异常波动并计算严重程度"
-    entrypoint: "skills/anomaly_detection/main.py"
-    function: "detect"
-    requirements:
-      - "pandas"
-      - "numpy"
-      - "scipy"
-    config:
-      threshold: 3.0  # 3-sigma 规则
-      min_data_points: 10
-
-  # 归因分析 Skill
-  attribution:
-    name: "归因分析"
-    description: "分析业务指标变化的驱动因素"
-    entrypoint: "skills/attribution/main.py"
-    function: "analyze"
-    requirements:
-      - "pandas"
-      - "numpy"
-    config:
-      max_dimensions: 5
-      min_contribution: 0.05  # 5%
-
-  # 报告生成 Skill
-  report_gen:
-    name: "报告生成"
-    description: "自动生成数据分析报告"
-    entrypoint: "skills/report_gen/main.py"
-    function: "generate"
-    requirements:
-      - "pandas"
-      - "jinja2"
-    config:
-      template_dir: "skills/report_gen/templates"
-      output_format: "markdown"
-
-  # 数据可视化 Skill
-  visualization:
-    name: "数据可视化"
-    description: "创建数据可视化图表"
-    entrypoint: "skills/visualization/main.py"
-    function: "create_chart"
-    requirements:
-      - "pandas"
-      - "plotly"
-    config:
-      default_chart_type: "line"
-      theme: "plotly_white"
+# 这个文件定义了 Skills 的运行时配置
+#
+# Skills 元数据（name, description, version 等）从各自的 SKILL.md 文件读取
+# Skills 安装状态记录在 config/skills_registry.json 中
+#
+# 技能来源：
+# - builtin: 内置技能，位于 skills/ 目录
+# - external: 外部安装的技能，通过 skill_package 工具安装
 
 # 全局配置
 global:
-  skill_timeout: 120  # Skill 执行超时时间（秒）
-  max_memory: 512m     # 最大内存使用
-  enable_cache: true  # 是否启用结果缓存
-  cache_ttl: 3600     # 缓存有效期（秒）
+  # Skill 执行超时时间（秒）
+  skill_timeout: 120
+
+  # 最大内存使用
+  max_memory: 512m
+
+  # 是否启用结果缓存
+  enable_cache: true
+
+  # 缓存有效期（秒）
+  cache_ttl: 3600
+
+  # Skill 包管理配置
+  package_manager:
+    # Skills 安装目录
+    install_dir: "skills"
+
+    # 注册表文件
+    registry_file: "config/skills_registry.json"
+
+    # GitHub 安装源（可选，用于搜索推荐 Skills）
+    github_sources:
+      - "https://github.com/ba-agent/skills-registry"
+
+# 内置 Skills 运行时配置覆盖
+#
+# 注意：这些配置会覆盖 SKILL.md 中的默认 config
+skills_config:
+  # 异动检测 Skill
+  anomaly_detection:
+    threshold: 2.0  # 统计检测的标准差倍数
+    min_data_points: 7
+
+  # 归因分析 Skill
+  attribution:
+    max_dimensions: 5
+    min_contribution: 0.05  # 5%
+
+  # 报告生成 Skill
+  report_gen:
+    template_dir: "skills/report_gen/templates"
+    output_format: "markdown"
+
+  # 数据可视化 Skill
+  visualization:
+    default_chart_type: "auto"
+    theme: "default"
+
+# Skill 类别定义（用于组织和分类）
+categories:
+  Analysis:
+    description: "数据分析类 Skills"
+    skills:
+      - anomaly_detection
+      - attribution
+
+  Reporting:
+    description: "报告生成类 Skills"
+    skills:
+      - report_gen
+
+  Visualization:
+    description: "数据可视化类 Skills"
+    skills:
+      - visualization

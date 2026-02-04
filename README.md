@@ -23,12 +23,14 @@
 - ✅ 完成 Skill 调用工具 (US-013) - 核心，43 测试通过
 - ✅ 完成 Skills 配置系统 (US-014)
 - ✅ 完成统一工具输出格式系统 (US-INFRA-01) - 42 测试通过
+- ✅ 完成 Skill 包管理工具 - 支持外部 Skill 导入
+- ✅ 重组 Phase 3 Skills 结构 - 统一 SKILL.md 格式
 - ✅ 创建自定义 Docker 镜像包含数据分析库
-- ✅ 426 个测试全部通过
+- ✅ 506 个测试全部通过
 
-**Phase 2 完成**: 8/8 核心工具全部完成 ✅
+**Phase 2 完成**: 9/9 核心工具全部完成 ✅
 
-**下一任务**: US-015 - 示例 Skill: 异动检测
+**Phase 3 进行中**: Skills 结构重组完成 ✅
 
 ## 🏗️ 技术架构
 
@@ -60,10 +62,18 @@ ba-agent/
 │   ├── file_reader.py     # 文件读取 (含 Python/SQL 解析)
 │   ├── database.py        # SQL 查询 (SQLAlchemy 集成)
 │   ├── vector_search.py   # 向量检索 (ChromaDB/内存回退)
-│   └── skill_invoker.py   # Skill 调用 (桥接 Skills)
+│   ├── skill_invoker.py   # Skill 调用 (桥接 Skills)
+│   └── skill_manager.py   # Skill 包管理 (外部 Skill 导入)
+├── skills/                # Skills 目录
+│   ├── __init__.py
+│   ├── anomaly_detection/ # 异动检测 Skill
+│   ├── attribution/       # 归因分析 Skill
+│   ├── report_gen/        # 报告生成 Skill
+│   └── visualization/     # 数据可视化 Skill
 ├── config/                # 配置文件
 │   ├── settings.yaml      # 主配置
 │   ├── skills.yaml        # Skills 配置
+│   ├── skills_registry.json # Skills 注册表
 │   └── tools.yaml         # 工具配置
 ├── config/                # 配置文件
 │   ├── settings.yaml      # 主配置
@@ -156,16 +166,47 @@ uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 | query_database | SQL 查询 (参数化查询，多数据库支持) | 54/54 ✅ |
 | search_knowledge | 向量检索 (ChromaDB/内存回退) | 51/51 ✅ |
 | invoke_skill | Skill 调用 (桥接 Skills 系统) | 43/43 ✅ |
+| skill_package | Skill 包管理 (GitHub/ZIP/目录安装) | 43/43 ✅ |
 
-**Phase 2 完成**: 8/8 核心工具全部实现 ✅
+**Phase 2 完成**: 9/9 核心工具全部实现 ✅
 
-## 🧩 Phase 3: Skills 系统 (1/4 完成)
+## 🧩 Phase 3: Skills 系统
 
+**已完成**:
 - [x] Skills 配置系统 (config/skills.yaml)
-- [ ] 异动检测 Skill
-- [ ] 归因分析 Skill
-- [ ] 报告生成 Skill
-- [ ] 数据可视化 Skill
+- [x] Skill 注册表 (config/skills_registry.json)
+- [x] Skill 包管理工具 (tools/skill_manager.py)
+- [x] 统一 SKILL.md 格式 (YAML frontmatter)
+- [x] 4 个内置 Skill 结构 (anomaly_detection, attribution, report_gen, visualization)
+
+**待实现**:
+- [ ] 异动检测 Skill 完整实现
+- [ ] 归因分析 Skill 完整实现
+- [ ] 报告生成 Skill 完整实现
+- [ ] 数据可视化 Skill 完整实现
+
+### Skill 包管理功能
+
+支持从外部源安装 Skills：
+```python
+# 从 GitHub 安装
+skill_package(action="install", source="github:owner/repo")
+
+# 从本地 ZIP 安装
+skill_package(action="install", source="/path/to/skill.zip")
+
+# 从本地目录安装
+skill_package(action="install", source="/path/to/skill")
+
+# 列出已安装的 Skills
+skill_package(action="list")
+
+# 验证 Skill
+skill_package(action="validate", skill_name="anomaly_detection")
+
+# 卸载 Skill
+skill_package(action="uninstall", skill_name="anomaly_detection")
+```
 
 ## 🔧 基础设施
 
@@ -180,28 +221,19 @@ uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ## 📊 测试覆盖
 
 ```
-总计: 432 个测试
-✅ 通过: 426 (98.6%)
+总计: 512 个测试
+✅ 通过: 506 (98.8%)
 ⏭️  跳过: 6 (需要 MCP 依赖)
 ❌ 失败: 0
 ```
 
-## 🔜 待实现的工具 (Phase 2)
+## 🔜 待实现的功能
 
-- [x] Web 搜索工具 (MCP: mcp__web-search-prime__webSearchPrime)
-- [x] Web Reader 工具 (MCP: mcp__web_reader__webReader)
-- [x] 文件读取工具 (CSV/Excel/JSON/文本/Python/SQL)
-- [x] SQL 查询工具 (SQLAlchemy)
-- [x] 向量检索工具 (ChromaDB)
-- [x] Skill 调用工具 (核心) - ✅ Phase 2 完成!
 - [ ] 记忆管理工具 (memory_search, memory_get, memory_write)
-
-## 🧩 待实现的 Skills (Phase 3)
-
-- [ ] 异动检测 Skill
-- [ ] 归因分析 Skill
-- [ ] 报告生成 Skill
-- [ ] 数据可视化 Skill
+- [ ] 异动检测 Skill 完整实现
+- [ ] 归因分析 Skill 完整实现
+- [ ] 报告生成 Skill 完整实现
+- [ ] 数据可视化 Skill 完整实现
 
 ## 📝 许可证
 

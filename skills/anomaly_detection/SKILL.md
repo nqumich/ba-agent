@@ -1,3 +1,35 @@
+---
+name: anomaly_detection
+display_name: "异动检测"
+description: "检测数据中的异常波动并分析可能原因。支持统计方法（3-sigma）、历史对比（同比/环比）、AI智能识别。"
+version: "1.0.0"
+category: "Analysis"
+author: "BA-Agent Team"
+entrypoint: "skills/anomaly_detection/main.py"
+function: "detect"
+requirements:
+  - "pandas>=2.0.0"
+  - "numpy>=1.24.0"
+  - "scipy>=1.10.0"
+  - "anthropic>=0.39.0"
+config:
+  methods:
+    - statistical  # 基于3-sigma的统计检测
+    - historical   # 同比/环比历史对比
+    - ai          # 使用Claude AI智能识别
+  threshold: 2.0        # 统计检测的标准差倍数
+  min_data_points: 7    # 最小数据点数
+tags:
+  - "anomaly"
+  - "detection"
+  - "statistics"
+  - "ai"
+examples:
+  - "今天GMV有什么异常？"
+  - "检测最近7天的异常波动"
+  - "GMV突然下降是什么原因？"
+---
+
 # 异动检测分析 Skill
 
 ## 描述
@@ -28,21 +60,3 @@
 - type: 异常类型 (上升/下降)
 - severity: 异常程度 (低/中/高)
 - reason: 可能原因分析
-
-## 依赖
-
-- pandas>=2.0.0
-- numpy>=1.24.0
-- scipy>=1.10.0
-- anthropic>=0.39.0
-
-## 配置
-
-```yaml
-methods:
-  - statistical  # 基于3-sigma的统计检测
-  - historical   # 同比/环比历史对比
-  - ai          # 使用Claude AI智能识别
-threshold: 2.0        # 统计检测的标准差倍数
-min_data_points: 7    # 最小数据点数
-```

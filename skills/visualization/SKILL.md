@@ -1,3 +1,51 @@
+---
+name: visualization
+display_name: "数据可视化"
+description: "使用 AI (Gemini 3 Pro) 自动生成 ECharts 可视化代码，经校验后返回前端渲染。"
+version: "1.0.0"
+category: "Visualization"
+author: "BA-Agent Team"
+entrypoint: "skills/visualization/main.py"
+function: "create_chart"
+requirements:
+  - "google-genai>=1.0.0"
+  - "anthropic>=0.39.0"
+  - "pandas>=2.0.0"
+config:
+  gemini:
+    model: "gemini-1.5-pro"
+    temperature: 0.3
+    max_tokens: 4096
+  supported_charts:
+    - line:       # 折线图 - 趋势展示
+    - bar:        # 柱状图 - 对比展示
+    - pie:        # 饼图 - 占比展示
+    - scatter:    # 散点图 - 分布展示
+    - heatmap:    # 热力图 - 多维数据
+    - map:        # 地图 - 地域分布
+    - gauge:      # 仪表盘 - KPI展示
+    - funnel:     # 漏斗图 - 转化分析
+  themes:
+    - default
+    - dark
+    - macarons
+    - vintage
+  chart_limits:
+    max_series: 10
+    max_data_points: 10000
+    max_categories: 50
+tags:
+  - "visualization"
+  - "charts"
+  - "echarts"
+  - "gemini"
+examples:
+  - "把最近30天的GMV趋势用图表展示"
+  - "生成各地区GMV占比的饼图"
+  - "展示用户增长的折线图"
+  - "对比本周和上周的销售额"
+---
+
 # 数据可视化 Skill
 
 ## 描述
@@ -46,12 +94,6 @@
 - `series`: 数据系列
 - `theme`: 主题名称
 
-## 依赖
-
-- google-genai>=1.0.0 (Gemini API - 新 SDK)
-- anthropic>=0.39.0 (Claude - 用于辅助分析)
-- pandas>=2.0.0 (数据处理)
-
 ## Gemini 3 Pro Prompt 模板
 
 ```
@@ -84,36 +126,6 @@ def validate_echarts_code(code: str) -> bool:
     # 3. 必需字段检查（title, series 等）
     # 4. 数据类型检查
     pass
-```
-
-## 配置
-
-```yaml
-gemini:
-  model: gemini-1.5-pro
-  temperature: 0.3
-  max_tokens: 4096
-
-supported_charts:
-  - line:       # 折线图 - 趋势展示
-  - bar:        # 柱状图 - 对比展示
-  - pie:        # 饼图 - 占比展示
-  - scatter:    # 散点图 - 分布展示
-  - heatmap:    # 热力图 - 多维数据
-  - map:        # 地图 - 地域分布
-  - gauge:      # 仪表盘 - KPI展示
-  - funnel:     # 漏斗图 - 转化分析
-
-themes:
-  - default
-  - dark
-  - macarons
-  - vintage
-
-chart_limits:
-  max_series: 10
-  max_data_points: 10000
-  max_categories: 50
 ```
 
 ## 前端渲染示例

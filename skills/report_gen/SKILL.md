@@ -1,3 +1,53 @@
+---
+name: report_gen
+display_name: "报告生成"
+description: "自动生成业务分析报告，支持日报、周报、月报。"
+version: "1.0.0"
+category: "Reporting"
+author: "BA-Agent Team"
+entrypoint: "skills/report_gen/main.py"
+function: "generate"
+requirements:
+  - "python-docx>=1.1.0"
+  - "reportlab>=4.0.0"
+  - "matplotlib>=3.7.0"
+  - "anthropic>=0.39.0"
+config:
+  templates:
+    daily:
+      sections:
+        - 核心指标概览
+        - 关键异动提醒
+        - 今日重点关注
+        - 明日建议
+    weekly:
+      sections:
+        - 本周经营概况
+        - 核心指标趋势
+        - 异动分析
+        - 下周策略建议
+    monthly:
+      sections:
+        - 月度经营总结
+        - 关键指标分析
+        - 异动复盘
+        - 下月规划
+  formats:
+    - pdf:     PDF格式报告
+    - docx:    Word格式报告
+    - xlsx:    Excel格式报告（含图表）
+    - markdown: Markdown格式报告
+tags:
+  - "report"
+  - "generation"
+  - "document"
+  - "summary"
+examples:
+  - "帮我生成本周的业务周报"
+  - "生成GMV月度分析报告"
+  - "自动生成每日业务简报"
+---
+
 # 报告生成 Skill
 
 ## 描述
@@ -30,39 +80,3 @@
 - metrics: 核心指标汇总
 - charts: 图表配置
 - file_path: 报告文件路径
-
-## 依赖
-
-- python-docx>=1.1.0
-- reportlab>=4.0.0
-- matplotlib>=3.7.0
-- anthropic>=0.39.0
-
-## 配置
-
-```yaml
-templates:
-  daily:
-    sections:
-      - 核心指标概览
-      - 关键异动提醒
-      - 今日重点关注
-      - 明日建议
-  weekly:
-    sections:
-      - 本周经营概况
-      - 核心指标趋势
-      - 异动分析
-      - 下周策略建议
-  monthly:
-    sections:
-      - 月度经营总结
-      - 关键指标分析
-      - 异动复盘
-      - 下月规划
-formats:
-  - pdf:     PDF格式报告
-  - docx:    Word格式报告
-  - xlsx:    Excel格式报告（含图表）
-  - markdown: Markdown格式报告
-```
