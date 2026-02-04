@@ -58,6 +58,14 @@ from .skill_invoker import (
     SkillConfig,
 )
 
+from .skill_manager import (
+    SkillPackageInput,
+    skill_package_impl,
+    skill_package_tool,
+    SkillRegistry,
+    SkillInstaller,
+)
+
 from .base import (
     unified_tool,
     ToolOutputParser,
@@ -96,6 +104,11 @@ __all__ = [
     "invoke_skill_impl",
     "invoke_skill_tool",
     "SkillConfig",
+    "SkillPackageInput",
+    "skill_package_impl",
+    "skill_package_tool",
+    "SkillRegistry",
+    "SkillInstaller",
     "unified_tool",
     "ToolOutputParser",
     "ReActFormatter",
