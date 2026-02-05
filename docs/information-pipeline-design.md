@@ -325,6 +325,45 @@ Final Response
 
 ## Message Format Specifications
 
+### Message Validation Layer
+
+```python
+from functools import wraps
+
+def validate_message(msg_type: Type[BaseModel]):
+    """
+    Decorator to validate message format at layer boundaries.
+
+    Ensures message integrity across component boundaries.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Extract message from args (first arg usually self, second is message)
+            if len(args) > 1:
+                msg = args[1]
+                try:
+                    # Validate and parse message
+                    if isinstance(msg, dict):
+                        validated = msg_type(**msg)
+                        # Replace with validated instance
+                        args = list(args)
+                        args[1] = validated
+                        args = tuple(args)
+                except Exception as e:
+                    raise ValueError(f"Message validation failed: {e}")
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# Example usage:
+# @validate_message(ToolExecutionResult)
+# def process_tool_result(self, result: ToolExecutionResult):
+#     ...
+```
+
+### 1. Standard Message Format
+
 ### 1. Standard Message Format
 
 All messages in BA-Agent follow this base structure:
@@ -383,8 +422,13 @@ class StandardMessage(BaseModel):
 
     def to_langchain_format(self) -> Dict[str, Any]:
         """Convert to LangChain message format"""
-        # Implementation for LangGraph compatibility
-        pass
+        # CRITICAL: Use .value for consistent serialization
+        return {
+            "role": self.role.value,  # Always use enum value
+            "content": [block.model_dump(exclude_none=True) for block in self.content],
+            "timestamp": self.timestamp,
+            "message_id": self.message_id
+        }
 ```
 
 ### 2. Tool Call Message Format
@@ -581,6 +625,26 @@ class ToolErrorType(str, Enum):
     EXECUTION_ERROR = "execution_error"
     RESOURCE_ERROR = "resource_error"
 
+class ToolRetryPolicy(BaseModel):
+    """Retry configuration for tool execution"""
+    max_retries: int = 3
+    retry_on: List[ToolErrorType] = Field(
+        default_factory=lambda: [ToolErrorType.TIMEOUT, ToolErrorType.RESOURCE_ERROR]
+    )
+    backoff_multiplier: float = 1.5
+    initial_delay_ms: int = 1000
+    max_delay_ms: int = 10000
+
+    def should_retry(self, error_type: ToolErrorType, attempt: int) -> bool:
+        """Check if operation should be retried"""
+        return error_type in self.retry_on and attempt < self.max_retries
+
+    def get_delay(self, attempt: int) -> int:
+        """Calculate delay with exponential backoff"""
+        delay = self.initial_delay_ms * (self.backoff_multiplier ** attempt)
+        return min(int(delay), self.max_delay_ms)
+```
+
 class ToolErrorResponse(BaseModel):
     """Standardized error response"""
     request_id: str
@@ -637,6 +701,27 @@ class SkillActivationRequest(BaseModel):
 
     # Execution options
     response_format: ResponseFormat = ResponseFormat.STANDARD
+
+    # Circular dependency prevention
+    activation_depth: int = 0
+    max_depth: int = 3
+
+    def can_activate_nested(self) -> bool:
+        """Check if nested skill activation is allowed"""
+        return self.activation_depth < self.max_depth
+
+    def create_nested_request(self, nested_skill: str) -> "SkillActivationRequest":
+        """Create request for nested skill activation"""
+        if not self.can_activate_nested():
+            raise ValueError(f"Maximum skill activation depth ({self.max_depth}) exceeded")
+        return SkillActivationRequest(
+            skill_name=nested_skill,
+            conversation_id=self.conversation_id,
+            user_request=self.user_request,
+            conversation_history=self.conversation_history,
+            activation_depth=self.activation_depth + 1,
+            max_depth=self.max_depth
+        )
 ```
 
 #### Phase 2: Skill Activation Result
@@ -688,12 +773,35 @@ class SkillActivationResult(BaseModel):
 ### Message Injection Protocol
 
 ```python
+import threading
+from contextlib import contextmanager
+
 class MessageInjectionProtocol:
     """
     Protocol for injecting skill messages into conversation.
 
+    Thread-safe with atomic state updates.
+
     Based on Claude Code's sub-agent communication pattern.
     """
+
+    # Per-conversation locks for thread safety
+    _locks: Dict[str, threading.Lock] = {}
+    _locks_lock = threading.Lock()
+
+    @classmethod
+    @contextmanager
+    def _conversation_lock(cls, conversation_id: str):
+        """Get or create lock for conversation"""
+        with cls._locks_lock:
+            if conversation_id not in cls._locks:
+                cls._locks[conversation_id] = threading.Lock()
+        lock = cls._locks[conversation_id]
+        lock.acquire()
+        try:
+            yield
+        finally:
+            lock.release()
 
     @staticmethod
     def inject_into_state(
@@ -702,7 +810,7 @@ class MessageInjectionProtocol:
         agent_state: Any
     ) -> bool:
         """
-        Inject messages into LangGraph agent state.
+        Thread-safely inject messages into LangGraph agent state.
 
         Args:
             messages: Messages to inject
@@ -712,32 +820,35 @@ class MessageInjectionProtocol:
         Returns:
             Success status
         """
-        try:
-            # Get current state
-            state = agent_state.get_state({"configurable": {"thread_id": conversation_id}})
-            current_messages = list(state.messages.get("messages", []))
+        with MessageInjectionProtocol._conversation_lock(conversation_id):
+            try:
+                # Atomic state read
+                state = agent_state.get_state({"configurable": {"thread_id": conversation_id}})
+                current_messages = list(state.messages.get("messages", []))
 
-            # Add new messages
-            for msg_dict in messages:
-                if msg_dict.get("role") == "user":
-                    current_messages.append(HumanMessage(content=msg_dict["content"]))
-                elif msg_dict.get("role") == "assistant":
-                    additional_kwargs = msg_dict.get("additional_kwargs", {})
-                    current_messages.append(AIMessage(
-                        content=msg_dict["content"],
-                        additional_kwargs=additional_kwargs
-                    ))
+                # Build new message list
+                new_messages = current_messages.copy()
+                for msg_dict in messages:
+                    role = msg_dict.get("role")
+                    if role == MessageType.USER.value:
+                        new_messages.append(HumanMessage(content=msg_dict["content"]))
+                    elif role == MessageType.ASSISTANT.value:
+                        additional_kwargs = msg_dict.get("additional_kwargs", {})
+                        new_messages.append(AIMessage(
+                            content=msg_dict["content"],
+                            additional_kwargs=additional_kwargs
+                        ))
 
-            # Update state
-            agent_state.update_state(
-                {"configurable": {"thread_id": conversation_id}},
-                {"messages": current_messages}
-            )
+                # Atomic state update
+                agent_state.update_state(
+                    {"configurable": {"thread_id": conversation_id}},
+                    {"messages": new_messages}
+                )
 
-            return True
-        except Exception as e:
-            logger.error(f"Failed to inject messages: {e}")
-            return False
+                return True
+            except Exception as e:
+                logger.error(f"Failed to inject messages: {e}")
+                return False
 ```
 
 ---
@@ -902,10 +1013,31 @@ class ContextManager:
             self._compress_context()
 
     def _should_compress(self) -> bool:
-        """Check if context compression is needed"""
-        # Estimate tokens (rough: 1 token ≈ 4 characters)
-        total_chars = sum(len(str(m.get("content", ""))) for m in self.conversation_history)
-        estimated_tokens = total_chars // 4
+        """
+        Check if context compression is needed.
+
+        Improved token estimation:
+        - English: ~4 characters per token
+        - Chinese: ~1.5 characters per token
+        - Mixed: Weighted average
+        """
+        total_chars = 0
+        chinese_chars = 0
+
+        for msg in self.conversation_history:
+            content = str(msg.get("content", ""))
+            total_chars += len(content)
+            # Count Chinese characters (CJK range)
+            chinese_chars += sum(1 for c in content if '\u4e00' <= c <= '\u9fff')
+
+        # Calculate weighted token estimate
+        if total_chars == 0:
+            return False
+
+        chinese_ratio = chinese_chars / total_chars
+        # Blend char/token ratios based on content
+        chars_per_token = 4 * (1 - chinese_ratio) + 1.5 * chinese_ratio
+        estimated_tokens = int(total_chars / chars_per_token)
 
         return estimated_tokens > (self.max_tokens * self.compression_threshold)
 
@@ -935,18 +1067,50 @@ class ContextManager:
         ] + recent
 
     def _create_summary(self, messages: List[Dict[str, Any]]) -> str:
-        """Create summary of older messages"""
-        # Extract key information
-        tool_calls = [m for m in messages if "tool_use" in str(m.get("content", ""))]
-        results = [m for m in messages if "tool_result" in str(m.get("content", ""))]
+        """
+        Create semantic summary of older messages.
+
+        Enhanced to preserve key decisions and tool outcomes.
+        """
+        # Extract key decisions and tool outcomes
+        key_decisions = self._extract_key_decisions(messages)
+        tool_outcomes = self._extract_tool_outcomes(messages)
 
         summary_parts = [
-            f"Summary of {len(messages)} previous messages:",
-            f"- {len(tool_calls)} tool calls executed",
-            f"- {len(results)} tool results received",
+            f"## Previous Context Summary",
+            f"### Key Decisions",
+            *key_decisions,
+            f"",
+            f"### Tool Outcomes",
+            *tool_outcomes,
         ]
 
         return "\n".join(summary_parts)
+
+    def _extract_key_decisions(self, messages: List[Dict[str, Any]]) -> List[str]:
+        """Extract key decisions from conversation history"""
+        decisions = []
+        for msg in messages:
+            content = str(msg.get("content", ""))
+            # Look for decision patterns
+            if any(keyword in content.lower() for keyword in ["decided", "selected", "chose", "确定", "选择"]):
+                # Extract the decision sentence
+                decisions.append(f"- {content[:100]}...")
+        return decisions[:5]  # Keep top 5
+
+    def _extract_tool_outcomes(self, messages: List[Dict[str, Any]]) -> List[str]:
+        """Extract tool execution outcomes"""
+        outcomes = []
+        for msg in messages:
+            if "tool_result" in str(msg.get("content", "")):
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    for block in content:
+                        if block.get("type") == "tool_result":
+                            tool_name = block.get("name", "unknown")
+                            outcome = "✓" if not block.get("is_error") else "✗"
+                            outcomes.append(f"- {tool_name}: {outcome}")
+        return outcomes[:10]  # Keep top 10
 
     def _refocus(self):
         """Re-focus on main task (from Manus AI)"""
@@ -1015,6 +1179,49 @@ Research sources for this design:
 
 ---
 
-**Document Status**: Design Draft - Pending Review
+**Document Status**: Design v1.1 - Updated based on review feedback
+**Last Updated**: 2026-02-05
 **Next Review Date**: 2026-02-12
 **Approval Required**: @ba-agent-team
+
+---
+
+## Change History
+
+### v1.1 (2026-02-05) - Review Response
+
+Addressed 7 issues identified in design review:
+
+1. **Fixed Message Format Consistency** (Issue #1)
+   - Changed `to_langchain_format()` to use `.value` for enum serialization
+   - All message formats now consistently use enum values
+
+2. **Enhanced Context Compression** (Issue #2)
+   - Added `_extract_key_decisions()` to preserve important decisions
+   - Added `_extract_tool_outcomes()` to preserve tool execution results
+   - Context now retains semantic information during compression
+
+3. **Added Retry Policy** (Issue #3)
+   - New `ToolRetryPolicy` class with configurable retry behavior
+   - Exponential backoff with max delay cap
+   - `should_retry()` and `get_delay()` methods
+
+4. **Fixed Race Conditions** (Issue #4)
+   - Added per-conversation locking mechanism
+   - Atomic state read-modify-write operations
+   - Context manager for lock lifecycle management
+
+5. **Added Message Validation Layer** (Issue #5)
+   - `@validate_message` decorator for format validation
+   - Validates messages at layer boundaries
+   - Prevents format errors from propagating
+
+6. **Prevented Circular Dependencies** (Issue #6)
+   - Added `activation_depth` and `max_depth` to `SkillActivationRequest`
+   - `can_activate_nested()` check before nested activation
+   - `create_nested_request()` for safe nested calls
+
+7. **Improved Token Estimation** (Issue #7)
+   - Distinguishes between Chinese and English text
+   - Weighted char/token ratio: 4.0 (EN) vs 1.5 (ZH)
+   - More accurate context compression triggers
