@@ -117,10 +117,18 @@ memory:
     query:
       max_results: 6                # 默认返回结果数
       min_score: 0.35               # 最小相关性分数
-      hybrid:
-        enabled: true              # 是否启用混合搜索
-        vector_weight: 0.7          # 向量搜索权重
-        text_weight: 0.3            # 文本搜索权重
+    hybrid:
+      enabled: true              # 是否启用混合搜索
+      vector_weight: 0.7          # 向量搜索权重
+      text_weight: 0.3            # 文本搜索权重
+
+  # Memory Watcher 配置
+  watcher:
+    enabled: false                 # 是否启用文件监听（默认禁用，避免资源占用）
+    watch_paths:                   # 监听的路径列表
+      - ./memory
+    debounce_seconds: 2.0          # 防抖秒数
+    check_interval_seconds: 5.0    # 检查间隔秒数
 
 # 日志配置
 logging:

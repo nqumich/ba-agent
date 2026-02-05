@@ -204,9 +204,13 @@ class TestMemorySearchV2:
 
     def test_no_index_directory(self, monkeypatch):
         """测试索引目录不存在"""
-        # 修改索引路径指向不存在的目录
-        import backend.memory.index as index_module
-        monkeypatch.setattr(index_module, "DEFAULT_INDEX_PATH", Path("/nonexistent/path"))
+        # Mock get_index_db_path 返回不存在的路径
+        # 需要patch导入到memory_search_v2模块的函数
+        def mock_get_index_db_path():
+            return Path("/nonexistent/path/memory.db")
+
+        import tools.memory_search_v2 as search_module
+        monkeypatch.setattr(search_module, "get_index_db_path", mock_get_index_db_path)
 
         result = memory_search_v2("test query")
         assert "搜索索引尚未创建" in result or "尚未建立" in result

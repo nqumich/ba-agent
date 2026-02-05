@@ -5,6 +5,8 @@ BA-Agent 主 Agent 类
 """
 
 import os
+import threading
+import time
 from typing import Any, Dict, List, Optional, Sequence, TypedDict
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +30,7 @@ from backend.models.agent import (
     AgentConfig as AgentConfigModel,
 )
 from backend.memory.flush import MemoryFlush, MemoryFlushConfig, MemoryExtractor
+from backend.memory.index import MemoryIndexer, MemoryWatcher, get_index_db_path
 
 
 class AgentState(TypedDict):
@@ -82,6 +85,9 @@ class BAAgent:
 
         # 初始化 Memory Flush
         self.memory_flush = self._init_memory_flush()
+
+        # 初始化 Memory Watcher
+        self.memory_watcher = self._init_memory_watcher()
 
         # 会话 token 跟踪
         self.session_tokens = 0
@@ -251,6 +257,48 @@ class BAAgent:
             memory_path=memory_path,
             extractor=extractor,
         )
+
+    def _init_memory_watcher(self) -> Optional["MemoryWatcherWrapper"]:
+        """
+        初始化 Memory Watcher
+
+        Returns:
+            MemoryWatcherWrapper 实例，如果未启用则返回 None
+        """
+        if not self.app_config.memory.enabled:
+            return None
+
+        watcher_config = self.app_config.memory.watcher
+        if not watcher_config.enabled:
+            return None
+
+        # 创建 MemoryIndexer
+        index_path = get_index_db_path()
+
+        indexer = MemoryIndexer(
+            db_path=index_path,
+        )
+
+        # 创建 watch 路径列表
+        watch_paths = [Path(p) for p in watcher_config.watch_paths]
+
+        # 创建 MemoryWatcher
+        watcher = MemoryWatcher(
+            indexer=indexer,
+            watch_paths=watch_paths,
+            debounce_seconds=watcher_config.debounce_seconds,
+        )
+
+        # 创建包装器
+        wrapper = MemoryWatcherWrapper(
+            watcher=watcher,
+            check_interval=watcher_config.check_interval_seconds,
+        )
+
+        # 启动监听线程
+        wrapper.start()
+
+        return wrapper
 
     def _get_total_tokens(self, result: Dict[str, Any]) -> int:
         """
@@ -635,6 +683,102 @@ class BAAgent:
         # 删除检查点中的对话
         config = {"configurable": {"thread_id": conversation_id}}
         self.agent.update_state(config, {"messages": []})
+
+    def shutdown(self) -> None:
+        """
+        关闭 Agent，释放资源
+
+        停止 MemoryWatcher 线程
+        """
+        if self.memory_watcher:
+            self.memory_watcher.stop()
+            self.memory_watcher = None
+
+
+class MemoryWatcherWrapper:
+    """
+    Memory Watcher 包装器
+
+    在后台线程中运行 MemoryWatcher，定期检查文件变更
+    """
+
+    def __init__(
+        self,
+        watcher: MemoryWatcher,
+        check_interval: float = 5.0,
+    ):
+        """
+        初始化包装器
+
+        Args:
+            watcher: MemoryWatcher 实例
+            check_interval: 检查间隔（秒）
+        """
+        self.watcher = watcher
+        self.check_interval = check_interval
+        self._thread: Optional[threading.Thread] = None
+        self._running = False
+        self._stop_event = threading.Event()
+
+    def _watch_loop(self) -> None:
+        """监听循环"""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        while not self._stop_event.is_set():
+            try:
+                # 处理变更
+                results = self.watcher.process_changes()
+
+                if results["processed"] > 0 or results["failed"] > 0:
+                    logger.info(
+                        f"MemoryWatcher: 处理了 {results['processed']} 个文件变更"
+                    )
+
+                    if results["failed"] > 0:
+                        logger.warning(
+                            f"MemoryWatcher: {results['failed']} 个文件处理失败"
+                        )
+
+            except Exception as e:
+                logger.error(f"MemoryWatcher 循环错误: {e}")
+
+            # 等待指定间隔或停止事件
+            self._stop_event.wait(self.check_interval)
+
+    def start(self) -> None:
+        """启动监听线程"""
+        if self._running:
+            return
+
+        self._running = True
+        self._stop_event.clear()
+        self.watcher.start()
+
+        self._thread = threading.Thread(
+            target=self._watch_loop,
+            daemon=True,
+            name="MemoryWatcher",
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        """停止监听线程"""
+        if not self._running:
+            return
+
+        self._running = False
+        self._stop_event.set()
+
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+
+        self.watcher.stop()
+
+    def is_running(self) -> bool:
+        """检查是否正在运行"""
+        return self._running and self._thread is not None and self._thread.is_alive()
 
 
 def create_agent(

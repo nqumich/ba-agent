@@ -157,6 +157,18 @@ class MemorySearchConfig(BaseModel):
     )
 
 
+class MemoryWatcherConfig(BaseModel):
+    """Memory Watcher 配置"""
+
+    enabled: bool = Field(default=False, description="是否启用文件监听（默认禁用）")
+    watch_paths: list[str] = Field(
+        default_factory=lambda: ["./memory"],
+        description="监听的路径列表"
+    )
+    debounce_seconds: float = Field(default=2.0, description="防抖秒数")
+    check_interval_seconds: float = Field(default=5.0, description="检查间隔秒数")
+
+
 class MemoryConfig(BaseModel):
     """记忆管理配置"""
 
@@ -166,6 +178,7 @@ class MemoryConfig(BaseModel):
     max_context_tokens: int = Field(default=8000, description="最大上下文 tokens")
     flush: MemoryFlushConfig = Field(default_factory=MemoryFlushConfig, description="Memory Flush 配置")
     search: MemorySearchConfig = Field(default_factory=MemorySearchConfig, description="Memory Search 配置")
+    watcher: MemoryWatcherConfig = Field(default_factory=MemoryWatcherConfig, description="Memory Watcher 配置")
 
 
 class LoggingConfig(BaseModel):

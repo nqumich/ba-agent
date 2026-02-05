@@ -27,6 +27,8 @@ class TestMemoryFlushIntegration:
             mock_config.memory.flush.llm_model = "glm-4.7-flash"
             mock_config.memory.flush.llm_timeout = 30
             mock_config.memory.memory_dir = "./memory"
+            # 添加 watcher 配置（禁用以避免启动线程）
+            mock_config.memory.watcher.enabled = False
             mock_config.llm.model = "claude-3-5-sonnet-20241022"
             mock_config.llm.temperature = 0.7
             mock_config.llm.max_tokens = 4096
@@ -148,6 +150,8 @@ class TestMemoryFlushIntegration:
             mock_config.memory.flush.llm_model = "glm-4.7-flash"
             mock_config.memory.flush.llm_timeout = 30
             mock_config.memory.memory_dir = "./memory"
+            # 添加 watcher 配置（禁用以避免启动线程）
+            mock_config.memory.watcher.enabled = False
             mock_config.llm.model = "claude-3-5-sonnet-20241022"
             mock_config.llm.temperature = 0.7
             mock_config.llm.max_tokens = 4096
