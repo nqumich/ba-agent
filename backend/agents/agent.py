@@ -18,6 +18,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_anthropic import ChatAnthropic
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, END
+# TODO: LangGraph V2.0 迁移 - create_react_agent 将移至 langchain.agents
+# 当前使用 langgraph.prebuilt.create_react_agent，等待稳定 API
 from langgraph.prebuilt import create_react_agent
 
 import logging

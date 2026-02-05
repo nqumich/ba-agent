@@ -5,11 +5,15 @@ Memory Flush - 自动记忆持久化
 """
 
 import json
+import logging
 import time
 import re
 from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 from pathlib import Path
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 try:
     from token_monitor import TokenMonitor
@@ -276,15 +280,19 @@ class MemoryExtractor:
         # 优先使用 LLM 提取
         if self.use_llm:
             try:
+                logger.debug(f"使用 LLM 提取记忆，消息数: {len(valid_messages)}")
                 memories = self._extract_with_llm(valid_messages)
                 if memories:
+                    logger.info(f"LLM 提取到 {len(memories)} 条记忆")
                     return memories
-            except Exception:
-                # LLM 提取失败，回退到正则表达式
-                pass
+            except Exception as e:
+                logger.warning(f"LLM 提取失败，回退到正则表达式: {e}")
 
         # 回退到正则表达式提取
-        return self._extract_with_regex(valid_messages)
+        memories = self._extract_with_regex(valid_messages)
+        if memories:
+            logger.info(f"正则表达式提取到 {len(memories)} 条记忆")
+        return memories
 
     def _extract_with_llm(self, messages: List[Dict[str, Any]]) -> List[str]:
         """
@@ -571,6 +579,7 @@ class MemoryFlush:
 
         if should_flush:
             try:
+                logger.info(f"Memory Flush 触发: tokens={current_tokens}, force={force}")
                 # 提取记忆
                 memories = self.extractor.extract_from_messages(self.message_buffer)
 
@@ -586,12 +595,23 @@ class MemoryFlush:
                     result["memories_written"] = memories_written
                     result["reason"] = self._get_flush_reason(current_tokens)
 
+                    logger.info(
+                        f"Memory Flush 完成: 提取={len(memories)}, 写入={memories_written}, "
+                        f"原因={result['reason']}"
+                    )
+
                     # 清空缓存
                     self.message_buffer.clear()
                     self.last_flush_tokens = current_tokens
+                else:
+                    logger.debug(
+                        f"Memory Flush 跳过: 记忆数不足 ({len(memories)} < {self.config.min_memory_count}) "
+                        f"或会话年龄过长 ({session_age:.1f}h > {self.config.max_memory_age_hours}h)"
+                    )
 
             except Exception as e:
                 result["error"] = str(e)
+                logger.error(f"Memory Flush 失败: {e}")
 
         return result
 
@@ -657,6 +677,8 @@ class MemoryFlush:
             filename = f"{date_str}.md"
             file_path = self.memory_path / filename
 
+            logger.debug(f"写入记忆到文件: {file_path}")
+
             # 追加写入
             with open(file_path, 'a', encoding='utf-8') as f:
                 f.write(f"\n## Memory Flush ({datetime.now().strftime('%H:%M:%S')})\n\n")
@@ -666,10 +688,11 @@ class MemoryFlush:
 
                 f.write("\n")
 
+            logger.info(f"记忆已写入: {filename} ({len(memories)} 条)")
             return len(memories)
 
         except Exception as e:
-            # 写入失败
+            logger.error(f"写入记忆文件失败: {e}")
             return 0
 
     def get_status(self) -> Dict[str, Any]:

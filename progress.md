@@ -393,6 +393,48 @@ agent = create_agent(model, [test_tool], checkpointer=memory)
 
 ---
 
+### 2026-02-05 15:30 - Memory Flush 日志记录优化
+
+#### 完成的工作
+
+1. **添加日志记录到 MemoryFlush**
+   - ✅ `backend/memory/flush.py` 添加 logging 模块
+   - ✅ `extract_from_messages()` - 记录提取方法（LLM vs 正则）
+   - ✅ `check_and_flush()` - 记录触发原因、提取/写入数量
+   - ✅ `_write_to_file()` - 记录文件写入操作
+
+2. **添加日志记录到 MemoryWatcher**
+   - ✅ `backend/memory/index.py` 添加 logging 模块
+   - ✅ `on_file_changed()` - 记录文件变更检测
+   - ✅ `process_changes()` - 记录索引处理进度和结果
+   - ✅ `start()/stop()` - 记录监听器状态变化
+
+3. **日志级别说明**
+   - `INFO`: Memory Flush 触发/完成、文件写入、MemoryWatcher 状态
+   - `DEBUG`: 提取细节、文件变更、索引处理
+   - `WARNING`: LLM 提取失败回退、索引失败
+   - `ERROR`: Flush 失败、文件处理失败
+
+#### 日志示例
+
+```
+INFO:memory.flush:Memory Flush 触发: tokens=5000, force=False
+INFO:memory.flush:LLM 提取到 5 条记忆
+INFO:memory.flush:记忆已写入: 2025-02-05.md (5 条)
+INFO:memory.flush:Memory Flush 完成: 提取=5, 写入=5, 原因=软阈值触发
+
+INFO:memory.index:MemoryWatcher 启动，监听路径: ['memory/']
+DEBUG:memory.index:检测到文件变更: memory/2025-02-05.md
+INFO:memory.index:MemoryWatcher: 处理 1 个文件变更
+INFO:memory.index:索引成功: 2025-02-05.md, chunks_added=3
+INFO:memory.index:MemoryWatcher 完成: 处理=1, 失败=0
+```
+
+4. **测试结果**
+   - ✅ 750 个测试全部通过
+
+---
+
 ### 2026-02-05 14:00 - Memory Flush 重构 (Clawdbot 风格)
 
 #### 完成的工作

@@ -5,6 +5,7 @@
 """
 
 import hashlib
+import logging
 import sqlite3
 import threading
 from datetime import datetime
@@ -17,6 +18,9 @@ from .schema import (
     open_index_db,
     DEFAULT_INDEX_PATH
 )
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 
 # 默认配置
@@ -486,6 +490,7 @@ class MemoryWatcher:
         """文件变更回调"""
         if self._is_watch_path(path):
             self._dirty_files.add(path)
+            logger.debug(f"检测到文件变更: {path}")
 
     def process_changes(self) -> Dict[str, Any]:
         """处理所有变更"""
@@ -498,13 +503,20 @@ class MemoryWatcher:
         if not self._dirty_files:
             return results
 
+        logger.info(f"MemoryWatcher: 处理 {len(self._dirty_files)} 个文件变更")
+
         for file_path in list(self._dirty_files):
             try:
                 result = self.indexer.index_file(file_path)
                 if result["success"]:
                     results["processed"] += 1
+                    logger.debug(
+                        f"索引成功: {file_path.name}, "
+                        f"chunks_added={result.get('chunks_added', 0)}"
+                    )
                 else:
                     results["failed"] += 1
+                    logger.warning(f"索引失败: {file_path.name}, error={result.get('error')}")
 
                 results["files"].append({
                     "path": str(file_path),
@@ -518,19 +530,28 @@ class MemoryWatcher:
 
             except Exception as e:
                 results["failed"] += 1
+                logger.error(f"处理文件失败: {file_path}, error={e}")
                 results["files"].append({
                     "path": str(file_path),
                     "success": False,
                     "error": str(e)
                 })
 
+        if results["processed"] > 0 or results["failed"] > 0:
+            logger.info(
+                f"MemoryWatcher 完成: 处理={results['processed']}, "
+                f"失败={results['failed']}"
+            )
+
         return results
 
     def start(self) -> None:
         """启动监听（需要外部触发 process_changes）"""
+        logger.info(f"MemoryWatcher 启动，监听路径: {[str(p) for p in self.watch_paths]}")
         self._running = True
 
     def stop(self) -> None:
         """停止监听"""
+        logger.info("MemoryWatcher 停止")
         self._running = False
         self._dirty_files.clear()
