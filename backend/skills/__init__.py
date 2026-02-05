@@ -22,6 +22,13 @@ from backend.skills.activator import SkillActivator, SkillActivationError
 from backend.skills.formatter import SkillMessageFormatter
 from backend.skills.installer import SkillInstaller, SkillInstallError
 from backend.skills.loader import SkillLoader
+from backend.skills.message_protocol import (
+    MessageType,
+    MessageVisibility,
+    SkillMessage,
+    ContextModifier,
+    SkillActivationResult,
+)
 from backend.skills.models import (
     Skill,
     SkillFrontmatter,
@@ -35,6 +42,12 @@ __all__ = [
     "SkillFrontmatter",
     "Skill",
     "SkillMetadata",
+    # Message Protocol
+    "MessageType",
+    "MessageVisibility",
+    "SkillMessage",
+    "ContextModifier",
+    "SkillActivationResult",
     # Core components
     "SkillLoader",
     "SkillRegistry",

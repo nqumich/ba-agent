@@ -8,15 +8,26 @@ Following Claude Code's architecture:
 - Single "activate_skill" tool in the tools array
 - Tool description contains formatted list of all available skills
 - Agent selects skills through semantic matching
-- When invoked, injects skill instructions into conversation
+- When invoked, returns structured result for message injection
 """
 
 import logging
-from typing import Any, Dict, List, Optional
-from langchain_core.tools import BaseTool, StructuredTool
+from typing import Any, Dict, Optional
+
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from backend.skills import SkillRegistry, SkillActivator, SkillMessageFormatter
+from backend.skills import (
+    SkillRegistry,
+    SkillActivator,
+    SkillMessageFormatter,
+    MessageType,
+    MessageVisibility,
+    SkillMessage,
+    ContextModifier,
+    SkillActivationResult,
+)
+from backend.skills.models import Skill
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +35,14 @@ logger = logging.getLogger(__name__)
 def create_skill_tool(
     skill_registry: SkillRegistry,
     skill_activator: SkillActivator,
-) -> Optional[BaseTool]:
+) -> Optional[StructuredTool]:
     """
     Create a Skill meta-tool that wraps all available skills.
 
     This tool follows Claude Code's architecture:
     - Tool description contains the formatted skills list for semantic discovery
     - Agent uses LLM reasoning to decide when to invoke based on user intent
-    - When invoked, loads full SKILL.md and injects into conversation
+    - When invoked, returns SkillActivationResult for BAAgent to process
 
     Args:
         skill_registry: SkillRegistry instance containing all available skills
@@ -103,43 +114,136 @@ def _activate_skill_wrapper(skill_activator: SkillActivator):
         skill_activator: SkillActivator instance
 
     Returns:
-        Function that activates skills
+        Function that activates skills and returns SkillActivationResult
     """
-    def _activate(skill_name: str) -> str:
+    def _activate(skill_name: str) -> Dict[str, Any]:
         """
         Activate a skill by name.
+
+        Returns a SkillActivationResult serialized as dict for BAAgent to process.
 
         Args:
             skill_name: Name of the skill to activate
 
         Returns:
-            Result message indicating the skill was activated
+            Dict representation of SkillActivationResult with:
+            - skill_name: str
+            - messages: List[Dict] - messages to inject
+            - context_modifier: Dict - execution context changes
+            - success: bool
+            - error: Optional[str]
         """
         from backend.skills import SkillActivationError
 
         try:
-            # Activate the skill
-            messages, context_modifier = skill_activator.activate_skill(skill_name)
+            # Activate the skill using SkillActivator
+            # This returns (messages, context_modifier) tuple
+            raw_messages, context_dict = skill_activator.activate_skill(skill_name)
 
-            # Log activation (hidden from user)
-            logger.info(
-                f"Activated skill '{skill_name}': "
-                f"{len(messages)} messages injected, "
-                f"context_modifier={context_modifier}"
+            # Convert raw messages to SkillMessage format
+            messages = _convert_to_skill_messages(raw_messages)
+
+            # Convert context dict to ContextModifier
+            context_modifier = ContextModifier(
+                allowed_tools=context_dict.get("allowed_tools"),
+                model=context_dict.get("model"),
+                disable_model_invocation=context_dict.get("disable_model_invocation", False)
             )
 
-            # Return a message that will be shown to the user
-            # The actual skill instructions are injected as hidden messages
-            return f"Activated skill: {skill_name}"
+            # Create success result
+            result = SkillActivationResult.success_result(
+                skill_name=skill_name,
+                messages=messages,
+                context_modifier=context_modifier
+            )
+
+            # Log activation
+            logger.info(
+                f"Activated skill '{skill_name}': "
+                f"{len(messages)} messages prepared, "
+                f"context_modifier={context_modifier.to_dict()}"
+            )
+
+            # Return as dict for JSON serialization
+            return _serialize_activation_result(result)
 
         except SkillActivationError as e:
             logger.error(f"Failed to activate skill '{skill_name}': {e}")
-            return f"Failed to activate skill '{skill_name}': {str(e)}"
+            result = SkillActivationResult.failure_result(skill_name, str(e))
+            return _serialize_activation_result(result)
+
         except Exception as e:
             logger.error(f"Unexpected error activating skill '{skill_name}': {e}")
-            return f"Error activating skill '{skill_name}': {str(e)}"
+            result = SkillActivationResult.failure_result(skill_name, str(e))
+            return _serialize_activation_result(result)
 
     return _activate
+
+
+def _convert_to_skill_messages(raw_messages: list) -> list:
+    """
+    Convert messages from SkillActivator to SkillMessage format.
+
+    Args:
+        raw_messages: List of message dicts from SkillActivator
+
+    Returns:
+        List of SkillMessage objects
+    """
+    skill_messages = []
+
+    for msg in raw_messages:
+        if msg.get("isMeta") is False:
+            # Visible metadata message
+            skill_messages.append(SkillMessage(
+                type=MessageType.METADATA,
+                content=msg["content"],
+                visibility=MessageVisibility.VISIBLE
+            ))
+        elif msg.get("isMeta") is True:
+            # Hidden instruction message
+            skill_messages.append(SkillMessage(
+                type=MessageType.INSTRUCTION,
+                content=msg["content"],
+                visibility=MessageVisibility.HIDDEN
+            ))
+        else:
+            # Message without isMeta - assume it's content-based
+            if isinstance(msg.get("content"), dict):
+                # Permissions message
+                skill_messages.append(SkillMessage(
+                    type=MessageType.PERMISSIONS,
+                    content=msg["content"],
+                    visibility=MessageVisibility.HIDDEN
+                ))
+            else:
+                # Regular message - treat as instruction
+                skill_messages.append(SkillMessage(
+                    type=MessageType.INSTRUCTION,
+                    content=msg["content"],
+                    visibility=MessageVisibility.VISIBLE
+                ))
+
+    return skill_messages
+
+
+def _serialize_activation_result(result: SkillActivationResult) -> Dict[str, Any]:
+    """
+    Serialize SkillActivationResult to dict for JSON transport.
+
+    Args:
+        result: SkillActivationResult to serialize
+
+    Returns:
+        Dict with all fields serialized
+    """
+    return {
+        "skill_name": result.skill_name,
+        "messages": [msg.to_dict() for msg in result.messages],
+        "context_modifier": result.context_modifier.to_dict(),
+        "success": result.success,
+        "error": result.error,
+    }
 
 
 class SkillActivationInput(BaseModel):

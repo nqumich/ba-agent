@@ -191,9 +191,11 @@ class TestSkillInstaller:
         with pytest.raises(SkillInstallError, match="not installed"):
             installer.uninstall("nonexistent")
 
-    def test_github_url_patterns(self):
+    def test_github_url_patterns(self, tmp_path):
         """Test that GitHub URL patterns are recognized."""
-        installer = SkillInstaller(install_dir=Path("skills"))
+        # Use temp directory instead of project directory
+        install_dir = tmp_path / "test_install"
+        installer = SkillInstaller(install_dir=install_dir)
 
         # Test different formats are recognized as GitHub URLs
         valid_formats = [

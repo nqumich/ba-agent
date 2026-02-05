@@ -42,6 +42,10 @@ from backend.skills import (
     SkillActivator,
     SkillMessageFormatter,
     create_skill_tool,
+    SkillMessage,
+    ContextModifier,
+    MessageType,
+    MessageVisibility,
 )
 
 logger = logging.getLogger(__name__)
@@ -403,6 +407,140 @@ class BAAgent:
         formatter = SkillMessageFormatter()
         return formatter.format_skills_list_for_prompt(skills_list)
 
+    def _handle_skill_activation_result(
+        self,
+        result: Dict[str, Any],
+        conversation_id: str,
+        config: RunnableConfig
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Handle skill activation result from tool call.
+
+        When the activate_skill tool is called, it returns a SkillActivationResult.
+        This method processes that result by:
+        1. Injecting skill messages into the conversation
+        2. Applying context modifiers (tool permissions, model override)
+        3. Continuing the conversation with the skill active
+
+        Args:
+            result: The result dict from activate_skill tool
+            conversation_id: Current conversation ID
+            config: Current runnable config
+
+        Returns:
+            Updated result after processing, or None if no skill was activated
+        """
+        # Check if this is a skill activation result
+        if not result.get("success") or "skill_name" not in result:
+            return None
+
+        skill_name = result["skill_name"]
+        messages_data = result.get("messages", [])
+        context_data = result.get("context_modifier", {})
+
+        # Log skill activation
+        logger.info(f"Processing skill activation: {skill_name}")
+
+        # Apply context modifier
+        context_modifier = ContextModifier(
+            allowed_tools=context_data.get("allowed_tools"),
+            model=context_data.get("model"),
+            disable_model_invocation=context_data.get("disable_model_invocation", False)
+        )
+        self._apply_context_modifier(context_modifier, skill_name)
+
+        # Inject messages into conversation
+        if messages_data:
+            self._inject_skill_messages(messages_data, conversation_id, config)
+
+        # Store active skill context
+        self._active_skill_context[skill_name] = context_modifier.to_dict()
+
+        logger.info(
+            f"Skill '{skill_name}' activated: "
+            f"{len(messages_data)} messages injected, "
+            f"context={context_modifier.to_dict()}"
+        )
+
+        return result
+
+    def _inject_skill_messages(
+        self,
+        messages_data: List[Dict[str, Any]],
+        conversation_id: str,
+        config: RunnableConfig
+    ) -> None:
+        """
+        Inject skill messages into the conversation.
+
+        Args:
+            messages_data: List of message dicts from skill activation
+            conversation_id: Current conversation ID
+            config: Current runnable config
+        """
+        # Get current conversation state
+        state = self.agent.get_state(config)
+        current_messages = list(state.messages.get("messages", []))
+
+        # Convert and add each message
+        for msg_data in messages_data:
+            # Determine message type based on content
+            if msg_data.get("isMeta") is True:
+                # Hidden instruction message - create as AIMessage with metadata
+                msg = AIMessage(
+                    content=msg_data["content"],
+                    additional_kwargs={"isMeta": True}
+                )
+            else:
+                # Visible message - create as HumanMessage
+                msg = HumanMessage(content=msg_data["content"])
+
+            current_messages.append(msg)
+
+        # Update state with new messages
+        self.agent.update_state(config, {"messages": current_messages})
+
+        logger.debug(f"Injected {len(messages_data)} messages into conversation {conversation_id}")
+
+    def _apply_context_modifier(
+        self,
+        context_modifier: ContextModifier,
+        skill_name: str
+    ) -> None:
+        """
+        Apply context modifier from skill activation.
+
+        This modifies the agent's execution context based on skill requirements:
+        - allowed_tools: Pre-approve specific tools for this skill
+        - model: Switch to a different model (if supported)
+        - disable_model_invocation: Prevent skill from calling LLM
+
+        Args:
+            context_modifier: The context modifier to apply
+            skill_name: Name of the skill being activated
+        """
+        # Apply tool permissions
+        if context_modifier.allowed_tools is not None:
+            logger.info(
+                f"Skill '{skill_name}' granted access to: "
+                f"{context_modifier.allowed_tools}"
+            )
+            # Store in active context for tool permission checks
+            # (Actual enforcement happens at tool invocation time)
+            self._active_skill_context[f"{skill_name}_allowed_tools"] = context_modifier.allowed_tools
+
+        # Apply model override
+        if context_modifier.model is not None:
+            logger.info(f"Skill '{skill_name}' requesting model: {context_modifier.model}")
+            # Note: Model switching would require recreating the agent
+            # For now, just store the preference
+            self._active_skill_context[f"{skill_name}_model"] = context_modifier.model
+
+        # Apply model invocation disable
+        if context_modifier.disable_model_invocation:
+            logger.info(f"Skill '{skill_name}' has model invocation disabled")
+            self._active_skill_context[f"{skill_name}_disable_model"] = True
+
     def _get_total_tokens(self, result: Dict[str, Any]) -> int:
         """
         从 Agent 结果中提取总 token 数
@@ -665,6 +803,20 @@ class BAAgent:
                 config,
             )
 
+            # 检查是否有 skill 激活结果
+            skill_result = self._extract_skill_activation_result(result)
+            if skill_result:
+                # 处理 skill 激活
+                self._handle_skill_activation_result(
+                    skill_result, conversation_id, config
+                )
+
+                # 继续对话（skill 指令已注入）
+                result = self.agent.invoke(
+                    {"messages": []},  # 不添加新消息，继续现有对话
+                    config,
+                )
+
             # 提取 token 使用
             tokens_used = self._get_total_tokens(result)
             self.session_tokens += tokens_used
@@ -702,6 +854,48 @@ class BAAgent:
                 "error": str(e),
                 "timestamp": datetime.now().isoformat(),
             }
+
+    def _extract_skill_activation_result(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Extract skill activation result from agent response.
+
+        Check if the agent called the activate_skill tool and extract the result.
+
+        Args:
+            result: Agent invoke result
+
+        Returns:
+            Skill activation result dict, or None if no skill was activated
+        """
+        messages = result.get("messages", [])
+
+        for msg in reversed(messages):  # Check from most recent
+            if isinstance(msg, AIMessage):
+                # Check tool calls in the message
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    for tool_call in msg.tool_calls:
+                        if tool_call.get("name") == "activate_skill":
+                            # Extract result from tool output
+                            if hasattr(msg, 'additional_kwargs'):
+                                additional = msg.additional_kwargs or {}
+                                if "tool_output" in additional:
+                                    import json
+                                    try:
+                                        return json.loads(additional["tool_output"])
+                                    except json.JSONDecodeError:
+                                        pass
+
+                # Also check content for skill activation result
+                if isinstance(msg.content, str):
+                    import json
+                    try:
+                        content = json.loads(msg.content)
+                        if isinstance(content, dict) and "skill_name" in content:
+                            return content
+                    except json.JSONDecodeError:
+                        pass
+
+        return None
 
     def _extract_response(self, result: Dict[str, Any]) -> str:
         """

@@ -110,7 +110,12 @@ class TestSkillToolInvocation:
         assert tool is not None
         result = tool.invoke({"skill_name": "test_skill"})
 
-        assert "Activated skill: test_skill" in result
+        # Result is now a dict with SkillActivationResult structure
+        assert isinstance(result, dict)
+        assert result["success"] is True
+        assert result["skill_name"] == "test_skill"
+        assert len(result["messages"]) >= 2  # metadata + instruction
+        assert result["messages"][0]["role"] == "user"
 
     def test_invoke_nonexistent_skill(self, skills_base_dir, sample_skill):
         """Test invoking tool with non-existent skill name"""
@@ -123,8 +128,11 @@ class TestSkillToolInvocation:
         assert tool is not None
         result = tool.invoke({"skill_name": "nonexistent_skill"})
 
-        assert "Failed to activate skill" in result
-        assert "nonexistent_skill" in result
+        # Result is a dict with failure info
+        assert isinstance(result, dict)
+        assert result["success"] is False
+        assert "error" in result
+        assert "nonexistent_skill" in result["error"]
 
     def test_invoke_with_empty_skill_name(self, skills_base_dir, sample_skill):
         """Test invoking tool with empty skill name"""
@@ -137,8 +145,31 @@ class TestSkillToolInvocation:
         assert tool is not None
         result = tool.invoke({"skill_name": ""})
 
-        # Should handle gracefully - either activation fails or returns error
-        assert "Failed" in result or "Error" in result
+        # Should handle gracefully - failure result
+        assert isinstance(result, dict)
+        assert result["success"] is False
+        assert "error" in result
+
+    def test_invoke_returns_message_with_isMeta(self, skills_base_dir, sample_skill):
+        """Test that returned messages have isMeta field correctly set"""
+        loader = SkillLoader(skills_dirs=[skills_base_dir])
+        registry = SkillRegistry(loader)
+        activator = SkillActivator(loader, registry)
+
+        tool = create_skill_tool(registry, activator)
+
+        assert tool is not None
+        result = tool.invoke({"skill_name": "test_skill"})
+
+        # Check message structure
+        messages = result["messages"]
+        assert len(messages) >= 2
+
+        # First message should be visible (no isMeta or isMeta=False)
+        assert "isMeta" not in messages[0] or messages[0].get("isMeta") is False
+
+        # Second message should be hidden (isMeta=True)
+        assert messages[1].get("isMeta") is True
 
 
 class TestSkillActivationInput:
@@ -175,8 +206,8 @@ class TestSkillToolIntegration:
         assert hasattr(tool, "_run")
         assert hasattr(tool, "args_schema")
 
-    def test_tool_returns_string_result(self, skills_base_dir, sample_skill):
-        """Test that tool returns string result"""
+    def test_tool_returns_structured_result(self, skills_base_dir, sample_skill):
+        """Test that tool returns structured SkillActivationResult"""
         loader = SkillLoader(skills_dirs=[skills_base_dir])
         registry = SkillRegistry(loader)
         activator = SkillActivator(loader, registry)
@@ -186,5 +217,13 @@ class TestSkillToolIntegration:
         assert tool is not None
         result = tool.invoke({"skill_name": "test_skill"})
 
-        assert isinstance(result, str)
-        assert len(result) > 0
+        # Result should be a dict with SkillActivationResult structure
+        assert isinstance(result, dict)
+        assert "skill_name" in result
+        assert "messages" in result
+        assert "context_modifier" in result
+        assert "success" in result
+
+        # Messages should be a list
+        assert isinstance(result["messages"], list)
+        assert len(result["messages"]) > 0

@@ -71,6 +71,10 @@ skills/installed_skill*/
 skills/extracted_skill
 skills/existing_skill
 
+# Test-installed skills in subdirectories
+skills/skills/test_install_skill*/
+skills/skills/test_*/
+
 # Development Memory (personal use, not in Git)
 # 开发记忆存储在 ~/.ba-agent-dev/，不进项目仓库
 # 包含：PROGRESS.md, TASKS.md, MEMORY.md, daily-notes/
