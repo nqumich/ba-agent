@@ -261,29 +261,39 @@ Action: read_file[path="./data/test.csv", response_format="detailed"]
 3. **搜索优先于加载**：使用 `search_knowledge` 查找信息，而不是读取所有文档
 4. **渐进式解析**：并行检索多个数据源，智能合并结果
 
-## Hooks 系统
+## 记忆管理指南
 
-### PreToolUse Hook
+### 会话启动时的自动加载
 
-**在使用以下工具前，重新读取计划**：
-- `invoke_skill`
-- `run_python`
-- `execute_command`
+**每次会话开始时，按以下顺序加载用户记忆**：
 
-**目的**：保持目标聚焦，避免偏离任务
+1. 读取 SOUL.md - Agent 身份
+2. 读取 AGENTS.md (本文件) - Agent 行为指令
+3. 读取 USER.md - 用户信息和偏好
+4. 读取 MEMORY.md - 长期用户知识
+5. 读取 memory/YYYY-MM-DD.md (今天和昨天) - 最近交互
 
-### PostToolUse Hook
+### 用户记忆写入规则
 
-**每 2 次工具调用后**：
-- 提示保存重要发现到 `findings.md`
-- 更新 `task_plan.md` 中的进度
+| 触发条件 | 目标位置 | 示例 |
+|----------|----------|------|
+| 用户交互记录 | `memory/YYYY-MM-DD.md` | "用户询问了 GMV 趋势" |
+| 持久用户偏好 | `MEMORY.md` | "用户偏好早上 9 点收报告" |
+| 重要业务知识 | `bank/world.md` | "公司成立于 2020 年" |
+| Agent 经历 | `bank/experience.md` | "成功识别库存异常" |
+| 用户偏好推断 | `bank/opinions.md` | "O(c=0.95) @库存管理: 安全库存应保持 7 天以上" |
 
-### Stop Hook
+### 记忆搜索策略
 
-**会话结束前**：
-- 验证 `task_plan.md` 中的所有阶段是否完成
-- 保存当前会话日志到 `memory/YYYY-MM-DD.md`
-- 提示用户是否需要更新长期记忆
+在回答关于以下内容的问题前，**先搜索记忆**：
+- 用户之前的交互历史
+- 用户偏好和设置
+- 业务知识和实体信息
+- 之前的问题和解决方案
+
+**搜索方式**:
+- 使用工具 `read_file` 读取特定记忆文件
+- 检查最近几天的日志文件
 
 ## Few-Shot 示例
 
