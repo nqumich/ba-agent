@@ -104,6 +104,7 @@ memory:
     max_memory_age_hours: 24.0      # 记忆最大年龄（小时）
     llm_model: "glm-4.7-flash"      # 提取模型
     llm_timeout: 30                 # LLM 超时（秒）
+    compaction_keep_recent: 10      # 压缩对话时保留最近的消息数量
 
   # Memory Search 配置
   search:

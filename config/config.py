@@ -112,6 +112,7 @@ class MemoryFlushConfig(BaseModel):
     max_memory_age_hours: float = Field(default=24.0, description="记忆最大年龄（小时）")
     llm_model: str = Field(default="glm-4.7-flash", description="LLM 提取模型")
     llm_timeout: int = Field(default=30, description="LLM 超时（秒）")
+    compaction_keep_recent: int = Field(default=10, description="压缩对话时保留最近的消息数量")
 
 
 class MemorySearchChunkingConfig(BaseModel):

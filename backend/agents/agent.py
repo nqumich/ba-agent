@@ -427,10 +427,61 @@ class BAAgent:
                 f"{result['memories_extracted']} memories extracted, "
                 f"{result['memories_written']} memories written"
             )
+
+            # 执行对话压缩 - 清理旧消息，释放上下文空间
+            keep_recent = self.app_config.memory.flush.compaction_keep_recent if self.app_config.memory.flush.compaction_keep_recent else 10
+            self._compact_conversation(conversation_id, keep_recent)
+
             # 重置 token 计数
             self.session_tokens = 0
 
         return result if result["flushed"] else None
+
+    def _compact_conversation(
+        self,
+        conversation_id: str,
+        keep_recent: int = 10
+    ) -> bool:
+        """
+        压缩对话历史 - 清理旧消息，只保留最近的消息
+
+        Args:
+            conversation_id: 对话 ID
+            keep_recent: 保留最近的消息数量（默认 10 条）
+
+        Returns:
+            是否成功压缩
+        """
+        try:
+            config = {"configurable": {"thread_id": conversation_id}}
+            state = self.agent.get_state(config)
+
+            if not state or not state.messages:
+                return False
+
+            # 获取当前所有消息
+            all_messages = state.messages.get("messages", [])
+
+            if len(all_messages) <= keep_recent:
+                # 消息数量不足，无需压缩
+                return False
+
+            # 只保留最近的消息
+            recent_messages = all_messages[-keep_recent:]
+
+            # 更新状态（清空旧消息，只保留最近的）
+            self.agent.update_state(config, {"messages": recent_messages})
+
+            logger.info(
+                f"Conversation compacted: {len(all_messages)} -> {len(recent_messages)} "
+                f"messages (kept recent {keep_recent})"
+            )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Conversation compaction failed: {e}")
+            return False
 
     def _create_agent(self):
         """
