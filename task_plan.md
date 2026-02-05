@@ -308,6 +308,56 @@
 
 **测试覆盖**: 137 个 Skills 相关测试全部通过
 
+### 信息管道设计 v1.4 (US-INFRA-02, 2026-02-05) - 概念修正
+
+基于 Claude Code 和 Manus AI 的实际实现，修正了之前设计中三个概念混淆的问题：
+
+**核心概念修正**:
+
+1. **ReAct Pattern** - Agent 执行循环，不是工具输出格式
+   ```
+   Thought: 我需要搜索天气信息
+   Action: call web_search("扬州天气")
+   Observation: [工具执行结果 - 纯字符串]
+   ```
+   - 这是控制流程模式，不是数据格式
+   - Agent 通过此模式进行推理
+
+2. **Tool Output Format** - 简单的 observation 字符串
+   ```json
+   {
+     "role": "user",
+     "content": [{
+       "type": "tool_result",
+       "tool_use_id": "call_xxx",
+       "content": "扬州今天晴天，25°C"
+     }]
+   }
+   ```
+   - 移除了错误的 summary/observation/result 三层结构
+   - 匹配 Claude Code 的直接、简单方法
+   - 工具结果作为 `role: "user"` 消息发送
+
+3. **Progressive Disclosure** - 仅用于 Skills 系统
+   - Level 1: Frontmatter (~100 tokens) - 启动时加载所有技能元数据
+   - Level 2: Full SKILL.md (~5000 tokens) - 激活时加载完整指令
+   - Level 3: 资源文件 - 按需加载 scripts/references/assets
+
+**设计文件**: `docs/information-pipeline-design.md` v1.4
+
+**关键变更**:
+- 添加了 "Core Concepts Clarification" 章节
+- 简化了 `ToolExecutionResult` 为单个 `observation` 字段
+- 移除了错误的三层结构引用
+- 更新了所有序列图和代码示例
+- 添加了详细的 ReAct 附录说明
+
+**学习要点**:
+- ReAct = 控制流程 (Agent 如何推理)
+- Tool Output = 数据格式 (工具如何返回数据)
+- Progressive Disclosure = 信息呈现策略 (Skills 如何加载)
+- 这三个是独立概念，不应混淆
+
 ---
 
-**最后更新**: 2026-02-05 信息管道设计完成
+**最后更新**: 2026-02-05 信息管道设计 v1.4 (概念修正)

@@ -1,16 +1,16 @@
 # BA-Agent Information Pipeline Design Document
 
-> **日期**: 2026-02-05
-> **版本**: v1.3
-> **作者**: BA-Agent Development Team
-> **状态**: Design Phase
+> **Date**: 2026-02-05
+> **Version**: v1.4 (Conceptual Correction)
+> **Author**: BA-Agent Development Team
+> **Status**: Design Phase
 
 ---
 
 ## Table of Contents
 
 1. [Executive Summary](#executive-summary)
-2. [Current State Analysis](#current-state-analysis)
+2. [Core Concepts Clarification](#core-concepts-clarification)
 3. [Claude Code Research Findings](#claude-code-research-findings)
 4. [Proposed Information Pipeline Architecture](#proposed-information-pipeline-architecture)
 5. [Message Format Specifications](#message-format-specifications)
@@ -24,106 +24,102 @@
 
 ## Executive Summary
 
-This document defines the comprehensive information pipeline architecture for BA-Agent, a business analysis AI agent system. The design is based on research into Claude Code's architecture and best practices from other agentic systems like Manus AI and OpenClaw.
+This document defines the comprehensive information pipeline architecture for BA-Agent, based on research into Claude Code, Manus AI, and OpenManus implementations.
 
 ### Key Design Principles
 
-1. **Standardized Message Format**: All components use a consistent message format
-2. **Three-Layer Context**: Summary → Observation → Result (progressive disclosure)
-3. **ReAct Compatible**: Observation format follows standard ReAct patterns
-4. **Tool Telemetry**: Built-in observability for all tool executions
+1. **Simple Message Format**: Follow Claude Code's straightforward message structure
+2. **ReAct Execution Loop**: Agent uses Thought→Action→Observation pattern for reasoning
+3. **Simple Tool Output**: Tools return plain observation strings, not complex multi-layer formats
+4. **Progressive Disclosure**: Applied to Skills system (metadata → full instruction → resources)
 5. **Context Modifiers**: Skills can modify agent execution context
-6. **Memory Management**: Efficient context window usage through compression
+6. **Efficient Memory Management**: Context compression and token optimization
 
 ---
 
-## Current State Analysis
+## Core Concepts Clarification
 
-### Existing BA-Agent Components
+> **CRITICAL**: This section clarifies three concepts that were previously conflated.
 
-#### 1. Tool Output Format (`backend/models/tool_output.py`)
+### Concept 1: ReAct Pattern (Agent Execution Loop)
 
-```python
-class ToolOutput(BaseModel):
-    # Model context (passed to next round)
-    result: Optional[Any] = None
-    summary: str = ""
-    observation: str = ""
+**ReAct** (Reasoning + Acting) is the **agent's execution pattern**, NOT a tool output format.
 
-    # Token efficiency
-    response_format: ResponseFormat = ResponseFormat.STANDARD
-
-    # Engineering telemetry (not passed to model)
-    telemetry: ToolTelemetry = Field(default_factory=ToolTelemetry)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-    # State management
-    state_update: Optional[Dict[str, Any]] = None
-    checkpoint: Optional[str] = None
+```
+Thought: I need to search for weather information in Yangzhou
+Action: call web_search("扬州天气")
+Observation: [tool execution result - plain string]
+Thought: Based on the weather data, I should also check tomorrow's forecast
+Action: call web_search("扬州明天天气")
+Observation: [tool execution result - plain string]
+Thought: I now have all the information to answer the user
+Final Answer: The weather in Yangzhou today is...
 ```
 
-**Strengths**:
-- Well-structured three-layer context (summary/observation/result)
-- Built-in telemetry for observability
-- Response format levels for token efficiency
-- ReAct-compatible observation format
+**Key Points**:
+- **Thought**: Agent's internal reasoning (visible in extended thinking mode)
+- **Action**: Tool invocation (tool_use content block)
+- **Observation**: The tool's execution result (tool_result content block)
+- This is a **control flow pattern**, not a data format
 
-**Gaps**:
-- Not consistently used across all tools
-- No standard tool call format definition
-- Missing error handling specification
+### Concept 2: Tool Output Format
 
-#### 2. Skill Message Protocol (`backend/skills/message_protocol.py`)
+**Tool Output** is how tools return data to the agent. In Claude Code, this is **simple and straightforward**.
 
-```python
-@dataclass
-class SkillMessage:
-    type: MessageType  # METADATA/INSTRUCTION/PERMISSIONS
-    content: Any
-    visibility: MessageVisibility  # VISIBLE/HIDDEN
-    role: str = "user"
-
-@dataclass
-class ContextModifier:
-    allowed_tools: Optional[List[str]] = None
-    model: Optional[str] = None
-    disable_model_invocation: bool = False
-
-@dataclass
-class SkillActivationResult:
-    skill_name: str
-    messages: List[SkillMessage]
-    context_modifier: ContextModifier
-    success: bool = True
-    error: Optional[str] = None
+```json
+{
+  "role": "user",
+  "content": [
+    {
+      "type": "tool_result",
+      "tool_use_id": "call_abc123",
+      "content": "File found: /path/to/file.py\nAnother file: /path/to/another.py",
+      "is_error": false
+    }
+  ]
+}
 ```
 
-**Strengths**:
-- Clear separation of message types
-- Context modifier well-defined
-- Good visibility control
+**Key Points**:
+- Tool results are sent as `role: "user"` messages
+- The `content` field contains the plain observation string
+- **No** summary/observation/result three-layer structure
+- **No** complex nested formats
+- The agent sees the tool result as a simple text observation
 
-**Gaps**:
-- No standard error response format
-- Missing message flow documentation
+### Concept 3: Progressive Disclosure
 
-#### 3. Agent Implementation (`backend/agents/agent.py`)
+**Progressive Disclosure** is an **information presentation strategy** for the Skills system.
 
-**Current Flow**:
 ```
-User Request → BAAgent.invoke() → LangGraph Agent
-                ↓
-        Tool Call → Tool Execution → ToolResult
-                ↓
-        Skill Activation → Message Injection → Context Modifier Application
-                ↓
-        Response → User
+Level 1: Frontmatter (~100 tokens/skill)
+  ├── skill name, description, capabilities
+  └── Loaded at startup for all skills
+
+Level 2: Full SKILL.md (~5000 tokens/skill)
+  ├── Complete instructions
+  └── Loaded when skill is activated
+
+Level 3: Resource files
+  ├── scripts/, references/, assets/
+  └── Loaded on-demand as needed
 ```
 
-**Gaps**:
-- No standardized message format for LangGraph messages
-- Tool result extraction logic is brittle
-- Message injection timing not well-defined
+**Key Points**:
+- Applied to **Skills system** only
+- Optimizes token usage by loading info progressively
+- Not related to tool output format
+- Not related to ReAct execution loop
+
+### Summary of Separation
+
+| Concept | Purpose | Scope |
+|---------|---------|-------|
+| **ReAct** | Agent reasoning pattern | Control flow |
+| **Tool Output** | Data return format | Tool results |
+| **Progressive Disclosure** | Information loading strategy | Skills system |
+
+These are **three separate, independent concepts** that should not be conflated.
 
 ---
 
@@ -131,7 +127,7 @@ User Request → BAAgent.invoke() → LangGraph Agent
 
 ### 1. Message Format Structure
 
-Based on tracing Claude Code's LLM traffic, the message format follows this structure:
+Based on tracing Claude Code's LLM traffic:
 
 ```json
 {
@@ -141,7 +137,7 @@ Based on tracing Claude Code's LLM traffic, the message format follows this stru
       "content": [
         {
           "type": "text",
-          "text": "...",
+          "text": "Find all Python files in the project",
           "cache_control": {"type": "ephemeral"}
         }
       ]
@@ -151,7 +147,7 @@ Based on tracing Claude Code's LLM traffic, the message format follows this stru
       "content": [
         {
           "type": "thinking",
-          "thinking": "..."
+          "thinking": "I need to search for Python files using the Glob tool..."
         },
         {
           "type": "tool_use",
@@ -167,7 +163,7 @@ Based on tracing Claude Code's LLM traffic, the message format follows this stru
         {
           "type": "tool_result",
           "tool_use_id": "call_xxx",
-          "content": "file1.py\nfile2.py...",
+          "content": "src/main.py\nutils/helpers.py\ntests/test_main.py",
           "is_error": false
         }
       ]
@@ -176,39 +172,14 @@ Based on tracing Claude Code's LLM traffic, the message format follows this stru
 }
 ```
 
-### 2. Tool Result Format
+### 2. Critical Insights
 
-**Critical Insight**: Tool results are sent as `role: "user"` messages!
+1. **Tool results are user messages**: The agent receives tool results as `role: "user"` messages
+2. **Simple observation format**: Tool results are plain text strings, not complex nested structures
+3. **ReAct is execution flow**: The Thought→Action→Observation pattern is how the agent reasons, not a data format
+4. **Minimal wrapping**: No unnecessary layers between tool execution and agent observation
 
-```json
-{
-  "role": "user",
-  "content": [
-    {
-      "type": "tool_result",
-      "tool_use_id": "call_3cs6eu75",
-      "content": "/path/to/file1.py\n/path/to/file2.py",
-      "is_error": false
-    }
-  ]
-}
-```
-
-### 3. Agentic Loop Pattern
-
-```
-User Request
-    ↓
-LLM generates tool_use
-    ↓
-Tool executes
-    ↓
-Result returned as tool_result (user message)
-    ↓
-LLM processes result → Next action or Final Answer
-```
-
-### 4. Sub-Agent Communication
+### 3. Sub-Agent Communication
 
 **Parent → Sub-Agent**:
 ```json
@@ -232,25 +203,19 @@ LLM processes result → Next action or Final Answer
   "content": [
     {
       "type": "text",
-      "text": "## Comprehensive Report\n..."
-    },
-    {
-      "type": "text",
-      "text": "agentId: a09479d (for resuming)"
+      "text": "## Exploration Report\n\nFound 15 Python files..."
     }
   ]
 }
 ```
 
-### 5. System Reminders
+### 4. Progressive Disclosure in Practice
 
-System messages injected with metadata:
-```json
-{
-  "role": "user",
-  "content": "<system-reminder>CRITICAL: This is a READ-ONLY task...</system-reminder>"
-}
-```
+Claude Code uses progressive disclosure for **skills/plugins**, not for tool outputs:
+
+- **Discovery Phase**: Plugin metadata only (~100 tokens)
+- **Activation Phase**: Full plugin instructions loaded
+- **Execution Phase**: Resource files loaded as needed
 
 ---
 
@@ -272,7 +237,11 @@ System messages injected with metadata:
 │                         ┌──────────────┐                         │
 │                         │  Skill       │                         │
 │                         │  System      │                         │
-│                         │  (Meta-Tool) │                         │
+│                         │ (Meta-Tool)  │                         │
+│                         │              │                         │
+│                         │ Progressive  │                         │
+│                         │ Disclosure:   │                         │
+│                         │ L1→L2→L3     │                         │
 │                         └──────────────┘                         │
 │                                                                   │
 └─────────────────────────────────────────────────────────────────┘
@@ -284,38 +253,32 @@ System messages injected with metadata:
 User Request
     ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 1: Standardized Request Format                        │
-│  - User message with context                                   │
-│  - System prompt with tool descriptions                        │
-│  - Active skill context                                        │
+│  Layer 1: Request Processing                                 │
+│  - Parse user message                                        │
+│  - Load system prompt                                        │
+│  - Check active skill context                                │
 └─────────────────────────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 2: Agent Processing (LangGraph)                        │
-│  - LLM reasoning                                               │
-│  - Tool selection                                              │
-│  - Parameter construction                                      │
+│  Layer 2: Agent Reasoning (ReAct Loop)                       │
+│  - Thought: What do I need to do?                            │
+│  - Action: Which tool should I call?                         │
+│  - Observation: What did the tool return?                    │
+│  - Repeat until task complete                                │
 └─────────────────────────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 3: Tool Execution                                      │
-│  - Permission check (Context Modifier)                        │
-│  - Tool invocation                                             │
-│  - Result capture                                              │
+│  Layer 3: Tool Execution                                     │
+│  - Permission check (Context Modifier)                       │
+│  - Tool invocation                                           │
+│  - Return simple observation string                          │
 └─────────────────────────────────────────────────────────────┘
     ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Layer 4: Response Format Selection                           │
-│  - CONCISE: summary only                                       │
-│  - STANDARD: summary + observation                             │
-│  - DETAILED: full result + telemetry                           │
-└─────────────────────────────────────────────────────────────┘
-    ↓
-┌─────────────────────────────────────────────────────────────┐
-│  Layer 5: Message Injection (if skill)                        │
-│  - Skill activation result                                    │
-│  - Context modifier application                               │
-│  - Message list injection                                     │
+│  Layer 4: Skill Activation (if needed)                       │
+│  - Progressive Disclosure: Level 1 → Level 2 → Level 3      │
+│  - Inject messages into conversation                         │
+│  - Apply Context Modifier                                    │
 └─────────────────────────────────────────────────────────────┘
     ↓
 Final Response
@@ -323,36 +286,45 @@ Final Response
 
 ### Sequence Diagrams
 
-#### 1. Standard Tool Execution Flow
+#### 1. Standard ReAct Execution Flow
 
 ```
 User          BAAgent         Tool          LangGraph
   │              │              │               │
   │──Request────>│              │               │
   │              │              │               │
-  │              │──GetState──────────────────>│
-  │              │<─Messages──────────────────│
+  │              │<─Messages───────────────────│
   │              │              │               │
-  │              │──ToolCall────>│               │
+  │              │──Thought────────────────────>│
+  │              │<─What to do next────────────│
+  │              │              │               │
+  │              │──Action──────>│               │
   │              │<─Result──────│               │
   │              │              │               │
-  │              │─ResultAsUserMsg────────────>│
+  │              │─Observation─────────────────>│
   │              │              │               │
-  │              │<─NextAction────────────────│
+  │              │<─Next Thought───────────────│
+  │              │              │               │
+  │ [Loop continues until task complete]
   │              │              │               │
   │<─Response────│              │               │
 ```
 
-#### 2. Skill Activation Flow
+#### 2. Skill Activation with Progressive Disclosure
 
 ```
 User          BAAgent      SkillSystem      LangGraph
   │              │              │                │
   │──Request────>│              │                │
   │              │              │                │
+  │              │──Get Metadata───────────────>│
+  │              │<─Level 1 (~100 tokens)──────│
+  │              │              │                │
+  │              │──Select Skill────────────────│
+  │              │              │                │
   │              │──Activate────────────────────>│
   │              │              │                │
-  │              │<─SkillMessages───────────────│
+  │              │<─Level 2 (~5000 tokens)──────│
   │              │              │                │
   │              │──Inject─────────────────────>│
   │              │              │                │
@@ -363,101 +335,13 @@ User          BAAgent      SkillSystem      LangGraph
   │<─Response────│              │                │
 ```
 
-#### 3. Multi-Round Conversation Flow
-
-```
-User          BAAgent         Tool        Skill
-  │              │              │           │
-  │──Round1─────>│              │           │
-  │              │              │           │
-  │              │──Tool1──────>│           │
-  │              │<─Result1─────│           │
-  │              │              │           │
-  │              │──Activate───────────────>│
-  │              │<─Messages────────────────│
-  │<─Answer1─────│              │           │
-  │              │              │           │
-  │──Round2─────>│              │           │
-  │              │              │           │
-  │              │──Tool2──────>│           │
-  │              │<─Result2─────│           │
-  │              │              │           │
-  │<─Answer2─────│              │           │
-  │              │              │           │
-  │ [Context compression if needed]
-  │              │              │           │
-  │──Round3─────>│              │           │
-  │              │              │           │
-  │<─Answer3─────│              │           │
-```
-
-#### 4. Error Handling with Retry Flow
-
-```
-User          BAAgent         Tool        RetryPolicy
-  │              │              │              │
-  │──Request────>│              │              │
-  │              │              │              │
-  │              │──ToolCall────>│              │
-  │              │<─Timeout─────│              │
-  │              │              │              │
-  │              │──ShouldRetry──────────────>│
-  │              │<─Yes────────────────────────│
-  │              │              │              │
-  │              │──Wait───────>(delay)        │
-  │              │              │              │
-  │              │──ToolCall────>│              │
-  │              │<─Success─────│              │
-  │              │              │              │
-  │<─Response────│              │              │
-```
-
 ---
 
 ## Message Format Specifications
 
-### Message Validation Layer
-
-```python
-from functools import wraps
-
-def validate_message(msg_type: Type[BaseModel]):
-    """
-    Decorator to validate message format at layer boundaries.
-
-    Ensures message integrity across component boundaries.
-    """
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Extract message from args (first arg usually self, second is message)
-            if len(args) > 1:
-                msg = args[1]
-                try:
-                    # Validate and parse message
-                    if isinstance(msg, dict):
-                        validated = msg_type(**msg)
-                        # Replace with validated instance
-                        args = list(args)
-                        args[1] = validated
-                        args = tuple(args)
-                except Exception as e:
-                    raise ValueError(f"Message validation failed: {e}")
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
-
-# Example usage:
-# @validate_message(ToolExecutionResult)
-# def process_tool_result(self, result: ToolExecutionResult):
-#     ...
-```
-
 ### 1. Standard Message Format
 
-### 1. Standard Message Format
-
-All messages in BA-Agent follow this base structure:
+All messages in BA-Agent follow Claude Code's structure:
 
 ```python
 from typing import Any, Dict, List, Optional, Literal
@@ -469,22 +353,23 @@ class MessageType(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
-    TOOL_RESULT = "tool_result"
-    TOOL_USE = "tool_use"
-    SKILL_ACTIVATION = "skill_activation"
 
 class ContentBlockType(str, Enum):
-    """Content block types"""
+    """Content block types (Claude Code format)"""
     TEXT = "text"
     THINKING = "thinking"
     TOOL_USE = "tool_use"
     TOOL_RESULT = "tool_result"
-    SYSTEM_REMINDER = "system_reminder"
 
 class ContentBlock(BaseModel):
     """Standardized content block"""
     type: ContentBlockType
-    content: Any
+
+    # Text content
+    text: Optional[str] = None
+
+    # Thinking content
+    thinking: Optional[str] = None
 
     # Tool use specific
     id: Optional[str] = None
@@ -503,128 +388,79 @@ class StandardMessage(BaseModel):
     role: MessageType
     content: List[ContentBlock]
 
-    # Schema version for compatibility
-    schema_version: str = "1.2"
-
     # Metadata
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
     # Context
-    conversation_id: str
-    user_id: str
+    conversation_id: str = ""
+    user_id: str = ""
 
     def to_langchain_format(self) -> Dict[str, Any]:
-        """
-        Convert to LangChain message format.
-
-        Includes all necessary fields for LangGraph compatibility.
-        """
-        # CRITICAL: Use .value for consistent serialization
+        """Convert to LangChain message format"""
         return {
-            "role": self.role.value,  # Always use enum value
+            "role": self.role.value,
             "content": [block.model_dump(exclude_none=True) for block in self.content],
-            "schema_version": self.schema_version,
             "timestamp": self.timestamp,
             "message_id": self.message_id,
-            # Include context identifiers for LangGraph state management
-            "conversation_id": self.conversation_id,
-            "user_id": self.user_id
         }
 ```
 
-### 2. Tool Call Message Format
+### 2. Tool Call Format
 
 ```python
 class ToolCallMessage(BaseModel):
-    """Format for tool invocation requests"""
-    message_id: str
+    """Format for tool invocation (from Agent)"""
+    tool_call_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     tool_name: str
     parameters: Dict[str, Any]
-    response_format: ResponseFormat = ResponseFormat.STANDARD
-
-    # Context
-    conversation_id: str
-    user_id: str
-    timestamp: str
 
     def to_content_block(self) -> ContentBlock:
         """Convert to ContentBlock for LLM"""
         return ContentBlock(
             type=ContentBlockType.TOOL_USE,
-            id=self.message_id,
+            id=self.tool_call_id,
             name=self.tool_name,
             input=self.parameters
         )
 ```
 
-### 3. Tool Result Message Format
+### 3. Tool Result Format (SIMPLE)
 
 ```python
 class ToolResultMessage(BaseModel):
-    """Format for tool execution results"""
-    tool_call_id: str  # References ToolCallMessage.message_id
+    """Format for tool execution results - SIMPLE format like Claude Code"""
+    tool_call_id: str  # References ToolCallMessage.tool_call_id
 
-    # Result data (three layers)
-    summary: str                    # Human-readable summary
-    observation: str                # ReAct-compatible observation
-    result: Optional[Any] = None    # Full result data
-
-    # Telemetry
-    telemetry: ToolTelemetry
-    response_format: ResponseFormat
+    # Simple observation string (NOT multi-layer)
+    observation: str
 
     # Status
     success: bool = True
-    error_code: Optional[str] = None
     error_message: Optional[str] = None
 
     def to_content_block(self) -> ContentBlock:
         """Convert to ContentBlock for LLM"""
+        content = self.observation if self.success else f"Error: {self.error_message}"
         return ContentBlock(
             type=ContentBlockType.TOOL_RESULT,
             tool_use_id=self.tool_call_id,
-            content=self.observation if self.success else f"Error: {self.error_message}",
+            content=content,
             is_error=not self.success
         )
 
     def to_user_message(self) -> StandardMessage:
         """
         Convert to user message for LLM.
-        KEY INSIGHT from Claude Code: Tool results are sent as user messages!
+        KEY: Tool results are sent as user messages in Claude Code!
         """
         return StandardMessage(
             role=MessageType.USER,
-            content=[self.to_content_block()],
-            conversation_id="",
-            user_id=""
+            content=[self.to_content_block()]
         )
 ```
 
-### 4. Skill Activation Message Format
-
-```python
-class SkillActivationMessage(BaseModel):
-    """Format for skill activation requests"""
-    skill_name: str
-    activation_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-
-    # Context for skill
-    conversation_context: List[Dict[str, Any]]
-    user_request: str
-
-    def to_tool_call(self) -> ToolCallMessage:
-        """Convert to tool call format"""
-        return ToolCallMessage(
-            message_id=self.activation_id,
-            tool_name="activate_skill",
-            parameters={"skill_name": self.skill_name},
-            response_format=ResponseFormat.STANDARD,
-            conversation_id="",
-            user_id="",
-            timestamp=datetime.now().isoformat()
-        )
-```
+**Design Decision**: Removed the `summary` and `result` fields. Tools now return a simple `observation` string, matching Claude Code's approach.
 
 ---
 
@@ -649,67 +485,45 @@ class ToolInvocationRequest(BaseModel):
     parameters: Dict[str, Any]
 
     # Execution context
-    response_format: ResponseFormat = ResponseFormat.STANDARD
     timeout_ms: int = 120000
 
     # Security
     caller_id: str  # Agent or skill ID
-    permission_level: str = "default"  # default/restricted/admin
+    permission_level: str = "default"
 ```
 
-#### Phase 2: Tool Execution Result
+#### Phase 2: Tool Execution Result (SIMPLE)
 
 **Direction**: Tool → Agent
 
 ```python
 class ToolExecutionResult(BaseModel):
-    """Standardized result format from tool execution"""
+    """Simple result format from tool execution"""
     request_id: str
 
-    # Three-layer result
-    summary: str                    # For quick LLM understanding
-    observation: str                # ReAct-compatible
-    result: Optional[Any] = None    # Full data
-
-    # Response format
-    response_format: ResponseFormat
-
-    # Telemetry
-    telemetry: ToolTelemetry
+    # Simple observation string
+    observation: str
 
     # Status
     success: bool
     error_code: Optional[str] = None
     error_message: Optional[str] = None
 
-    # State management (for tools that modify state)
-    state_update: Optional[Dict[str, Any]] = None
-    checkpoint: Optional[str] = None
-
     def to_llm_message(self) -> Dict[str, Any]:
         """
         Convert to message for LLM.
-        CRITICAL: Tool results are sent as USER messages in Claude Code's architecture
+        KEY: Simple observation string, not multi-layer format.
+        Tool results are sent as USER messages.
         """
         content = self.observation if self.success else f"Error: {self.error_message}"
 
-        if self.response_format == ResponseFormat.CONCISE:
-            # Only summary
-            final_content = self.summary
-        elif self.response_format == ResponseFormat.STANDARD:
-            # Summary + observation
-            final_content = f"{self.summary}\n\nObservation: {content}"
-        else:  # DETAILED or RAW
-            # Full result
-            final_content = f"{self.summary}\n\nObservation: {content}\n\nResult: {self.result}"
-
         return {
-            "role": "user",  # KEY: Tool results are user messages
+            "role": "user",
             "content": [
                 {
                     "type": "tool_result",
                     "tool_use_id": self.request_id,
-                    "content": final_content,
+                    "content": content,
                     "is_error": not self.success
                 }
             ]
@@ -727,26 +541,6 @@ class ToolErrorType(str, Enum):
     EXECUTION_ERROR = "execution_error"
     RESOURCE_ERROR = "resource_error"
 
-class ToolRetryPolicy(BaseModel):
-    """Retry configuration for tool execution"""
-    max_retries: int = 3
-    retry_on: List[ToolErrorType] = Field(
-        default_factory=lambda: [ToolErrorType.TIMEOUT, ToolErrorType.RESOURCE_ERROR]
-    )
-    backoff_multiplier: float = 1.5
-    initial_delay_ms: int = 1000
-    max_delay_ms: int = 10000
-
-    def should_retry(self, error_type: ToolErrorType, attempt: int) -> bool:
-        """Check if operation should be retried"""
-        return error_type in self.retry_on and attempt < self.max_retries
-
-    def get_delay(self, attempt: int) -> int:
-        """Calculate delay with exponential backoff"""
-        delay = self.initial_delay_ms * (self.backoff_multiplier ** attempt)
-        return min(int(delay), self.max_delay_ms)
-```
-
 class ToolErrorResponse(BaseModel):
     """Standardized error response"""
     request_id: str
@@ -754,23 +548,11 @@ class ToolErrorResponse(BaseModel):
     error_code: str
     error_message: str
 
-    # Debug information
-    traceback: Optional[str] = None
-    context: Dict[str, Any] = Field(default_factory=dict)
-
     def to_result(self) -> ToolExecutionResult:
         """Convert to ToolExecutionResult"""
         return ToolExecutionResult(
             request_id=self.request_id,
-            summary=f"Error: {self.error_message}",
-            observation=f"Observation: Tool Error [{self.error_code}] - {self.error_message}",
-            result=None,
-            response_format=ResponseFormat.STANDARD,
-            telemetry=ToolTelemetry(
-                success=False,
-                error_code=self.error_code,
-                error_message=self.error_message
-            ),
+            observation=f"Tool Error [{self.error_code}]: {self.error_message}",
             success=False,
             error_code=self.error_code,
             error_message=self.error_message
@@ -798,93 +580,22 @@ class SkillActivationRequest(BaseModel):
     user_request: str
     conversation_history: List[Dict[str, Any]]
 
-    # Parameters
-    parameters: Dict[str, Any] = Field(default_factory=dict)
-
-    # Execution options
-    response_format: ResponseFormat = ResponseFormat.STANDARD
+    # Progressive Disclosure Control
+    load_level: Literal[1, 2, 3] = 2
+    # Level 1: Metadata only
+    # Level 2: Full instructions (default)
+    # Level 3: Include resources
 
     # Circular dependency prevention
     activation_depth: int = 0
-    max_depth: int = Field(default=3, description="Maximum nesting depth (configurable)")
-    activation_chain: List[str] = Field(default_factory=list, description="Track activation path")
-
-    # Token budget alternative (optional)
-    token_budget: Optional[int] = Field(default=None, description="Token budget instead of depth limit")
-
-    # Per-skill configuration
-    skill_config: Dict[str, Any] = Field(default_factory=dict, description="Skill-specific overrides")
-
-    def get_max_depth_for_skill(self, skill_name: str) -> int:
-        """
-        Get maximum depth for a specific skill.
-
-        Allows different depth limits for different skill types.
-        """
-        # Check skill-specific override
-        if skill_name in self.skill_config:
-            skill_specific = self.skill_config[skill_name]
-            if "max_depth" in skill_specific:
-                return skill_specific["max_depth"]
-
-        # Default depth limits by skill category
-        complex_skills = {"data_analysis", "report_generation", "multi_chart"}
-        if skill_name in complex_skills or any(cat in skill_name for cat in complex_skills):
-            return 5  # Allow deeper nesting for complex workflows
-        elif skill_name.startswith("simple_"):
-            return 2  # Shallow nesting for simple skills
-        else:
-            return self.max_depth  # Use default
+    max_depth: int = 3
+    activation_chain: List[str] = Field(default_factory=list)
 
     def can_activate_nested(self, skill_name: str) -> bool:
-        """
-        Check if nested skill activation is allowed.
-
-        Prevents both depth overflow and circular dependencies (A→B→A).
-        Can use either depth limit or token budget.
-        """
-        # Check circular dependency first
+        """Check if nested skill activation is allowed"""
         if skill_name in self.activation_chain:
-            return False
-
-        # Use token budget if specified
-        if self.token_budget is not None:
-            return self.token_budget > 0
-
-        # Use depth limit with skill-specific maximum
-        skill_max_depth = self.get_max_depth_for_skill(skill_name)
-        return self.activation_depth < skill_max_depth
-
-    def create_nested_request(self, nested_skill: str) -> "SkillActivationRequest":
-        """Create request for nested skill activation"""
-        if not self.can_activate_nested(nested_skill):
-            if nested_skill in self.activation_chain:
-                raise ValueError(f"Circular dependency detected: {' → '.join(self.activation_chain)} → {nested_skill}")
-            elif self.token_budget is not None:
-                raise ValueError(f"Token budget exhausted: {self.token_budget} remaining")
-            else:
-                skill_max_depth = self.get_max_depth_for_skill(nested_skill)
-                raise ValueError(f"Maximum skill activation depth ({skill_max_depth}) exceeded for {nested_skill}")
-
-        # Create nested request
-        nested_request = SkillActivationRequest(
-            skill_name=nested_skill,
-            conversation_id=self.conversation_id,
-            user_request=self.user_request,
-            conversation_history=self.conversation_history,
-            activation_depth=self.activation_depth + 1,
-            max_depth=self.max_depth,
-            activation_chain=self.activation_chain + [self.skill_name],
-            skill_config=self.skill_config
-        )
-
-        # Update token budget if using
-        if self.token_budget is not None:
-            # Estimate tokens for this skill activation (rough estimate)
-            estimated_cost = 1000  # Base cost
-            nested_request.token_budget = max(0, self.token_budget - estimated_cost)
-
-        return nested_request
+            return False  # Circular dependency
+        return self.activation_depth < self.max_depth
 ```
 
 #### Phase 2: Skill Activation Result
@@ -892,12 +603,24 @@ class SkillActivationRequest(BaseModel):
 **Direction**: Skill System → Agent
 
 ```python
+class SkillMessage(BaseModel):
+    """Skill message format"""
+    type: Literal["metadata", "instruction", "permissions"]
+    content: str
+    visibility: Literal["visible", "hidden"] = "visible"
+
+class ContextModifier(BaseModel):
+    """Context modifier for skill execution"""
+    allowed_tools: Optional[List[str]] = None
+    model: Optional[str] = None
+    disable_model_invocation: bool = False
+
 class SkillActivationResult(BaseModel):
     """Result from skill activation"""
     activation_id: str
     skill_name: str
 
-    # Messages to inject
+    # Progressive Disclosure: Messages at requested level
     messages: List[SkillMessage]
 
     # Context modifier
@@ -906,159 +629,122 @@ class SkillActivationResult(BaseModel):
     # Status
     success: bool
     error: Optional[str] = None
+```
 
-    def to_llm_messages(self) -> List[Dict[str, Any]]:
+### Progressive Disclosure Implementation
+
+```python
+class SkillLoader:
+    """Handles progressive disclosure for skill loading"""
+
+    def load_skill(self, skill_name: str, level: int) -> SkillActivationResult:
         """
-        Convert to messages for LLM injection.
+        Load skill at specified disclosure level.
 
-        Returns a list of LangChain-compatible messages.
+        Args:
+            skill_name: Name of the skill to load
+            level: Disclosure level (1=metadata, 2=full, 3=with resources)
         """
-        result = []
+        if level >= 1:
+            # Load Level 1: Frontmatter metadata
+            metadata = self._load_frontmatter(skill_name)
 
-        for msg in self.messages:
-            if msg.visibility == MessageVisibility.HIDDEN:
-                # Hidden instruction - use AIMessage with isMeta flag
-                result.append({
-                    "role": "assistant",
-                    "content": msg.content,
-                    "additional_kwargs": {"isMeta": True}
-                })
-            else:
-                # Visible message - use HumanMessage
-                result.append({
-                    "role": "user",
-                    "content": msg.content
-                })
+        if level >= 2:
+            # Load Level 2: Full SKILL.md
+            instructions = self._load_skill_md(skill_name)
 
-        return result
+        if level >= 3:
+            # Load Level 3: Resource files
+            resources = self._load_resources(skill_name)
+
+        # Build message list based on level
+        messages = self._build_messages(metadata, instructions, resources, level)
+
+        return SkillActivationResult(
+            skill_name=skill_name,
+            messages=messages,
+            context_modifier=self._get_context_modifier(skill_name),
+            success=True
+        )
+
+    def _load_frontmatter(self, skill_name: str) -> Dict[str, Any]:
+        """Load Level 1: Frontmatter (~100 tokens)"""
+        skill_path = self._get_skill_path(skill_name)
+        with open(skill_path / "SKILL.md") as f:
+            frontmatter = self._parse_yaml_frontmatter(f)
+        return frontmatter
+
+    def _load_skill_md(self, skill_name: str) -> str:
+        """Load Level 2: Full skill instructions (~5000 tokens)"""
+        skill_path = self._get_skill_path(skill_name)
+        with open(skill_path / "SKILL.md") as f:
+            # Skip frontmatter, return full content
+            content = self._extract_markdown_content(f)
+        return content
+
+    def _load_resources(self, skill_name: str) -> Dict[str, str]:
+        """Load Level 3: Resource files (on-demand)"""
+        skill_path = self._get_skill_path(skill_name)
+        resources = {}
+
+        # Load scripts
+        scripts_dir = skill_path / "scripts"
+        if scripts_dir.exists():
+            for script in scripts_dir.glob("*.py"):
+                resources[script.name] = script.read_text()
+
+        # Load references
+        refs_dir = skill_path / "references"
+        if refs_dir.exists():
+            for ref in refs_dir.glob("*"):
+                resources[ref.name] = ref.read_text()
+
+        return resources
 ```
 
 ### Message Injection Protocol
 
 ```python
 import threading
-import time
 from contextlib import contextmanager
-from typing import Set
 
 class MessageInjectionProtocol:
     """
     Protocol for injecting skill messages into conversation.
 
-    Thread-safe with atomic state updates, automatic lock cleanup,
-    and message deduplication.
-
-    Based on Claude Code's sub-agent communication pattern.
+    Thread-safe with atomic state updates.
     """
 
-    # Per-conversation locks for thread safety
     _locks: Dict[str, threading.Lock] = {}
     _locks_lock = threading.Lock()
-
-    # Reference counting for cleanup
-    _lock_refs: Dict[str, int] = {}
-    _lock_last_used: Dict[str, float] = {}  # Timestamp tracking
-
-    # Message deduplication
-    _injected_message_ids: Set[str] = set()
-    _dedup_lock = threading.Lock()
-
-    # Cleanup configuration
-    _lock_ttl_seconds: int = 3600  # 1 hour TTL
-    _cleanup_interval_seconds: int = 300  # Cleanup every 5 minutes
 
     @classmethod
     @contextmanager
     def _conversation_lock(cls, conversation_id: str):
-        """Get or create lock for conversation with reference counting"""
+        """Get or create lock for conversation"""
         with cls._locks_lock:
             if conversation_id not in cls._locks:
                 cls._locks[conversation_id] = threading.Lock()
-                cls._lock_refs[conversation_id] = 0
-            cls._lock_refs[conversation_id] += 1
-            cls._lock_last_used[conversation_id] = time.time()
-
         lock = cls._locks[conversation_id]
         lock.acquire()
         try:
             yield
         finally:
             lock.release()
-            # Decrement reference and cleanup if zero
-            with cls._locks_lock:
-                cls._lock_refs[conversation_id] -= 1
-                if cls._lock_refs[conversation_id] == 0:
-                    # No more references, schedule cleanup
-                    cls._lock_last_used[conversation_id] = time.time()
-
-    @classmethod
-    def _should_cleanup_lock(cls, conversation_id: str) -> bool:
-        """Check if lock should be cleaned up based on TTL"""
-        if conversation_id not in cls._lock_last_used:
-            return True
-        age = time.time() - cls._lock_last_used[conversation_id]
-        return age > cls._lock_ttl_seconds
-
-    @classmethod
-    def _cleanup_stale_locks(cls):
-        """Clean up locks that have exceeded TTL"""
-        with cls._locks_lock:
-            stale_ids = [
-                conv_id for conv_id in cls._locks
-                if cls._should_cleanup_lock(conv_id)
-            ]
-            for conv_id in stale_ids:
-                del cls._locks[conv_id]
-                del cls._lock_refs[conv_id]
-                del cls._lock_last_used[conv_id]
-            return len(stale_ids)
-
-    @classmethod
-    def cleanup_lock(cls, conversation_id: str) -> bool:
-        """
-        Manually cleanup lock for a specific conversation.
-
-        Called when conversation ends explicitly.
-        """
-        with cls._locks_lock:
-            if conversation_id in cls._locks:
-                del cls._locks[conversation_id]
-                if conversation_id in cls._lock_refs:
-                    del cls._lock_refs[conversation_id]
-                if conversation_id in cls._lock_last_used:
-                    del cls._lock_last_used[conversation_id]
-                return True
-            return False
-
-    @classmethod
-    def cleanup_all_locks(cls) -> int:
-        """
-        Cleanup all locks (emergency use).
-
-        Returns number of locks cleaned up.
-        """
-        with cls._locks_lock:
-            count = len(cls._locks)
-            cls._locks.clear()
-            cls._lock_refs.clear()
-            cls._lock_last_used.clear()
-            return count
 
     @staticmethod
     def inject_into_state(
         messages: List[Dict[str, Any]],
         conversation_id: str,
-        agent_state: Any,
-        skip_duplicates: bool = True
+        agent_state: Any
     ) -> bool:
         """
         Thread-safely inject messages into LangGraph agent state.
 
         Args:
-            messages: Messages to inject
+            messages: Messages to inject (from SkillActivationResult)
             conversation_id: Conversation ID
             agent_state: Current agent state
-            skip_duplicates: Whether to skip already injected messages
 
         Returns:
             Success status
@@ -1069,18 +755,9 @@ class MessageInjectionProtocol:
                 state = agent_state.get_state({"configurable": {"thread_id": conversation_id}})
                 current_messages = list(state.messages.get("messages", []))
 
-                # Build new message list with deduplication
+                # Build new message list
                 new_messages = current_messages.copy()
                 for msg_dict in messages:
-                    msg_id = msg_dict.get("message_id")
-
-                    # Skip if already injected (deduplication)
-                    if skip_duplicates and msg_id:
-                        with MessageInjectionProtocol._dedup_lock:
-                            if msg_id in MessageInjectionProtocol._injected_message_ids:
-                                continue
-                            MessageInjectionProtocol._injected_message_ids.add(msg_id)
-
                     role = msg_dict.get("role")
                     if role == MessageType.USER.value:
                         new_messages.append(HumanMessage(content=msg_dict["content"]))
@@ -1111,15 +788,15 @@ class MessageInjectionProtocol:
 
 ```python
 class ConversationRound(BaseModel):
-    """A single round of conversation"""
+    """A single round of conversation (ReAct loop)"""
     round_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     conversation_id: str
 
     # Messages
     user_message: str
-    assistant_thought: Optional[str] = None  # Thinking before action
+    thoughts: List[str] = Field(default_factory=list)  # Agent's reasoning
     tool_calls: List[ToolCallMessage] = Field(default_factory=list)
-    tool_results: List[ToolResultMessage] = Field(default_factory=list)
+    tool_observations: List[str] = Field(default_factory=list)  # Simple strings
     skill_activations: List[SkillActivationResult] = Field(default_factory=list)
 
     # Final response
@@ -1157,23 +834,22 @@ class MultiRoundConversation(BaseModel):
         """
         Get compressed conversation history.
 
-        Implements strategy from Clawdbot/OpenClaw:
+        Strategy:
         - Keep recent rounds complete
-        - Compress old rounds to summaries
-        - Preserve tool calls and results
+        - Summarize old rounds to key decisions
+        - Preserve tool observations (critical for reasoning)
         """
         if not self.should_compress_context():
-            # Return full history
             return self._get_full_history()
 
         # Compress old rounds
         compressed = []
         for i, round_data in enumerate(self.rounds):
-            if i < len(self.rounds) - 3:  # Keep last 3 rounds complete
+            if i < len(self.rounds) - 5:  # Keep last 5 rounds complete
                 # Compress to summary
                 compressed.append({
                     "role": "system",
-                    "content": f"[Round {i+1} Summary] {round_data.final_answer or 'Incomplete'}"
+                    "content": self._create_round_summary(round_data)
                 })
             else:
                 # Keep complete
@@ -1181,8 +857,19 @@ class MultiRoundConversation(BaseModel):
 
         return compressed
 
+    def _create_round_summary(self, round_data: ConversationRound) -> str:
+        """Create summary of a conversation round"""
+        parts = [
+            f"Round {round_data.round_id}:",
+            f"  Request: {round_data.user_message[:100]}...",
+            f"  Tools: {[tc.tool_name for tc in round_data.tool_calls]}",
+        ]
+        if round_data.final_answer:
+            parts.append(f"  Answer: {round_data.final_answer[:100]}...")
+        return "\n".join(parts)
+
     def _round_to_messages(self, round_data: ConversationRound) -> List[Dict[str, Any]]:
-        """Convert a round to message list"""
+        """Convert a round to message list (Claude Code format)"""
         messages = []
 
         # User message
@@ -1191,30 +878,31 @@ class MultiRoundConversation(BaseModel):
             "content": round_data.user_message
         })
 
-        # Tool calls and results (if any)
-        for tool_call in round_data.tool_calls:
+        # Tool calls and observations (ReAct loop)
+        for tool_call, observation in zip(round_data.tool_calls, round_data.tool_observations):
+            # Assistant: Tool use
             messages.append({
                 "role": "assistant",
                 "content": [{
                     "type": "tool_use",
-                    "id": tool_call.message_id,
+                    "id": tool_call.tool_call_id,
                     "name": tool_call.tool_name,
                     "input": tool_call.parameters
                 }]
             })
 
-        for tool_result in round_data.tool_results:
+            # User: Tool result (observation)
             messages.append({
-                "role": "user",  # Tool results are user messages!
+                "role": "user",
                 "content": [{
                     "type": "tool_result",
-                    "tool_use_id": tool_result.tool_call_id,
-                    "content": tool_result.observation,
-                    "is_error": not tool_result.success
+                    "tool_use_id": tool_call.tool_call_id,
+                    "content": observation,  # Simple observation string
+                    "is_error": False
                 }]
             })
 
-        # Final answer (if any)
+        # Final answer
         if round_data.final_answer:
             messages.append({
                 "role": "assistant",
@@ -1224,28 +912,28 @@ class MultiRoundConversation(BaseModel):
         return messages
 ```
 
-### Context Management
+---
+
+## Context Management Strategy
+
+### Context Manager
 
 ```python
 class ContextManager:
     """
     Manages conversation context and memory.
 
-    Inspired by Clawdbot's FocusManager and MemoryFlush.
+    Inspired by Clawdbot's FocusManager and Manus AI's context handling.
     """
 
     def __init__(self, max_tokens: int = 200000):
         self.max_tokens = max_tokens
         self.compression_threshold = 0.8
-        self.refocus_interval = 5  # Rounds between refocus
 
         # Context layers
         self.system_context: List[str] = []
         self.conversation_history: List[Dict[str, Any]] = []
         self.active_context: Dict[str, Any] = {}
-
-        # Focus management
-        self.round_count = 0
 
     def add_system_context(self, context: str):
         """Add system-level context"""
@@ -1254,110 +942,29 @@ class ContextManager:
     def add_message(self, message: Dict[str, Any]):
         """Add message to conversation history"""
         self.conversation_history.append(message)
-        self.round_count += 1
-
-        # Check if refocus needed
-        if self.round_count % self.refocus_interval == 0:
-            self._refocus()
 
         # Check if compression needed
         if self._should_compress():
             self._compress_context()
 
     def _should_compress(self) -> bool:
-        """
-        Check if context compression is needed.
-
-        Enhanced token estimation:
-        - English: ~4 characters per token
-        - Chinese: ~1.5 characters per token
-        - Code blocks: ~3 characters per token (more dense)
-        - JSON: ~2.5 characters per token
-        - Mixed: Weighted average based on content analysis
-        """
-        total_chars = 0
-        chinese_chars = 0
-        code_chars = 0
-        json_chars = 0
-
-        for msg in self.conversation_history:
-            content = str(msg.get("content", ""))
-
-            # Analyze content type
-            if self._is_code_block(content):
-                code_chars += len(content)
-            elif self._is_json(content):
-                json_chars += len(content)
-            else:
-                # Natural language
-                total_chars += len(content)
-                # Count Chinese characters (CJK range)
-                chinese_chars += sum(1 for c in content if '\u4e00' <= c <= '\u9fff')
-
-        # Calculate weighted token estimate
-        if total_chars + code_chars + json_chars == 0:
-            return False
-
-        # Calculate tokens by content type
-        nl_tokens = self._estimate_natural_language_tokens(total_chars, chinese_chars)
-        code_tokens = code_chars // 3  # Code is more token-dense
-        json_tokens = json_chars // 2.5  # JSON is moderately dense
-
-        estimated_tokens = nl_tokens + code_tokens + json_tokens
-
+        """Check if context compression is needed"""
+        # Simple char-based estimation (can be enhanced with tiktoken)
+        total_chars = sum(len(str(msg.get("content", ""))) for msg in self.conversation_history)
+        estimated_tokens = total_chars / 3  # Rough estimate
         return estimated_tokens > (self.max_tokens * self.compression_threshold)
 
-    def _is_code_block(self, content: str) -> bool:
-        """Check if content is a code block"""
-        code_indicators = [
-            "```",  # Markdown code blocks
-            "def ", "class ", "import ",  # Python
-            "function ", "const ", "let ",  # JavaScript
-            "<!DOCTYPE", "<html>",  # HTML
-            "<?xml",  # XML
-        ]
-        content_lower = content.lower()
-        return any(indicator in content_lower for indicator in code_indicators)
-
-    def _is_json(self, content: str) -> bool:
-        """Check if content is JSON"""
-        content_stripped = content.strip()
-        return (
-            content_stripped.startswith("{") and content_stripped.endswith("}") or
-            content_stripped.startswith("[") and content_stripped.endswith("]")
-        )
-
-    def _estimate_natural_language_tokens(self, total_chars: int, chinese_chars: int) -> int:
-        """Estimate tokens for natural language content"""
-        if total_chars == 0:
-            return 0
-
-        chinese_ratio = chinese_chars / total_chars
-        # Blend char/token ratios based on content
-        chars_per_token = 4 * (1 - chinese_ratio) + 1.5 * chinese_ratio
-        return int(total_chars / chars_per_token)
-
-    def _compress_context(self, keep_count: int = None):
+    def _compress_context(self, keep_count: int = 5):
         """
-        Compress conversation context with dynamic keep count.
+        Compress conversation context.
 
-        Strategy (from Clawdbot/OpenClaw):
-        - Keep last N rounds complete (dynamic based on complexity)
+        Strategy:
+        - Keep last N rounds complete
         - Summarize earlier rounds
-        - Preserve tool calls and critical information
-
-        Args:
-            keep_count: Number of recent rounds to keep complete.
-                       If None, calculated dynamically.
+        - Preserve tool observations
         """
-        if len(self.conversation_history) < 10:
+        if len(self.conversation_history) < 20:
             return
-
-        # Calculate optimal keep count if not specified
-        keep_count = keep_count or self._calculate_optimal_keep_count()
-
-        # Ensure keep_count is within reasonable bounds
-        keep_count = max(3, min(15, keep_count))
 
         recent = self.conversation_history[-keep_count:]
         older = self.conversation_history[:-keep_count]
@@ -1370,121 +977,24 @@ class ContextManager:
             {"role": "system", "content": summary}
         ] + recent
 
-    def _calculate_optimal_keep_count(self) -> int:
-        """
-        Calculate optimal number of rounds to keep based on task complexity.
-
-        Factors considered:
-        - Active tool chains (nested tool calls)
-        - Skill activations
-        - Recent error rates
-        """
-        active_tool_chains = self._count_active_tool_chains()
-        skill_activations = self._count_recent_skill_activations()
-        error_rate = self._calculate_recent_error_rate()
-
-        # Base count
-        base_count = 5
-
-        # Add buffer for active tool chains
-        chain_buffer = min(5, active_tool_chains)
-
-        # Add buffer for skill activations
-        skill_buffer = min(3, skill_activations)
-
-        # Reduce if high error rate (might need more context)
-        error_buffer = 2 if error_rate > 0.3 else 0
-
-        optimal_count = base_count + chain_buffer + skill_buffer + error_buffer
-
-        # Clamp to reasonable range
-        return max(3, min(15, optimal_count))
-
-    def _count_active_tool_chains(self) -> int:
-        """Count active tool call chains in recent history"""
-        chain_count = 0
-        for msg in self.conversation_history[-20:]:  # Check last 20 messages
-            content = str(msg.get("content", ""))
-            if "tool_use" in content and "tool_result" in content:
-                chain_count += 1
-        return chain_count
-
-    def _count_recent_skill_activations(self) -> int:
-        """Count recent skill activations"""
-        count = 0
-        for msg in self.conversation_history[-20:]:
-            if "skill_activation" in str(msg.get("content", "")):
-                count += 1
-        return count
-
-    def _calculate_recent_error_rate(self) -> float:
-        """Calculate error rate in recent messages"""
-        errors = 0
-        total = 0
-        for msg in self.conversation_history[-20:]:
-            total += 1
-            if msg.get("is_error") or "error" in str(msg.get("content", "")).lower():
-                errors += 1
-        return errors / total if total > 0 else 0.0
-
     def _create_summary(self, messages: List[Dict[str, Any]]) -> str:
-        """
-        Create semantic summary of older messages.
-
-        Enhanced to preserve key decisions and tool outcomes.
-        """
-        # Extract key decisions and tool outcomes
-        key_decisions = self._extract_key_decisions(messages)
-        tool_outcomes = self._extract_tool_outcomes(messages)
-
-        summary_parts = [
-            f"## Previous Context Summary",
-            f"### Key Decisions",
-            *key_decisions,
-            f"",
-            f"### Tool Outcomes",
-            *tool_outcomes,
-        ]
-
-        return "\n".join(summary_parts)
-
-    def _extract_key_decisions(self, messages: List[Dict[str, Any]]) -> List[str]:
-        """Extract key decisions from conversation history"""
-        decisions = []
+        """Create summary of older messages"""
+        # Extract tool calls and results
+        tool_activities = []
         for msg in messages:
-            content = str(msg.get("content", ""))
-            # Look for decision patterns
-            if any(keyword in content.lower() for keyword in ["decided", "selected", "chose", "确定", "选择"]):
-                # Extract the decision sentence
-                decisions.append(f"- {content[:100]}...")
-        return decisions[:5]  # Keep top 5
-
-    def _extract_tool_outcomes(self, messages: List[Dict[str, Any]]) -> List[str]:
-        """Extract tool execution outcomes"""
-        outcomes = []
-        for msg in messages:
-            if "tool_result" in str(msg.get("content", "")):
+            if "tool_use" in str(msg.get("content", "")):
+                tool_activities.append(f"- Action: {msg.get('content', {})}")
+            elif "tool_result" in str(msg.get("content", "")):
                 content = msg.get("content", "")
                 if isinstance(content, list):
                     for block in content:
                         if block.get("type") == "tool_result":
-                            tool_name = block.get("name", "unknown")
-                            outcome = "✓" if not block.get("is_error") else "✗"
-                            outcomes.append(f"- {tool_name}: {outcome}")
-        return outcomes[:10]  # Keep top 10
+                            tool_activities.append(f"- Observation: {str(block.get('content', ''))[:100]}...")
 
-    def _refocus(self):
-        """Re-focus on main task (from Manus AI)"""
-        if not self.system_context:
-            return
-
-        # Inject system context as reminder
-        focus_message = {
-            "role": "system",
-            "content": f"\n# Context Reminder (Round {self.round_count})\n\n" + "\n".join(self.system_context)
-        }
-
-        self.conversation_history.append(focus_message)
+        return "\n".join([
+            "## Previous Context Summary",
+            "\n".join(tool_activities[-20:])  # Keep last 20 activities
+        ])
 ```
 
 ---
@@ -1493,39 +1003,37 @@ class ContextManager:
 
 ### Phase 1: Core Message Format (Week 1)
 
-- [ ] Define `StandardMessage` and `ContentBlock` in `backend/models/message.py`
+- [ ] Simplify `ToolOutput` model - remove summary/result, keep only observation
+- [ ] Update `StandardMessage` to match Claude Code format
 - [ ] Implement `to_langchain_format()` method
-- [ ] Add message validation
 - [ ] Write unit tests (20 tests)
 
 ### Phase 2: Tool Communication Protocol (Week 2)
 
-- [ ] Implement `ToolInvocationRequest`
-- [ ] Implement `ToolExecutionResult` with `to_llm_message()`
-- [ ] Implement `ToolErrorResponse` and error types
-- [ ] Update all tools to use new format
+- [ ] Implement `ToolExecutionResult` with simple observation format
+- [ ] Update all tools to return simple observation strings
+- [ ] Implement error handling
 - [ ] Write integration tests (15 tests)
 
 ### Phase 3: Skill Communication Protocol (Week 2)
 
-- [ ] Update `SkillActivationResult` with new methods
-- [ ] Implement `MessageInjectionProtocol`
-- [ ] Update skill system to use new format
+- [ ] Implement `SkillActivationRequest` with load_level for progressive disclosure
+- [ ] Implement `SkillLoader` with 3-level loading
+- [ ] Update skill system to use progressive disclosure
 - [ ] Write skill integration tests (10 tests)
 
 ### Phase 4: Multi-Round Conversation (Week 3)
 
-- [ ] Implement `ConversationRound` and `MultiRoundConversation`
-- [ ] Implement `ContextManager`
-- [ ] Add context compression
-- [ ] Implement refocus mechanism
+- [ ] Implement `ConversationRound` with ReAct loop tracking
+- [ ] Implement `ContextManager` with compression
+- [ ] Update BAAgent to use new message formats
 - [ ] Write E2E tests (5 tests)
 
 ### Phase 5: Migration & Testing (Week 4)
 
-- [ ] Migrate existing tools to new format
-- [ ] Update BAAgent to use new message formats
-- [ ] Update tests
+- [ ] Migrate existing tools to simple observation format
+- [ ] Update BAAgent to use Claude Code-style messages
+- [ ] Update all tests
 - [ ] Performance benchmarking
 - [ ] Documentation updates
 
@@ -1537,10 +1045,12 @@ Research sources for this design:
 
 - [Claude Code: Best practices for agentic coding](https://www.anthropic.com/engineering/claude-code-best-practices)
 - [Tracing Claude Code's LLM Traffic](https://medium.com/@georgesung/tracing-claude-codes-llm-traffic-agentic-loop-sub-agents-tool-use-prompts-7796941806f5)
+- [从ReAct到CodeAct再到OpenManus - Zhihu](https://zhuanlan.zhihu.com/p/684765123)
+- [ReAct: Synergizing Reasoning and Acting in Language Models](https://arxiv.org/abs/2210.03629)
 
 ---
 
-**Document Status**: Design v1.3 - Engineering production-ready
+**Document Status**: Design v1.4 - Conceptual Correction
 **Last Updated**: 2026-02-05
 **Next Review Date**: 2026-02-12
 **Approval Required**: @ba-agent-team
@@ -1549,148 +1059,79 @@ Research sources for this design:
 
 ## Change History
 
+### v1.4 (2026-02-05) - Conceptual Correction
+
+**Major redesign based on user feedback about conceptual confusion.**
+
+Corrected three previously conflated concepts:
+
+1. **ReAct Pattern** (Agent Execution Loop)
+   - Clarified as control flow pattern: Thought → Action → Observation
+   - NOT a tool output format
+   - This is how the agent reasons, not how tools return data
+
+2. **Tool Output Format** (Simplified)
+   - Removed `summary` and `result` fields
+   - Now returns simple `observation` string only
+   - Matches Claude Code's straightforward approach
+   - Tool results are sent as `role: "user"` messages
+
+3. **Progressive Disclosure** (Skills System)
+   - Clarified as information loading strategy for Skills
+   - Level 1: Frontmatter metadata (~100 tokens)
+   - Level 2: Full SKILL.md (~5000 tokens)
+   - Level 3: Resource files (on-demand)
+   - NOT related to tool output format
+
+**Key Changes**:
+- Removed incorrect "Three-Layer Context: Summary → Observation → Result" from executive summary
+- Removed incorrect "ReAct Compatible" claim from tool output format
+- Simplified `ToolExecutionResult` to single `observation` field
+- Added detailed "Core Concepts Clarification" section
+- Updated all diagrams and code examples
+- Clarified that tool results are simple user messages with observation strings
+
 ### v1.3 (2026-02-05) - Engineering Production-Ready
 
-Addressed 6 additional issues from third review (deep engineering focus):
-
-1. **Enhanced Lock Lifecycle Management** (Issue #1) 🔴 Critical
-   - Added `_lock_last_used` timestamp tracking
-   - Added `_should_cleanup_lock()` with TTL (3600s default)
-   - Added `_cleanup_stale_locks()` for periodic cleanup
-   - Locks now auto-cleanup after TTL even with active references
-
-2. **Dynamic Context Compression** (Issue #2) 🟡 High
-   - Changed hardcoded `keep_count = 5` to dynamic calculation
-   - Added `_calculate_optimal_keep_count()` based on complexity:
-     * Active tool chains (+5 buffer)
-     * Skill activations (+3 buffer)
-     * Error rate adjustments (+2 if >30% errors)
-   - Added helper methods: `_count_active_tool_chains()`, `_count_recent_skill_activations()`, `_calculate_recent_error_rate()`
-   - Range clamped to 3-15 rounds
-
-3. **Fixed to_langchain_format Missing Fields** (Issue #3) 🟡 High
-   - Added `conversation_id` to output
-   - Added `user_id` to output
-   - Ensures LangGraph state management compatibility
-
-4. **Enhanced Token Estimation** (Issue #4) 🟢 Medium
-   - Added content type detection: `_is_code_block()`, `_is_json()`
-   - Code blocks: ~3 chars/token (more dense)
-   - JSON: ~2.5 chars/token (moderately dense)
-   - Natural language: existing 4.0/1.5 ratio for EN/ZH
-   - Refactored into `_estimate_natural_language_tokens()`
-
-5. **Per-Skill Depth Configuration** (Issue #5) 🟢 Medium
-   - Added `get_max_depth_for_skill()` method
-   - Complex skills (data_analysis, report_generation): depth 5
-   - Simple skills (simple_* prefix): depth 2
-   - Standard skills: depth 3 (default)
-   - Added `skill_config` dict for overrides
-
-6. **Message Deduplication** (Issue #6) 🟢 Medium
-   - Added `_injected_message_ids: Set[str]` for tracking
-   - Added `_dedup_lock` for thread-safe access
-   - Added `skip_duplicates` parameter to `inject_into_state()`
-   - Prevents duplicate injection in high-concurrency scenarios
+*Previous version with conceptual errors (kept for reference)*
 
 ### v1.2 (2026-02-05) - Production Environment Enhancements
 
-Addressed 5 additional issues from second review:
-
-1. **Added Message Version Control** (Issue #1)
-   - Added `schema_version` field to `StandardMessage` (default: "1.2")
-   - Enables backward compatibility when message format evolves
-   - Version included in `to_langchain_format()` output
-
-2. **Fixed Lock Memory Leak** (Issue #2) 🔴 Critical
-   - Added reference counting with `_lock_refs` dictionary
-   - Automatic cleanup when reference count reaches zero
-   - New `cleanup_lock(conversation_id)` for explicit cleanup
-   - New `cleanup_all_locks()` for emergency cleanup
-
-3. **Enhanced Circular Dependency Detection** (Issue #3)
-   - Added `activation_chain` to track skill activation path
-   - `can_activate_nested()` now checks for cycles (A→B→A)
-   - Improved error messages showing full activation chain
-   - `max_depth` is now configurable (default: 3)
-
-4. **Added Sequence Diagrams** (Issue #4)
-   - Standard Tool Execution Flow
-   - Skill Activation Flow
-   - Multi-Round Conversation Flow
-   - Error Handling with Retry Flow
-
-5. **Configurable Depth Limit** (Issue #5)
-   - `max_depth` changed from hardcoded to Field(default=3)
-   - Can be overridden per-request if needed
-   - Supports different depth requirements for different skills
-
 ### v1.1 (2026-02-05) - Review Response
-
-Addressed 7 issues identified in design review:
-
-1. **Fixed Message Format Consistency** (Issue #1)
-   - Changed `to_langchain_format()` to use `.value` for enum serialization
-   - All message formats now consistently use enum values
-
-2. **Enhanced Context Compression** (Issue #2)
-   - Added `_extract_key_decisions()` to preserve important decisions
-   - Added `_extract_tool_outcomes()` to preserve tool execution results
-   - Context now retains semantic information during compression
-
-3. **Added Retry Policy** (Issue #3)
-   - New `ToolRetryPolicy` class with configurable retry behavior
-   - Exponential backoff with max delay cap
-   - `should_retry()` and `get_delay()` methods
-
-4. **Fixed Race Conditions** (Issue #4)
-   - Added per-conversation locking mechanism
-   - Atomic state read-modify-write operations
-   - Context manager for lock lifecycle management
-
-5. **Added Message Validation Layer** (Issue #5)
-   - `@validate_message` decorator for format validation
-   - Validates messages at layer boundaries
-   - Prevents format errors from propagating
-
-6. **Prevented Circular Dependencies** (Issue #6)
-   - Added `activation_depth` and `max_depth` to `SkillActivationRequest`
-   - `can_activate_nested()` check before nested activation
-   - `create_nested_request()` for safe nested calls
-
-7. **Improved Token Estimation** (Issue #7)
-   - Distinguishes between Chinese and English text
-   - Weighted char/token ratio: 4.0 (EN) vs 1.5 (ZH)
-   - More accurate context compression triggers
 
 ---
 
-## Future Enhancements (Backlog)
+## Appendix: ReAct Pattern in Detail
 
-### Low Priority Optimizations
+### Understanding ReAct
 
-1. **tiktoken Integration**
-   - Replace char-based estimation with tiktoken for exact token counting
-   - Improves accuracy for context compression triggers
-   - Requires additional dependency
+ReAct (Reasoning + Acting) is a paradigm where language models generate reasoning traces and task-specific actions in an interleaved manner.
 
-2. **Token Usage Tracking**
-   - Add `tokens_input` and `tokens_output` to telemetry
-   - Track API call counts per conversation
-   - Enable cost monitoring and optimization
+```
+Thought: I need to find information about Python files in the project
+Action: Search[Glob]("**/*.py")
+Observation: src/main.py, utils/helper.py, tests/test_main.py
+Thought: I should read the main file to understand the structure
+Action: Read[FileReader]("src/main.py")
+Observation: [file content]
+Thought: Now I understand the project structure
+Final Answer: The project has three Python files...
+```
 
-3. **Async Lock Management**
-   - Convert to `asyncio.Lock` for async-first architecture
-   - Support concurrent message injection
-   - Better performance under high load
+### Key Insights
 
-4. **Circuit Breaker Pattern**
-   - Add circuit breaker for failing tools/skills
-   - Automatic recovery after cooldown period
-   - Prevents cascading failures
+1. **Thought**: The model's internal reasoning process
+2. **Action**: The tool/skill being invoked
+3. **Observation**: The raw result from tool execution
+4. This is a **reasoning pattern**, not a data structure
 
-5. **Token Budget Enforcement**
-   - Actual token tracking instead of estimation
-   - Per-conversation budgets
-   - Budget exhaustion alerts
+### Common Misconceptions
 
+❌ **Incorrect**: "Tool output should have summary → observation → result format"
+✅ **Correct**: "Tool output is a simple observation string; the agent formats its own response"
+
+❌ **Incorrect**: "Progressive disclosure applies to tool outputs"
+✅ **Correct**: "Progressive disclosure applies to Skills system (metadata → full → resources)"
+
+❌ **Incorrect**: "ReAct defines the tool output format"
+✅ **Correct**: "ReAct defines the agent's reasoning loop, not tool output format"
