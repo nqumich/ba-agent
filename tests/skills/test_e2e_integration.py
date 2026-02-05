@@ -239,6 +239,156 @@ class TestSkillActivationE2E:
         assert agent._active_skill_context["test_skill_disable_model"] is True
 
 
+class TestContextModifierApplication:
+    """Tests for Context Modifier application (Section 4.2 Missing Tests)."""
+
+    def test_tool_permission_checking(self, skills_base_dir, monkeypatch):
+        """
+        Test that _check_tool_allowed correctly enforces tool permissions.
+        This addresses the missing test from section 4.2: Context Modifier application.
+        """
+        from backend.agents.agent import BAAgent
+        from backend.skills.message_protocol import ContextModifier
+        import os
+
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        agent = BAAgent()
+
+        # No active skill - all tools should be allowed
+        assert agent._check_tool_allowed("Read") is True
+        assert agent._check_tool_allowed("Write") is True
+        assert agent._check_tool_allowed("AnyTool") is True
+
+        # Apply a context modifier with allowed_tools
+        context_modifier = ContextModifier(allowed_tools=["Read", "Write"])
+        agent._apply_context_modifier(context_modifier, "test_skill")
+
+        # Now only allowed tools should be permitted
+        assert agent._check_tool_allowed("Read") is True
+        assert agent._check_tool_allowed("Write") is True
+        assert agent._check_tool_allowed("Execute") is False
+        assert agent._check_tool_allowed("AnyTool") is False
+
+        # Deactivate skill (clear context)
+        agent._active_skill_context.clear()
+        assert agent._check_tool_allowed("AnyTool") is True
+
+    def test_model_switching_stores_preference(self, skills_base_dir, monkeypatch):
+        """
+        Test that model switching preference is stored.
+        Note: Actual model switching requires valid API keys and is tested separately.
+        """
+        from backend.agents.agent import BAAgent
+        from backend.skills.message_protocol import ContextModifier
+        import os
+
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        agent = BAAgent()
+
+        # Apply a context modifier with model override
+        context_modifier = ContextModifier(model="claude-opus-4-20250514")
+        agent._apply_context_modifier(context_modifier, "test_skill")
+
+        # Verify the model preference is stored
+        assert agent._active_skill_context.get("test_skill_model") == "claude-opus-4-20250514"
+
+        # Verify we can retrieve it
+        assert agent._get_active_skill_model() == "claude-opus-4-20250514"
+
+    def test_model_invocation_disabled(self, skills_base_dir, monkeypatch):
+        """
+        Test that disable_model_invocation flag is properly stored and checked.
+        """
+        from backend.agents.agent import BAAgent
+        from backend.skills.message_protocol import ContextModifier
+        import os
+
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        agent = BAAgent()
+
+        # Initially, model invocation should be enabled
+        assert agent._is_model_invocation_disabled() is False
+
+        # Apply a context modifier with disable_model_invocation
+        context_modifier = ContextModifier(disable_model_invocation=True)
+        agent._apply_context_modifier(context_modifier, "test_skill")
+
+        # Now model invocation should be disabled
+        assert agent._is_model_invocation_disabled() is True
+
+    def test_context_modifier_combined(self, skills_base_dir, monkeypatch):
+        """
+        Test that all context modifier fields work together correctly.
+        """
+        from backend.agents.agent import BAAgent
+        from backend.skills.message_protocol import ContextModifier
+        import os
+
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        agent = BAAgent()
+
+        # Apply a comprehensive context modifier
+        context_modifier = ContextModifier(
+            allowed_tools=["Read", "Write", "Search"],
+            model="claude-opus-4-20250514",
+            disable_model_invocation=False
+        )
+        agent._apply_context_modifier(context_modifier, "comprehensive_skill")
+
+        # Verify all fields are applied
+        assert agent._check_tool_allowed("Read") is True
+        assert agent._check_tool_allowed("Write") is True
+        assert agent._check_tool_allowed("Search") is True
+        assert agent._check_tool_allowed("Execute") is False
+        assert agent._get_active_skill_model() == "claude-opus-4-20250514"
+        assert agent._is_model_invocation_disabled() is False
+
+    def test_multiple_skills_context_isolation(self, skills_base_dir, monkeypatch):
+        """
+        Test that context modifiers from different skills are properly isolated.
+        """
+        from backend.agents.agent import BAAgent
+        from backend.skills.message_protocol import ContextModifier
+        import os
+
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+        agent = BAAgent()
+
+        # Apply context modifier for skill_1
+        context_modifier_1 = ContextModifier(
+            allowed_tools=["Read"],
+            model="model-1"
+        )
+        agent._apply_context_modifier(context_modifier_1, "skill_1")
+
+        # Apply context modifier for skill_2
+        context_modifier_2 = ContextModifier(
+            allowed_tools=["Write"],
+            model="model-2"
+        )
+        agent._apply_context_modifier(context_modifier_2, "skill_2")
+
+        # Verify skill_2's context is active (last applied)
+        assert agent._active_skill_context.get("current_skill") == "skill_2"
+        assert agent._check_tool_allowed("Write") is True
+        assert agent._check_tool_allowed("Read") is False
+        assert agent._get_active_skill_model() == "model-2"
+
+        # Verify skill_1's context is still stored
+        assert agent._active_skill_context.get("skill_1_allowed_tools") == ["Read"]
+        assert agent._active_skill_context.get("skill_1_model") == "model-1"
+
+
 class TestLangGraphToolOutputFormat:
     """Tests to understand how LangGraph returns tool outputs."""
 
@@ -255,5 +405,6 @@ class TestLangGraphToolOutputFormat:
 
 __all__ = [
     "TestSkillActivationE2E",
+    "TestContextModifierApplication",
     "TestLangGraphToolOutputFormat",
 ]

@@ -519,6 +519,9 @@ class BAAgent:
             context_modifier: The context modifier to apply
             skill_name: Name of the skill being activated
         """
+        # Always set the currently active skill
+        self._active_skill_context["current_skill"] = skill_name
+
         # Apply tool permissions
         if context_modifier.allowed_tools is not None:
             logger.info(
@@ -526,20 +529,108 @@ class BAAgent:
                 f"{context_modifier.allowed_tools}"
             )
             # Store in active context for tool permission checks
-            # (Actual enforcement happens at tool invocation time)
             self._active_skill_context[f"{skill_name}_allowed_tools"] = context_modifier.allowed_tools
 
         # Apply model override
         if context_modifier.model is not None:
             logger.info(f"Skill '{skill_name}' requesting model: {context_modifier.model}")
-            # Note: Model switching would require recreating the agent
-            # For now, just store the preference
             self._active_skill_context[f"{skill_name}_model"] = context_modifier.model
+            # Attempt to switch model
+            self._switch_model_for_skill(context_modifier.model, skill_name)
 
         # Apply model invocation disable
         if context_modifier.disable_model_invocation:
             logger.info(f"Skill '{skill_name}' has model invocation disabled")
             self._active_skill_context[f"{skill_name}_disable_model"] = True
+            self._active_skill_context["disable_model_invocation"] = True
+
+    def _check_tool_allowed(self, tool_name: str) -> bool:
+        """
+        Check if a tool is allowed to be used based on active skill context.
+
+        Args:
+            tool_name: Name of the tool to check
+
+        Returns:
+            True if tool is allowed, False otherwise
+        """
+        current_skill = self._active_skill_context.get("current_skill")
+        if not current_skill:
+            # No active skill, all tools are allowed
+            return True
+
+        allowed_tools_key = f"{current_skill}_allowed_tools"
+        allowed_tools = self._active_skill_context.get(allowed_tools_key)
+
+        if allowed_tools is None:
+            # No restriction specified, all tools allowed
+            return True
+
+        # Check if tool is in the allowed list
+        return tool_name in allowed_tools
+
+    def _switch_model_for_skill(self, model: str, skill_name: str) -> bool:
+        """
+        Switch to a different model for the active skill.
+
+        Args:
+            model: Model identifier to switch to
+            skill_name: Name of the skill requesting the switch
+
+        Returns:
+            True if model was switched, False otherwise
+        """
+        try:
+            # Only switch if it's different from current model
+            if self.config.model == model:
+                logger.debug(f"Already using model {model}, no switch needed")
+                return True
+
+            logger.info(f"Switching model from {self.config.model} to {model} for skill '{skill_name}'")
+
+            # Update the config
+            self.config.model = model
+
+            # Recreate the LLM instance
+            self.llm = self._init_llm()
+
+            # Recreate the agent with new LLM
+            self.agent = self._create_agent()
+
+            # Mark that we've switched models
+            self._active_skill_context["model_switched"] = True
+            self._active_skill_context["original_model"] = self.config.model
+
+            logger.info(f"Successfully switched to model {model}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to switch model to {model}: {e}")
+            # Store the failure
+            self._active_skill_context[f"{skill_name}_model_switch_failed"] = str(e)
+            return False
+
+    def _get_active_skill_model(self) -> Optional[str]:
+        """
+        Get the model requested by the active skill.
+
+        Returns:
+            Model identifier if a skill has requested a model switch, None otherwise
+        """
+        current_skill = self._active_skill_context.get("current_skill")
+        if not current_skill:
+            return None
+
+        return self._active_skill_context.get(f"{current_skill}_model")
+
+    def _is_model_invocation_disabled(self) -> bool:
+        """
+        Check if model invocation is disabled for the current skill.
+
+        Returns:
+            True if model invocation should be disabled, False otherwise
+        """
+        return self._active_skill_context.get("disable_model_invocation", False)
 
     def _get_total_tokens(self, result: Dict[str, Any]) -> int:
         """
