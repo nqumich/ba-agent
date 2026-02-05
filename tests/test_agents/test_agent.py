@@ -67,6 +67,9 @@ class TestBAAgent:
 
         agent = BAAgent()
 
+        # 获取初始工具数量（可能包含 skill_tool）
+        initial_count = len(agent.tools)
+
         # 创建测试工具
         @tool
         def test_tool(query: str) -> str:
@@ -75,14 +78,17 @@ class TestBAAgent:
 
         agent.add_tool(test_tool)
 
-        assert len(agent.tools) == 1
-        assert agent.tools[0].name == "test_tool"
+        assert len(agent.tools) == initial_count + 1
+        assert agent.tools[-1].name == "test_tool"
 
     def test_add_tools(self, monkeypatch):
         """测试批量添加工具"""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
 
         agent = BAAgent()
+
+        # 获取初始工具数量（可能包含 skill_tool）
+        initial_count = len(agent.tools)
 
         # 创建测试工具
         @tool
@@ -97,7 +103,7 @@ class TestBAAgent:
 
         agent.add_tools([tool1, tool2])
 
-        assert len(agent.tools) == 2
+        assert len(agent.tools) == initial_count + 2
 
     @patch("backend.agents.agent.ChatAnthropic")
     def test_invoke_without_mock_llm(self, mock_chat_anthropic, monkeypatch):
@@ -169,7 +175,11 @@ class TestCreateAgent:
         agent = create_agent()
 
         assert isinstance(agent, BAAgent)
-        assert agent.tools == []
+        # Agent may have skill_tool if skills directory exists
+        # The key is that we didn't explicitly add any tools
+        # Check that any tool present is the skill_tool
+        for tool in agent.tools:
+            assert tool.name in ["activate_skill", ""]
 
     def test_create_agent_with_tools(self, monkeypatch):
         """测试使用工具创建 Agent"""
@@ -183,7 +193,10 @@ class TestCreateAgent:
         agent = create_agent(tools=[test_tool])
 
         assert isinstance(agent, BAAgent)
-        assert len(agent.tools) == 1
+        # Agent should have at least our test_tool
+        # May also have skill_tool if skills directory exists
+        tool_names = [t.name for t in agent.tools]
+        assert "test_tool" in tool_names
 
     def test_create_agent_with_custom_prompt(self, monkeypatch):
         """测试使用自定义提示词创建 Agent"""

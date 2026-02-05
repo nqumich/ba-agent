@@ -13,7 +13,7 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
 from langchain_anthropic import ChatAnthropic
 from langgraph.checkpoint.memory import MemorySaver
@@ -35,6 +35,14 @@ from backend.models.agent import (
 )
 from backend.memory.flush import MemoryFlush, MemoryFlushConfig, MemoryExtractor
 from backend.memory.index import MemoryIndexer, MemoryWatcher, get_index_db_path
+# NEW: Skills system integration
+from backend.skills import (
+    SkillLoader,
+    SkillRegistry,
+    SkillActivator,
+    SkillMessageFormatter,
+    create_skill_tool,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +105,22 @@ class BAAgent:
 
         # 初始化 Memory Watcher
         self.memory_watcher = self._init_memory_watcher()
+
+        # NEW: 初始化 Skills System
+        self.skill_loader = self._init_skill_loader()
+        self.skill_registry = SkillRegistry(self.skill_loader) if self.skill_loader else None
+        self.skill_activator = SkillActivator(
+            self.skill_loader,
+            self.skill_registry
+        ) if self.skill_loader else None
+
+        # NEW: 创建 Skill meta-tool 并添加到工具列表
+        self.skill_tool = self._init_skill_tool()
+        if self.skill_tool:
+            self.tools.append(self.skill_tool)
+
+        # Active skill context modifier tracking
+        self._active_skill_context: Dict[str, Any] = {}
 
         # 会话 token 跟踪
         self.session_tokens = 0
@@ -186,12 +210,12 @@ class BAAgent:
 
     def _get_default_system_prompt(self) -> str:
         """
-        获取默认系统提示词
+        获取默认系统提示词（包含 Skills 部分）
 
         Returns:
             系统提示词
         """
-        return """# BA-Agent 系统提示词
+        base_prompt = """# BA-Agent 系统提示词
 
 你是一个专业的商业分析助手 (BA-Agent)，面向非技术业务人员，专注于电商业务分析。
 
@@ -232,6 +256,13 @@ class BAAgent:
 
 你会在此时收到专门的 Flush 指令，请专注于记忆提取工作。
 """
+
+        # 添加 Skills 部分（如果有）
+        skills_section = self._build_skills_section()
+        if skills_section:
+            return base_prompt + "\n\n" + skills_section
+
+        return base_prompt
 
     def _init_memory_flush(self) -> Optional[MemoryFlush]:
         """
@@ -310,6 +341,67 @@ class BAAgent:
         wrapper.start()
 
         return wrapper
+
+    def _init_skill_loader(self) -> Optional[SkillLoader]:
+        """
+        初始化 Skills System Loader
+
+        Returns:
+            SkillLoader 实例，如果 skills 目录不存在则返回 None
+        """
+        # 定义 skills 目录
+        skills_dirs = [
+            Path("skills"),              # Project skills
+            Path(".claude/skills"),      # User skills
+        ]
+
+        # 检查是否至少有一个目录存在
+        has_skills = any(d.exists() for d in skills_dirs)
+
+        if not has_skills:
+            logger.info("No skills directories found, skills system disabled")
+            return None
+
+        return SkillLoader(skills_dirs=skills_dirs)
+
+    def _init_skill_tool(self) -> Optional[BaseTool]:
+        """
+        初始化 Skill meta-tool
+
+        Returns:
+            StructuredTool 实例，如果没有 skills 则返回 None
+        """
+        if self.skill_registry is None or self.skill_activator is None:
+            return None
+
+        try:
+            return create_skill_tool(self.skill_registry, self.skill_activator)
+        except Exception as e:
+            logger.warning(f"Failed to create skill tool: {e}")
+            return None
+
+    def _build_skills_section(self) -> str:
+        """
+        构建 Skills 发现部分，用于系统提示词
+
+        Returns:
+            Skills 发现部分的格式化字符串，如果没有 skills 则返回空字符串
+        """
+        # Check if skill_registry exists and is initialized
+        # Use getattr to handle cases where __init__ is not complete yet
+        skill_registry = getattr(self, 'skill_registry', None)
+        if skill_registry is None:
+            return ""
+
+        # 获取格式化的 skills 列表
+        skills_list = skill_registry.get_formatted_skills_list()
+
+        if not skills_list:
+            return ""
+
+        # 使用 formatter 构建完整的 skills section
+        formatter = SkillMessageFormatter()
+        return formatter.format_skills_list_for_prompt(skills_list)
 
     def _get_total_tokens(self, result: Dict[str, Any]) -> int:
         """
