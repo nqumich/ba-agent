@@ -114,6 +114,49 @@ class MemoryFlushConfig(BaseModel):
     llm_timeout: int = Field(default=30, description="LLM 超时（秒）")
 
 
+class MemorySearchChunkingConfig(BaseModel):
+    """记忆搜索分块配置"""
+
+    tokens: int = Field(default=400, description="文本分块 token 数")
+    overlap: int = Field(default=80, description="重叠 token 数")
+
+
+class MemorySearchQueryConfig(BaseModel):
+    """记忆搜索查询配置"""
+
+    max_results: int = Field(default=6, description="默认返回结果数")
+    min_score: float = Field(default=0.35, description="最小相关性分数")
+
+
+class MemorySearchHybridConfig(BaseModel):
+    """记忆搜索混合配置"""
+
+    enabled: bool = Field(default=True, description="是否启用混合搜索")
+    vector_weight: float = Field(default=0.7, description="向量搜索权重")
+    text_weight: float = Field(default=0.3, description="文本搜索权重")
+
+
+class MemorySearchConfig(BaseModel):
+    """Memory Search 配置"""
+
+    enabled: bool = Field(default=True, description="是否启用记忆搜索")
+    provider: str = Field(default="auto", description="embedding 提供商")
+    model: str = Field(default="text-embedding-3-small", description="embedding 模型")
+    fallback: str = Field(default="local", description="回退提供商")
+    chunking: MemorySearchChunkingConfig = Field(
+        default_factory=MemorySearchChunkingConfig,
+        description="分块配置"
+    )
+    query: MemorySearchQueryConfig = Field(
+        default_factory=MemorySearchQueryConfig,
+        description="查询配置"
+    )
+    hybrid: MemorySearchHybridConfig = Field(
+        default_factory=MemorySearchHybridConfig,
+        description="混合搜索配置"
+    )
+
+
 class MemoryConfig(BaseModel):
     """记忆管理配置"""
 
@@ -122,6 +165,7 @@ class MemoryConfig(BaseModel):
     daily_log_format: str = Field(default="%Y-%m-%d", description="每日日志文件名格式")
     max_context_tokens: int = Field(default=8000, description="最大上下文 tokens")
     flush: MemoryFlushConfig = Field(default_factory=MemoryFlushConfig, description="Memory Flush 配置")
+    search: MemorySearchConfig = Field(default_factory=MemorySearchConfig, description="Memory Search 配置")
 
 
 class LoggingConfig(BaseModel):

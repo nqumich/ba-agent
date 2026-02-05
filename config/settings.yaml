@@ -105,6 +105,23 @@ memory:
     llm_model: "glm-4.7-flash"      # 提取模型
     llm_timeout: 30                 # LLM 超时（秒）
 
+  # Memory Search 配置
+  search:
+    enabled: true
+    provider: "auto"               # auto, zhipuai, openai, local
+    model: "text-embedding-3-small"
+    fallback: "local"              # remote 失败时回退到 local
+    chunking:
+      tokens: 400                   # 文本分块 token 数
+      overlap: 80                   # 重叠 token 数
+    query:
+      max_results: 6                # 默认返回结果数
+      min_score: 0.35               # 最小相关性分数
+      hybrid:
+        enabled: true              # 是否启用混合搜索
+        vector_weight: 0.7          # 向量搜索权重
+        text_weight: 0.3            # 文本搜索权重
+
 # 日志配置
 logging:
   level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL

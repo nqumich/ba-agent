@@ -22,7 +22,8 @@ tool_groups:
 
   # 记忆管理 - 管理三层记忆系统
   memory:
-    - memory_search       # 搜索记忆
+    - memory_search       # 搜索记忆 (v1: grep 关键词)
+    - memory_search_v2    # 搜索记忆 (v2: 混合搜索)
     - memory_get          # 读取记忆
     - memory_write        # 写入记忆
 
