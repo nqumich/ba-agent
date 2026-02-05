@@ -7,7 +7,7 @@ import pytest
 from pathlib import Path
 import tempfile
 
-from tools.memory_search_v2 import (
+from backend.memory.tools.memory_search_v2 import (
     memory_search_v2,
     MemorySearchV2Input,
     _search_fts,
@@ -205,12 +205,11 @@ class TestMemorySearchV2:
     def test_no_index_directory(self, monkeypatch):
         """测试索引目录不存在"""
         # Mock get_index_db_path 返回不存在的路径
-        # 需要patch导入到memory_search_v2模块的函数
+        # 需要patch原始位置，因为memory_search_v2导入了这个函数
         def mock_get_index_db_path():
             return Path("/nonexistent/path/memory.db")
 
-        import tools.memory_search_v2 as search_module
-        monkeypatch.setattr(search_module, "get_index_db_path", mock_get_index_db_path)
+        monkeypatch.setattr("backend.memory.index.get_index_db_path", mock_get_index_db_path)
 
         result = memory_search_v2("test query")
         assert "搜索索引尚未创建" in result or "尚未建立" in result
@@ -223,7 +222,7 @@ class TestMemorySearchV2:
 
     def test_format_results_with_no_results(self):
         """测试格式化空结果"""
-        from tools.memory_search_v2 import _format_results_v2
+        from backend.memory.tools.memory_search_v2 import _format_results_v2
 
         result = _format_results_v2([], "test query", 0.5, "memory", True)
         assert "未找到" in result
@@ -231,7 +230,7 @@ class TestMemorySearchV2:
 
     def test_format_results_with_results(self):
         """测试格式化有结果"""
-        from tools.memory_search_v2 import _format_results_v2
+        from backend.memory.tools.memory_search_v2 import _format_results_v2
 
         results = [
             {

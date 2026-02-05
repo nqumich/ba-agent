@@ -3,7 +3,7 @@ Memory Retain 工具测试
 """
 
 import pytest
-from tools.memory_retain import (
+from backend.memory.tools.memory_retain import (
     memory_retain,
     memory_retain_parse,
     MemoryRetainInput,

@@ -4,7 +4,7 @@ memory_search 工具测试
 
 import pytest
 from pathlib import Path
-from tools.memory_search import memory_search, _get_files_to_search, MEMORY_DIR
+from backend.memory.tools.memory_search import memory_search, _get_files_to_search, MEMORY_DIR
 
 
 class TestMemorySearchInput:
@@ -13,7 +13,7 @@ class TestMemorySearchInput:
     def test_empty_query_raises_error(self):
         """测试空查询会抛出错误"""
         from pydantic import ValidationError
-        from tools.memory_search import MemorySearchInput
+        from backend.memory.tools.memory_search import MemorySearchInput
 
         with pytest.raises(ValidationError):
             MemorySearchInput(query="")
@@ -21,7 +21,7 @@ class TestMemorySearchInput:
     def test_invalid_memory_type_raises_error(self):
         """测试无效的 memory_type 会抛出错误"""
         from pydantic import ValidationError
-        from tools.memory_search import MemorySearchInput
+        from backend.memory.tools.memory_search import MemorySearchInput
 
         with pytest.raises(ValidationError):
             MemorySearchInput(query="test", memory_type="invalid")
@@ -29,7 +29,7 @@ class TestMemorySearchInput:
     def test_max_results_validation(self):
         """测试 max_results 验证"""
         from pydantic import ValidationError
-        from tools.memory_search import MemorySearchInput
+        from backend.memory.tools.memory_search import MemorySearchInput
 
         # 太小
         with pytest.raises(ValidationError):
@@ -41,7 +41,7 @@ class TestMemorySearchInput:
 
     def test_valid_input(self):
         """测试有效输入"""
-        from tools.memory_search import MemorySearchInput
+        from backend.memory.tools.memory_search import MemorySearchInput
 
         input_obj = MemorySearchInput(
             query="Python",
@@ -67,7 +67,7 @@ class TestGetFilesToSearch:
         (memory_dir / "MEMORY.md").write_text("# Memory\n")
         (memory_dir / "AGENTS.md").write_text("# Agents\n")
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -89,7 +89,7 @@ class TestGetFilesToSearch:
         (memory_dir / "MEMORY.md").write_text("# Memory\n")
         (bank_dir / "world.md").write_text("# World\n")
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -117,7 +117,7 @@ class TestGetFilesToSearch:
         yesterday_log = memory_dir / (today - timedelta(days=1)).strftime("%Y-%m-%d.md")
         yesterday_log.write_text("# Yesterday\n")
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -142,7 +142,7 @@ class TestMemorySearchFunction:
         test_file = memory_dir / "MEMORY.md"
         test_file.write_text("# Python 装饰器\n\ndecorator 可以扩展功能\n")
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -162,7 +162,7 @@ class TestMemorySearchFunction:
         test_file = bank_dir / "world.md"
         test_file.write_text("- W @Python: 装饰器\n- B @项目: 完成\n")
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -182,7 +182,7 @@ class TestMemorySearchFunction:
         test_file = memory_dir / "MEMORY.md"
         test_file.write_text("# 不相关内容\n")
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -200,7 +200,7 @@ class TestMemorySearchFunction:
         test_file = memory_dir / "MEMORY.md"
         test_file.write_text("第一行\n第二行\n匹配行\n第四行\n第五行\n")
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -222,7 +222,7 @@ class TestMemorySearchFunction:
         test_file = memory_dir / "MEMORY.md"
         test_file.write_text("\n".join([f"行{i}: 匹配内容" for i in range(10)]))
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -239,7 +239,7 @@ class TestMemorySearchTool:
 
     def test_tool_metadata(self):
         """测试工具元数据"""
-        from tools.memory_search import memory_search_tool
+        from backend.memory.tools.memory_search import memory_search_tool
 
         assert memory_search_tool.name == "memory_search"
         assert "搜索" in memory_search_tool.description
@@ -253,8 +253,8 @@ class TestMemorySearchTool:
         test_file = memory_dir / "MEMORY.md"
         test_file.write_text("# 测试内容\n")
 
-        import tools.memory_search
-        from tools.memory_search import memory_search_tool
+        import backend.memory.tools.memory_search
+        from backend.memory.tools.memory_search import memory_search_tool
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -279,7 +279,7 @@ class TestRegexSupport:
         test_file = memory_dir / "MEMORY.md"
         test_file.write_text("Python decorator\ndecorator function\n")
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -298,7 +298,7 @@ class TestRegexSupport:
         test_file = memory_dir / "MEMORY.md"
         test_file.write_text("包含 [特殊] 字符\n")
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -318,7 +318,7 @@ class TestEdgeCases:
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 
@@ -332,7 +332,7 @@ class TestEdgeCases:
         """测试不存在的目录"""
         memory_dir = tmp_path / "nonexistent"
 
-        import tools.memory_search
+        import backend.memory.tools.memory_search
         original_dir = tools.memory_search.MEMORY_DIR
         tools.memory_search.MEMORY_DIR = memory_dir
 

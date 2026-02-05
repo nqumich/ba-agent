@@ -1,17 +1,33 @@
 # BA-Agent 项目目录结构说明
 
 > 本文档详细说明 BA-Agent 项目的目录结构和各组件的用途
-> 更新时间: 2025-02-05
+> 更新时间: 2026-02-05
+
+## 整体进度
+
+- **Phase 1**: Agent Framework ✅ 100% 完成
+- **Phase 2**: Tooling Layer ✅ 100% 完成 (14 工具，764 测试)
+- **Phase 3**: Business Skills 🔄 25% 完成 (结构完整，逻辑待实现)
+- **Phase 4**: API Layer ❌ 未开始
+- **Phase 5**: Delivery Channels ❌ 未开始
+
+**总体进度**: ~50%
 
 ## 目录概览
 
 ```
 ba-agent/
 ├── backend/          # 后端核心模块
-├── tools/            # LangChain 工具集合 (9个)
-├── skills/           # Skills 实现 (4个内置)
+│   ├── agents/       # Agent 实现 (含 MemoryFlush/Compaction)
+│   ├── memory/       # 三层记忆系统 (Flush/Search/Watcher)
+│   ├── models/       # Pydantic 数据模型
+│   ├── docker/       # Docker 沙盒
+│   ├── hooks/        # 系统钩子
+│   └── orchestration/ # 任务编排
+├── tools/            # LangChain 工具集合 (14个)
+├── skills/           # Skills 实现 (4个内置，结构完整)
 ├── config/           # 配置管理系统
-├── tests/            # 测试套件 (481个测试)
+├── tests/            # 测试套件 (764个测试)
 ├── memory/           # 每日对话日志 (Layer 1)
 ├── docs/             # 项目文档
 ├── scripts/          # 工具脚本
@@ -27,7 +43,7 @@ ba-agent/
 
 ## 1. backend/ - 后端核心模块
 
-后端核心代码，包含 Agent 实现、Docker 集成、数据模型等。
+后端核心代码，包含 Agent 实现、Memory 系统、Docker 集成、数据模型等。
 
 ### 1.1 backend/agents/ - Agent 实现
 
@@ -38,6 +54,8 @@ agents/
                             - ChatAnthropic 初始化
                             - LangGraph AgentExecutor
                             - MemorySaver 对话历史
+                            - MemoryFlush (Clawdbot 风格)
+                            - Conversation Compaction
 ```
 
 **关键功能**:
@@ -45,8 +63,36 @@ agents/
 - 集成 Claude Sonnet 4.5 模型
 - 支持自定义 API 端点 (LingYi AI)
 - 支持工具调用和记忆管理
+- **MemoryFlush**: 基于 token 阈值的自动记忆提取和卸载
+- **Compaction**: MemoryFlush 后自动压缩对话上下文
 
-### 1.2 backend/docker/ - Docker 沙盒
+### 1.2 backend/memory/ - 三层记忆系统
+
+```
+memory/
+├── __init__.py
+├── flush.py              # MemoryFlush - Clawdbot 风格记忆提取
+├── index.py              # MemoryWatcher - 文件监听和索引
+├── search.py             # MemorySearch - FTS5 + 向量混合搜索
+├── embedding.py          # EmbeddingProvider - 多源 Embedding
+├── database.py           # SQLite FTS5 索引管理
+└── tools/                # Memory 工具（系统内部，不暴露给 Agent）
+    ├── __init__.py
+    ├── memory_write.py    # 记忆写入（自动层级选择）
+    ├── memory_get.py     # 记忆文件读取
+    ├── memory_retain.py  # LLM 记忆提取 (W/B/O 格式)
+    ├── memory_search.py  # 旧版记忆搜索
+    └── memory_search_v2.py # FTS5 + 向量混合搜索
+```
+
+**关键功能**:
+- **MemoryFlush**: 无声回复模式，自动提取结构化记忆
+- **MemoryWatcher**: 文件变更监听，自动更新索引
+- **MemorySearch**: BM25 + Cosine 混合搜索
+- **EmbeddingProvider**: OpenAI/Zhipuai/Local 三重回退机制
+- **Memory Tools**: 系统内部工具，仅供 MemoryFlush/MemoryWatcher 使用
+
+### 1.3 backend/docker/ - Docker 沙盒
 
 ```
 docker/
@@ -62,7 +108,7 @@ docker/
 - CPU quota 和内存限制
 - 超时控制
 
-### 1.3 backend/hooks/ - 系统钩子
+### 1.4 backend/hooks/ - 系统钩子
 
 ```
 hooks/
@@ -72,7 +118,7 @@ hooks/
                             - 生命周期钩子
 ```
 
-### 1.4 backend/orchestration/ - 任务编排
+### 1.5 backend/orchestration/ - 任务编排
 
 ```
 orchestration/
@@ -81,7 +127,7 @@ orchestration/
 └── tool_orchestrator.py  # 工具编排器
 ```
 
-### 1.5 backend/models/ - 数据模型（统一位置）
+### 1.6 backend/models/ - 数据模型（统一位置）
 
 **重要**: 所有 Pydantic 数据模型统一放在此目录。
 
@@ -112,9 +158,10 @@ from backend.models.agent import BAAgentConfig, AgentState
 from models.tool_output import ToolOutput
 ```
 
-## 2. tools/ - LangChain 工具集合
+## 2. tools/ - Agent 工具集合
 
 所有 LangChain StructuredTool 实现，每个工具一个文件。
+**注意**: 这些是主 Agent 可用的业务工具。Memory 相关的系统内部工具已移至 `backend/memory/tools/`。
 
 ### 工具列表
 
@@ -126,6 +173,7 @@ from models.tool_output import ToolOutput
 | web_search.py | web_search | Web 搜索 (Z.ai MCP) | 22 tests ✅ |
 | web_reader.py | web_reader | Web 读取 (Z.ai MCP) | 27 tests ✅ |
 | file_reader.py | file_reader | 多格式文件读取 | 61 tests ✅ |
+| file_write.py | file_write | 通用文件写入 (append/overwrite/prepend) | 14 tests ✅ |
 | database.py | query_database | SQL 查询 | 54 tests ✅ |
 | vector_search.py | search_knowledge | 向量检索 | 51 tests ✅ |
 | skill_invoker.py | invoke_skill | Skill 调用 | 43 tests ✅ |
@@ -140,7 +188,7 @@ from models.tool_output import ToolOutput
 
 ## 3. skills/ - Skills 实现
 
-可复用的分析能力模块。
+可复用的分析能力模块。**注意**: 当前结构已完整，但各 Skill 的核心业务逻辑为待实现的 stub。
 
 ### 目录结构
 
@@ -205,9 +253,10 @@ config/
 ├── config.py               # 配置管理核心类
 ├── settings.yaml           # 主配置文件
 ├── skills.yaml             # Skills 运行时配置
-├── skills_registry.json    # Skills 注册表（唯一真实来源）
 └── tools.yaml              # 工具配置
 ```
+
+**注意**: `skills_registry.json` 目前缺失，需要创建以跟踪已安装 Skills 的元数据。
 
 ### settings.yaml - 主配置
 
@@ -217,6 +266,11 @@ config/
 - **向量数据库**: ChromaDB 配置
 - **Docker**: 镜像、网络、资源限制
 - **记忆**: 三层记忆系统配置
+  - `memory.flush.enabled`: MemoryFlush 开关
+  - `memory.flush.soft_threshold_tokens`: 软阈值 token 数
+  - `memory.flush.compaction_keep_recent`: 压缩对话时保留最近的消息数量
+  - `memory.search.hybrid.enabled`: 混合搜索开关
+  - `memory.watcher.enabled`: 文件监听开关
 - **安全**: SQL 安全策略
 
 支持环境变量覆盖：
@@ -224,10 +278,6 @@ config/
 export BA_DATABASE__HOST=localhost
 export BA_LLM__API_KEY=sk-xxx
 ```
-
-### skills_registry.json - Skills 注册表
-
-记录所有已安装 Skills 的元数据，是 Skills 状态的唯一真实来源。
 
 ## 5. tests/ - 测试套件
 
@@ -237,6 +287,9 @@ export BA_LLM__API_KEY=sk-xxx
 tests/
 ├── __init__.py
 ├── conftest.py              # pytest 全局配置
+├── backend/                 # 后端测试
+│   ├── test_flush.py        # MemoryFlush 测试
+│   └── test_memory_flush_integration.py
 ├── models/                  # 模型测试
 │   ├── __init__.py
 │   ├── test_models.py       # 所有模型测试
@@ -254,6 +307,11 @@ tests/
     ├── test_database.py
     ├── test_execute_command.py
     ├── test_file_reader.py
+    ├── test_file_write.py
+    ├── test_memory_get.py
+    ├── test_memory_retain.py
+    ├── test_memory_search_v2.py
+    ├── test_memory_write.py
     ├── test_python_sandbox.py
     ├── test_skill_invoker.py
     ├── test_skill_manager.py
@@ -266,8 +324,8 @@ tests/
 
 ### 测试统计
 
-- **总计**: 481 个测试
-- **通过**: 481 (100%)
+- **总计**: 764 个测试
+- **通过**: 764 (100%)
 - **跳过**: 0
 
 ### 运行测试
@@ -290,14 +348,15 @@ pytest --cov=backend --cov=tools --cov-report=html
 
 ## 6. 三层记忆系统
 
-采用 Clawdbot/Manus 模式的三层记忆架构。
+采用 Clawdbot/Manus 模式的三层记忆架构，结合了 MemoryFlush、MemoryWatcher 和混合搜索。
 
 ### 实际文件组织
 
 **每日对话日志** (memory/ 目录):
 ```
 memory/
-└── 2025-02-04.md          # Layer 1: 每日对话日志
+├── 2025-02-04.md          # Layer 1: 每日对话日志
+└── memory_index.db        # SQLite FTS5 索引
 ```
 
 **核心记忆文件** (根目录):
@@ -328,9 +387,29 @@ memory/
 ### 使用方式
 
 Agent 可以通过以下工具管理记忆：
-- **memory_search**: 语义搜索 MEMORY.md + memory/*.md
+- **memory_search_v2**: FTS5 + 向量混合搜索 MEMORY.md + memory/*.md
 - **memory_get**: 读取特定内存文件
 - **memory_write**: 写入记忆（自动选择 Layer 1 或 Layer 2）
+- **memory_retain**: LLM 提取结构化记忆 (W/B/O(c=)/S 格式)
+
+### 核心特性
+
+#### MemoryFlush (Clawdbot 风格)
+- **触发条件**: `contextTokens > contextWindow - reserveTokens - softThreshold`
+- **提取方式**: LLM 静默提取，返回 `_SILENT_` 标记
+- **后续动作**: 自动压缩对话上下文 (保留最近 N 条消息)
+- **存储位置**: 自动选择 Layer 1 (临时) 或 Layer 2 (持久)
+
+#### MemoryWatcher
+- **功能**: 监听 memory/ 目录文件变更
+- **自动索引**: 文件变更时自动更新 FTS5 索引
+- **状态**: 默认禁用 (避免资源占用)
+
+#### MemorySearch (混合搜索)
+- **FTS5 全文搜索**: BM25 算法
+- **向量搜索**: Cosine 相似度
+- **权重**: 70% 向量 + 30% 文本
+- **最小分数**: 0.35
 
 ## 7. docs/ - 项目文档
 
@@ -339,7 +418,8 @@ docs/
 ├── PRD.md                              # 产品需求文档
 ├── project-structure.md                # 本文档 - 项目目录结构
 ├── tool-output-format-design.md        # 工具输出格式设计
-└── mcp-setup.md                        # MCP 服务器配置
+├── mcp-setup.md                        # MCP 服务器配置
+└── memory-flush-redesign.md            # MemoryFlush 重设计文档
 ```
 
 ### 其他重要文档
@@ -496,6 +576,7 @@ mcp_config = get_config_manager().get_mcp_config()
 
 ---
 
-**文档版本**: v1.1
-**最后更新**: 2025-02-05
+**文档版本**: v1.3
+**最后更新**: 2026-02-05
 **维护者**: BA-Agent Team
+**测试状态**: 743/764 通过 (21 个测试断言待修复)

@@ -2,10 +2,11 @@
 memory_write 工具测试
 """
 
+import importlib
 import pytest
 from pathlib import Path
 from datetime import date
-from tools.memory_write import (
+from backend.memory.tools.memory_write import (
     memory_write,
     _auto_detect_layer,
     _resolve_target_file,
@@ -14,13 +15,18 @@ from tools.memory_write import (
 )
 
 
+def _get_memory_write_module():
+    """获取 memory_write 模块，避免与同名的函数混淆"""
+    return importlib.import_module("backend.memory.tools.memory_write")
+
+
 class TestMemoryWriteInput:
     """测试 MemoryWriteInput 验证"""
 
     def test_empty_content_raises_error(self):
         """测试空内容会抛出错误"""
         from pydantic import ValidationError
-        from tools.memory_write import MemoryWriteInput
+        from backend.memory.tools.memory_write import MemoryWriteInput
 
         with pytest.raises(ValidationError):
             MemoryWriteInput(content="")
@@ -31,7 +37,7 @@ class TestMemoryWriteInput:
     def test_invalid_layer_raises_error(self):
         """测试无效的 layer 会抛出错误"""
         from pydantic import ValidationError
-        from tools.memory_write import MemoryWriteInput
+        from backend.memory.tools.memory_write import MemoryWriteInput
 
         with pytest.raises(ValidationError):
             MemoryWriteInput(content="test", layer="invalid")
@@ -39,7 +45,7 @@ class TestMemoryWriteInput:
     def test_invalid_category_raises_error(self):
         """测试无效的 category 会抛出错误"""
         from pydantic import ValidationError
-        from tools.memory_write import MemoryWriteInput
+        from backend.memory.tools.memory_write import MemoryWriteInput
 
         with pytest.raises(ValidationError):
             MemoryWriteInput(content="test", category="invalid")
@@ -47,7 +53,7 @@ class TestMemoryWriteInput:
     def test_category_with_non_bank_layer_raises_error(self):
         """测试非 bank 层使用 category 会抛出错误"""
         from pydantic import ValidationError
-        from tools.memory_write import MemoryWriteInput
+        from backend.memory.tools.memory_write import MemoryWriteInput
 
         with pytest.raises(ValidationError):
             MemoryWriteInput(content="test", layer="daily", category="world")
@@ -55,14 +61,14 @@ class TestMemoryWriteInput:
     def test_path_traversal_attack_raises_error(self):
         """测试路径遍历攻击会抛出错误"""
         from pydantic import ValidationError
-        from tools.memory_write import MemoryWriteInput
+        from backend.memory.tools.memory_write import MemoryWriteInput
 
         with pytest.raises(ValidationError):
             MemoryWriteInput(content="test", file_path="../etc/passwd")
 
     def test_valid_input(self):
         """测试有效输入"""
-        from tools.memory_write import MemoryWriteInput
+        from backend.memory.tools.memory_write import MemoryWriteInput
 
         input_obj = MemoryWriteInput(
             content="测试内容",
@@ -195,9 +201,9 @@ class TestMemoryWriteFunction:
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write("今天学习了 Python", layer="daily")
@@ -211,16 +217,16 @@ class TestMemoryWriteFunction:
             content = log_file.read_text()
             assert "今天学习了 Python" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_write_to_memory_md(self, tmp_path):
         """测试写入 MEMORY.md"""
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write("# 用户偏好\n\n喜欢简洁的代码", layer="longterm")
@@ -234,7 +240,7 @@ class TestMemoryWriteFunction:
             assert "用户偏好" in content
             assert "喜欢简洁的代码" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_write_to_bank_world(self, tmp_path):
         """测试写入 bank/world.md"""
@@ -242,9 +248,9 @@ class TestMemoryWriteFunction:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write(
@@ -262,7 +268,7 @@ class TestMemoryWriteFunction:
             assert "W @Python" in content
             assert "装饰器" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_write_to_bank_experience(self, tmp_path):
         """测试写入 bank/experience.md"""
@@ -270,9 +276,9 @@ class TestMemoryWriteFunction:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write(
@@ -288,7 +294,7 @@ class TestMemoryWriteFunction:
             content = exp_file.read_text()
             assert "B @项目" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_write_to_bank_opinions(self, tmp_path):
         """测试写入 bank/opinions.md"""
@@ -296,9 +302,9 @@ class TestMemoryWriteFunction:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write(
@@ -314,7 +320,7 @@ class TestMemoryWriteFunction:
             content = opinions_file.read_text()
             assert "O(c=0.9)" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_append_mode(self, tmp_path):
         """测试追加模式"""
@@ -322,9 +328,9 @@ class TestMemoryWriteFunction:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             # 第一次写入
@@ -340,7 +346,7 @@ class TestMemoryWriteFunction:
             assert "第一条内容" in content
             assert "第二条内容" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_overwrite_mode(self, tmp_path):
         """测试覆盖模式"""
@@ -348,9 +354,9 @@ class TestMemoryWriteFunction:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             # 第一次写入
@@ -366,7 +372,7 @@ class TestMemoryWriteFunction:
             assert "原始内容" not in content
             assert "新内容" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_timestamp_disabled(self, tmp_path):
         """测试禁用时间戳"""
@@ -374,9 +380,9 @@ class TestMemoryWriteFunction:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write("内容", layer="bank", category="world", timestamp=False)
@@ -388,7 +394,7 @@ class TestMemoryWriteFunction:
             assert "## " not in content  # 时间戳格式是 ## YYYY-MM-DD HH:MM:SS
             assert "内容" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_timestamp_enabled(self, tmp_path):
         """测试启用时间戳"""
@@ -396,9 +402,9 @@ class TestMemoryWriteFunction:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write("内容", layer="bank", category="world", timestamp=True)
@@ -410,31 +416,31 @@ class TestMemoryWriteFunction:
             assert "## " in content  # 时间戳格式
             assert "内容" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_context_layer_requires_file_path(self, tmp_path):
         """测试 context 层级需要明确指定文件路径"""
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write("内容", layer="context")
             assert "无法确定目标文件" in result
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_context_layer_with_file_path(self, tmp_path):
         """测试 context 层级配合文件路径"""
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write("# 新指令\n\n内容", layer="context", file_path="AGENTS.md")
@@ -446,7 +452,7 @@ class TestMemoryWriteFunction:
             content = agents_file.read_text()
             assert "新指令" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_auto_detect_with_retain_format(self, tmp_path):
         """测试 auto 层级自动检测 Retain 格式"""
@@ -454,9 +460,9 @@ class TestMemoryWriteFunction:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             # 包含 Retain 格式，应自动写入 bank/experience.md
@@ -469,16 +475,16 @@ class TestMemoryWriteFunction:
             content = exp_file.read_text()
             assert "B @测试" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_auto_detect_with_daily_keywords(self, tmp_path):
         """测试 auto 层级自动检测每日关键词"""
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write("今天完成了任务", layer="auto")
@@ -491,7 +497,7 @@ class TestMemoryWriteFunction:
             content = log_file.read_text()
             assert "今天完成了任务" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
 
 class TestMemoryWriteTool:
@@ -509,9 +515,9 @@ class TestMemoryWriteTool:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             result = memory_write_tool.invoke({
@@ -526,7 +532,7 @@ class TestMemoryWriteTool:
             content = world_file.read_text()
             assert "W @测试" in content
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
 
 class TestEdgeCases:
@@ -538,9 +544,9 @@ class TestEdgeCases:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             # 内容前后有空格
@@ -552,7 +558,7 @@ class TestEdgeCases:
             # 应该没有前后空格
             assert content == "内容"
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_long_content_preview(self, tmp_path):
         """测试长内容的预览截断"""
@@ -560,9 +566,9 @@ class TestEdgeCases:
         bank_dir = memory_dir / "bank"
         bank_dir.mkdir(parents=True)
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             # 超过100字符的内容
@@ -571,16 +577,16 @@ class TestEdgeCases:
             assert "成功" in result
             assert "..." in result  # 预览被截断
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir
 
     def test_creates_bank_directory(self, tmp_path):
         """测试自动创建 bank 目录"""
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
 
-        import tools.memory_write
-        original_dir = tools.memory_write.MEMORY_DIR
-        tools.memory_write.MEMORY_DIR = memory_dir
+        mw_module = _get_memory_write_module()
+        original_dir = mw_module.MEMORY_DIR
+        mw_module.MEMORY_DIR = memory_dir
 
         try:
             # bank 目录不存在
@@ -595,4 +601,4 @@ class TestEdgeCases:
             assert bank_dir.exists()
             assert (bank_dir / "world.md").exists()
         finally:
-            tools.memory_write.MEMORY_DIR = original_dir
+            mw_module.MEMORY_DIR = original_dir

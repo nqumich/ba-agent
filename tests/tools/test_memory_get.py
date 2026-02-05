@@ -7,7 +7,7 @@ import pytest
 from datetime import date, timedelta
 from pathlib import Path
 
-from tools.memory_get import memory_get, memory_get_tool, MemoryGetInput
+from backend.memory.tools.memory_get import memory_get, memory_get_tool, MemoryGetInput
 from pydantic import ValidationError
 
 
@@ -84,7 +84,7 @@ class TestMemoryGetFunction:
     def test_read_simple_file(self, memory_dir):
         """测试读取简单文件"""
         # 注意：这里需要临时修改 MEMORY_DIR 或使用 mock
-        import tools.memory_get as mg
+        import backend.memory.tools.memory_get as mg
         original_dir = mg.MEMORY_DIR
         mg.MEMORY_DIR = memory_dir
 
@@ -97,7 +97,7 @@ class TestMemoryGetFunction:
 
     def test_read_with_line_range(self, memory_dir):
         """测试读取指定行号范围"""
-        import tools.memory_get as mg
+        import backend.memory.tools.memory_get as mg
         original_dir = mg.MEMORY_DIR
         mg.MEMORY_DIR = memory_dir
 
@@ -111,7 +111,7 @@ class TestMemoryGetFunction:
 
     def test_read_nonexistent_file(self, memory_dir):
         """测试读取不存在的文件"""
-        import tools.memory_get as mg
+        import backend.memory.tools.memory_get as mg
         original_dir = mg.MEMORY_DIR
         mg.MEMORY_DIR = memory_dir
 
@@ -124,7 +124,7 @@ class TestMemoryGetFunction:
 
     def test_max_length_limit(self, memory_dir):
         """测试长度限制"""
-        import tools.memory_get as mg
+        import backend.memory.tools.memory_get as mg
         original_dir = mg.MEMORY_DIR
         mg.MEMORY_DIR = memory_dir
 
@@ -148,7 +148,7 @@ class TestMemoryGetTool:
     def test_tool_invocation(self):
         """测试工具调用"""
         # 创建一个临时文件进行测试
-        import tools.memory_get as mg
+        import backend.memory.tools.memory_get as mg
         original_dir = mg.MEMORY_DIR
 
         # 使用项目实际的 memory 目录
@@ -185,7 +185,7 @@ class TestRecentLogs:
 
     def test_get_recent_logs(self, memory_dir_with_logs):
         """测试获取最近日志"""
-        import tools.memory_get as mg
+        import backend.memory.tools.memory_get as mg
         original_dir = mg.MEMORY_DIR
         mg.MEMORY_DIR = memory_dir_with_logs
 
@@ -199,7 +199,7 @@ class TestRecentLogs:
 
     def test_get_recent_logs_with_limit(self, memory_dir_with_logs):
         """测试获取最近日志并限制长度"""
-        import tools.memory_get as mg
+        import backend.memory.tools.memory_get as mg
         original_dir = mg.MEMORY_DIR
         mg.MEMORY_DIR = memory_dir_with_logs
 
