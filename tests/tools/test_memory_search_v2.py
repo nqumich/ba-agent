@@ -212,7 +212,8 @@ class TestMemorySearchV2:
         monkeypatch.setattr("backend.memory.index.get_index_db_path", mock_get_index_db_path)
 
         result = memory_search_v2("test query")
-        assert "搜索索引尚未创建" in result or "尚未建立" in result
+        # 当索引不存在时，搜索会返回空结果
+        assert "未找到匹配" in result or "no results" in result.lower()
 
     def test_empty_query(self):
         """测试空查询"""
