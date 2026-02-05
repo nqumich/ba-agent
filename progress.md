@@ -393,6 +393,49 @@ agent = create_agent(model, [test_tool], checkpointer=memory)
 
 ---
 
+### 2026-02-05 14:00 - Memory Flush 重构 (Clawdbot 风格)
+
+#### 完成的工作
+
+1. **创建设计文档**
+   - ✅ 创建 `docs/memory-flush-redesign.md`
+   - 记录方案 A (完全模拟 Clawdbot 静默 ReAct 轮次)
+   - 记录方案 B (简化版本 - 当前实现)
+
+2. **实现简化版本 (方案 B)**
+   - ✅ 添加 `SILENT_REPLY_TOKEN = "_SILENT_"` 常量
+   - ✅ 添加 `memory_flush_compaction_count` 追踪
+   - ✅ 实现 `_should_run_memory_flush()` 函数 (Clawdbot 风格的阈值检测)
+   - ✅ 优化 `_check_and_flush()` 避免重复 flush
+   - ✅ 移除 `_run_flush_turn()` 方法 (不再需要额外轮次)
+   - ✅ Flush 结果对用户不可见 (只记录日志)
+
+3. **测试验证**
+   - ✅ 750 个测试全部通过
+   - ✅ Memory Flush 集成测试通过
+
+#### 关键变更
+
+```python
+# Clawdbot 风格的阈值检测
+def _should_run_memory_flush(self, current_tokens: int) -> bool:
+    threshold = context_window - reserve_tokens - soft_threshold_tokens
+    if current_tokens < threshold:
+        return False
+    # 避免重复 flush
+    if self.memory_flush_compaction_count == self.compaction_count:
+        return False
+    return True
+```
+
+#### 设计文档
+
+两种方案已记录在 `docs/memory-flush-redesign.md`:
+- **方案 A**: 完全模拟 Clawdbot (注入额外 ReAct 轮次)
+- **方案 B**: 简化版本 (当前实现，LLM 直接提取)
+
+---
+
 **最后更新**: 2025-02-05 15:00
 
 ### 工具调用 (2026-02-05 02:04:48)

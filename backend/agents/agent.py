@@ -20,6 +20,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import create_react_agent
 
+import logging
+
 from config import get_config
 from backend.models.agent import (
     AgentState as AgentModel,
@@ -31,6 +33,11 @@ from backend.models.agent import (
 )
 from backend.memory.flush import MemoryFlush, MemoryFlushConfig, MemoryExtractor
 from backend.memory.index import MemoryIndexer, MemoryWatcher, get_index_db_path
+
+logger = logging.getLogger(__name__)
+
+# Clawdbot 风格的静默响应标记
+SILENT_REPLY_TOKEN = "_SILENT_"
 
 
 class AgentState(TypedDict):
@@ -92,6 +99,8 @@ class BAAgent:
         # 会话 token 跟踪
         self.session_tokens = 0
         self.compaction_count = 0
+        # Memory Flush 状态追踪 (Clawdbot 风格)
+        self.memory_flush_compaction_count: Optional[int] = None
 
     def _load_default_config(self) -> AgentConfigModel:
         """
@@ -337,6 +346,39 @@ class BAAgent:
 
         return total
 
+    def _should_run_memory_flush(self, current_tokens: int) -> bool:
+        """
+        判断是否应该运行 Memory Flush (Clawdbot 风格)
+
+        Args:
+            current_tokens: 当前使用的 token 数
+
+        Returns:
+            是否应该运行 flush
+        """
+        if self.memory_flush is None:
+            return False
+
+        # 获取配置
+        flush_config = self.app_config.memory.flush
+        context_window = self.app_config.llm.max_tokens  # 假设使用 max_tokens 作为上下文窗口
+        soft_threshold = flush_config.soft_threshold_tokens
+        reserve_tokens = flush_config.reserve_tokens_floor
+
+        # 计算阈值 (Clawdbot: contextWindow - reserveTokensFloor - softThresholdTokens)
+        threshold = context_window - reserve_tokens - soft_threshold
+
+        # 检查 token 阈值
+        if current_tokens < threshold:
+            return False
+
+        # 检查是否已经在本次 compaction 中 flush 过
+        if (self.memory_flush_compaction_count is not None and
+            self.memory_flush_compaction_count == self.compaction_count):
+            return False
+
+        return True
+
     def _check_and_flush(
         self,
         conversation_id: str,
@@ -357,12 +399,19 @@ class BAAgent:
         if self.memory_flush is None:
             return None
 
-        # 更新消息缓存
+        # 始终更新消息缓存（积累上下文）
         for msg in messages:
             if isinstance(msg, HumanMessage):
                 self.memory_flush.add_message("user", msg.content)
             elif isinstance(msg, AIMessage):
                 self.memory_flush.add_message("assistant", msg.content)
+
+        # 检查是否应该运行 flush
+        if not self._should_run_memory_flush(current_tokens):
+            return None
+
+        # 记录当前 compaction_count
+        self.memory_flush_compaction_count = self.compaction_count
 
         # 检查并触发 flush
         result = self.memory_flush.check_and_flush(current_tokens)
@@ -370,80 +419,16 @@ class BAAgent:
         if result["flushed"]:
             # 更新 compaction 计数
             self.compaction_count += 1
+            # 记录日志 (用户不可见)
+            logger.info(
+                f"Memory Flush triggered: {result['reason']}, "
+                f"{result['memories_extracted']} memories extracted, "
+                f"{result['memories_written']} memories written"
+            )
             # 重置 token 计数
             self.session_tokens = 0
 
         return result if result["flushed"] else None
-
-    def _run_flush_turn(self, conversation_id: str) -> str:
-        """
-        运行 Memory Flush 专门的 Agent turn
-
-        Args:
-            conversation_id: 对话 ID
-
-        Returns:
-            Flush 结果消息
-        """
-        if self.memory_flush is None:
-            return ""
-
-        # Flush system prompt
-        flush_system_prompt = """# Memory Flush 模式
-
-你现在处于 Memory Flush 模式。你的任务是从当前对话中提取重要信息并持久化到记忆文件。
-
-## Retain 格式规范
-
-使用以下格式提取信息：
-- W @entity: 内容    # 世界事实 (World Facts)
-- B @entity: 内容    # 传记信息 (Biography)
-- O(c=0.9) @entity:  # 观点 (Opinion)
-- S @entity: 内容    # 总结 (Summary)
-
-## 提取指南
-
-1. **只提取真正重要的信息** - 值得长期保存的知识
-2. **优先提取具体事实** - 而不是笼统的描述
-3. **包含上下文** - 实体、时间、关系等
-4. **使用合适的类型**:
-   - W: 客观事实、技术决策、架构设计
-   - B: 用户偏好、项目经历、操作历史
-   - O: 判断、评估、建议（带置信度）
-   - S: 会议总结、任务完成情况
-
-## 示例
-
-- W @Claude: Claude Opus 4.5 是当前最强大的模型
-- B @项目: Phase 2 核心工具已全部完成
-- O(c=0.8) @架构: 双记忆系统设计是正确的方向
-- S @今日: 完成了 189 个测试，覆盖所有记忆模块
-
-使用 memory_write 工具将提取的记忆保存到文件。
-返回 _SILENT_ 表示完成（不需要向用户展示此消息）。
-"""
-
-        # 获取当前消息缓存
-        messages_for_flush = []
-        for msg_dict in self.memory_flush.message_buffer:
-            messages_for_flush.append({
-                "role": msg_dict["role"],
-                "content": msg_dict["content"],
-            })
-
-        # 如果没有消息，直接返回
-        if not messages_for_flush:
-            return ""
-
-        # 直接使用 MemoryExtractor 提取
-        memories = self.memory_flush.extractor.extract_from_messages(messages_for_flush)
-
-        # 写入记忆文件
-        if memories:
-            written = self.memory_flush._flush_memories(memories)
-            return f"已提取并保存 {written} 条记忆。"
-
-        return ""
 
     def _create_agent(self):
         """
@@ -539,16 +524,15 @@ class BAAgent:
             tokens_used = self._get_total_tokens(result)
             self.session_tokens += tokens_used
 
-            # 检查是否需要 Memory Flush
+            # 检查是否需要 Memory Flush (静默执行，用户不可见)
             flush_result = self._check_and_flush(
                 conversation_id,
                 result.get("messages", []),
                 self.session_tokens,
             )
 
-            # 如果触发了 flush，运行 flush turn
-            if flush_result:
-                flush_message = self._run_flush_turn(conversation_id)
+            # Flush 结果不对用户暴露，只记录日志
+            # (Clawdbot 风格: 静默轮次)
 
             # 提取响应
             response = self._extract_response(result)
@@ -561,7 +545,7 @@ class BAAgent:
                 "timestamp": datetime.now().isoformat(),
                 "tokens_used": tokens_used,
                 "session_tokens": self.session_tokens,
-                "flush_triggered": flush_result is not None,
+                # flush_triggered 不再暴露给用户 (Clawdbot 风格: 静默)
             }
 
         except Exception as e:
