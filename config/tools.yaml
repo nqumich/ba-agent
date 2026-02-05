@@ -26,6 +26,8 @@ tool_groups:
     - memory_search_v2    # 搜索记忆 (v2: 混合搜索)
     - memory_get          # 读取记忆
     - memory_write        # 写入记忆
+    - memory_retain       # 格式化 Retain 结构化记忆
+    - memory_retain_parse # 解析 Retain 格式
 
 # 状态转换规则
 state_transitions:
