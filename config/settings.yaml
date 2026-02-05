@@ -95,6 +95,16 @@ memory:
   daily_log_format: "%Y-%m-%d"
   max_context_tokens: 8000
 
+  # Memory Flush 配置
+  flush:
+    enabled: true
+    soft_threshold_tokens: 4000    # 距离限制多少 token 时触发
+    reserve_tokens_floor: 2000     # 保留空间
+    min_memory_count: 3             # 最少记忆数量
+    max_memory_age_hours: 24.0      # 记忆最大年龄（小时）
+    llm_model: "glm-4.7-flash"      # 提取模型
+    llm_timeout: 30                 # LLM 超时（秒）
+
 # 日志配置
 logging:
   level: INFO  # DEBUG, INFO, WARNING, ERROR, CRITICAL

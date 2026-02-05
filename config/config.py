@@ -102,6 +102,18 @@ class DockerConfig(BaseModel):
     network_disabled: bool = Field(default=True, description="是否禁用网络")
 
 
+class MemoryFlushConfig(BaseModel):
+    """Memory Flush 配置"""
+
+    enabled: bool = Field(default=True, description="是否启用 Memory Flush")
+    soft_threshold_tokens: int = Field(default=4000, description="软阈值 token 数")
+    reserve_tokens_floor: int = Field(default=2000, description="保留 token 数量")
+    min_memory_count: int = Field(default=3, description="最少记忆数量")
+    max_memory_age_hours: float = Field(default=24.0, description="记忆最大年龄（小时）")
+    llm_model: str = Field(default="glm-4.7-flash", description="LLM 提取模型")
+    llm_timeout: int = Field(default=30, description="LLM 超时（秒）")
+
+
 class MemoryConfig(BaseModel):
     """记忆管理配置"""
 
@@ -109,6 +121,7 @@ class MemoryConfig(BaseModel):
     memory_dir: str = Field(default="./memory", description="记忆文件目录")
     daily_log_format: str = Field(default="%Y-%m-%d", description="每日日志文件名格式")
     max_context_tokens: int = Field(default=8000, description="最大上下文 tokens")
+    flush: MemoryFlushConfig = Field(default_factory=MemoryFlushConfig, description="Memory Flush 配置")
 
 
 class LoggingConfig(BaseModel):

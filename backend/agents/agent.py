@@ -7,6 +7,7 @@ BA-Agent 主 Agent 类
 import os
 from typing import Any, Dict, List, Optional, Sequence, TypedDict
 from datetime import datetime
+from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -26,6 +27,7 @@ from backend.models.agent import (
     MessageType,
     AgentConfig as AgentConfigModel,
 )
+from backend.memory.flush import MemoryFlush, MemoryFlushConfig, MemoryExtractor
 
 
 class AgentState(TypedDict):
@@ -77,6 +79,13 @@ class BAAgent:
 
         # 初始化检查点保存器（用于对话历史）
         self.memory = MemorySaver()
+
+        # 初始化 Memory Flush
+        self.memory_flush = self._init_memory_flush()
+
+        # 会话 token 跟踪
+        self.session_tokens = 0
+        self.compaction_count = 0
 
     def _load_default_config(self) -> AgentConfigModel:
         """
@@ -195,7 +204,198 @@ class BAAgent:
 - 重要信息会自动保存到长期记忆
 - 每日操作记录在 daily log 中
 - 当前任务计划存储在 task_plan.md 中
+
+## Memory Flush 协议
+
+当会话接近上下文限制时，系统会自动触发 Memory Flush：
+1. 自动从对话中提取重要信息
+2. 格式化为结构化的 Retain 格式 (W @, B @, O(c=) @)
+3. 持久化到 memory/YYYY-MM-DD.md 文件
+4. 释放上下文空间以继续对话
+
+你会在此时收到专门的 Flush 指令，请专注于记忆提取工作。
 """
+
+    def _init_memory_flush(self) -> Optional[MemoryFlush]:
+        """
+        初始化 Memory Flush
+
+        Returns:
+            MemoryFlush 实例，如果未启用则返回 None
+        """
+        if not self.app_config.memory.enabled:
+            return None
+
+        flush_config = self.app_config.memory.flush
+        if not flush_config.enabled:
+            return None
+
+        # 创建 MemoryFlushConfig
+        memory_flush_config = MemoryFlushConfig(
+            soft_threshold=flush_config.soft_threshold_tokens,
+            reserve=flush_config.reserve_tokens_floor,
+            min_memory_count=flush_config.min_memory_count,
+            max_memory_age_hours=flush_config.max_memory_age_hours,
+        )
+
+        # 创建 MemoryExtractor
+        memory_path = Path(self.app_config.memory.memory_dir)
+        extractor = MemoryExtractor(
+            model=flush_config.llm_model,
+            llm_timeout=flush_config.llm_timeout,
+        )
+
+        # 创建 MemoryFlush
+        return MemoryFlush(
+            config=memory_flush_config,
+            memory_path=memory_path,
+            extractor=extractor,
+        )
+
+    def _get_total_tokens(self, result: Dict[str, Any]) -> int:
+        """
+        从 Agent 结果中提取总 token 数
+
+        Args:
+            result: Agent 返回结果
+
+        Returns:
+            总 token 数
+        """
+        total = 0
+
+        # 尝试从 response_metadata 中获取
+        if "response_metadata" in result:
+            metadata = result["response_metadata"]
+            if "usage" in metadata:
+                usage = metadata["usage"]
+                total += usage.get("input_tokens", 0)
+                total += usage.get("output_tokens", 0)
+
+        # 尝试从 messages 中获取
+        messages = result.get("messages", [])
+        for msg in messages:
+            if isinstance(msg, AIMessage):
+                if hasattr(msg, "usage_metadata"):
+                    usage = msg.usage_metadata or {}
+                    total += usage.get("input_tokens", 0)
+                    total += usage.get("output_tokens", 0)
+                if hasattr(msg, "response_metadata"):
+                    metadata = msg.response_metadata or {}
+                    if "usage" in metadata:
+                        usage = metadata["usage"]
+                        total += usage.get("input_tokens", 0)
+                        total += usage.get("output_tokens", 0)
+
+        return total
+
+    def _check_and_flush(
+        self,
+        conversation_id: str,
+        messages: List[BaseMessage],
+        current_tokens: int,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        检查是否需要触发 Memory Flush
+
+        Args:
+            conversation_id: 对话 ID
+            messages: 消息列表
+            current_tokens: 当前使用的 token 数
+
+        Returns:
+            Flush 结果，如果未触发则返回 None
+        """
+        if self.memory_flush is None:
+            return None
+
+        # 更新消息缓存
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                self.memory_flush.add_message("user", msg.content)
+            elif isinstance(msg, AIMessage):
+                self.memory_flush.add_message("assistant", msg.content)
+
+        # 检查并触发 flush
+        result = self.memory_flush.check_and_flush(current_tokens)
+
+        if result["flushed"]:
+            # 更新 compaction 计数
+            self.compaction_count += 1
+            # 重置 token 计数
+            self.session_tokens = 0
+
+        return result if result["flushed"] else None
+
+    def _run_flush_turn(self, conversation_id: str) -> str:
+        """
+        运行 Memory Flush 专门的 Agent turn
+
+        Args:
+            conversation_id: 对话 ID
+
+        Returns:
+            Flush 结果消息
+        """
+        if self.memory_flush is None:
+            return ""
+
+        # Flush system prompt
+        flush_system_prompt = """# Memory Flush 模式
+
+你现在处于 Memory Flush 模式。你的任务是从当前对话中提取重要信息并持久化到记忆文件。
+
+## Retain 格式规范
+
+使用以下格式提取信息：
+- W @entity: 内容    # 世界事实 (World Facts)
+- B @entity: 内容    # 传记信息 (Biography)
+- O(c=0.9) @entity:  # 观点 (Opinion)
+- S @entity: 内容    # 总结 (Summary)
+
+## 提取指南
+
+1. **只提取真正重要的信息** - 值得长期保存的知识
+2. **优先提取具体事实** - 而不是笼统的描述
+3. **包含上下文** - 实体、时间、关系等
+4. **使用合适的类型**:
+   - W: 客观事实、技术决策、架构设计
+   - B: 用户偏好、项目经历、操作历史
+   - O: 判断、评估、建议（带置信度）
+   - S: 会议总结、任务完成情况
+
+## 示例
+
+- W @Claude: Claude Opus 4.5 是当前最强大的模型
+- B @项目: Phase 2 核心工具已全部完成
+- O(c=0.8) @架构: 双记忆系统设计是正确的方向
+- S @今日: 完成了 189 个测试，覆盖所有记忆模块
+
+使用 memory_write 工具将提取的记忆保存到文件。
+返回 _SILENT_ 表示完成（不需要向用户展示此消息）。
+"""
+
+        # 获取当前消息缓存
+        messages_for_flush = []
+        for msg_dict in self.memory_flush.message_buffer:
+            messages_for_flush.append({
+                "role": msg_dict["role"],
+                "content": msg_dict["content"],
+            })
+
+        # 如果没有消息，直接返回
+        if not messages_for_flush:
+            return ""
+
+        # 直接使用 MemoryExtractor 提取
+        memories = self.memory_flush.extractor.extract_from_messages(messages_for_flush)
+
+        # 写入记忆文件
+        if memories:
+            written = self.memory_flush._flush_memories(memories)
+            return f"已提取并保存 {written} 条记忆。"
+
+        return ""
 
     def _create_agent(self):
         """
@@ -287,6 +487,21 @@ class BAAgent:
                 config,
             )
 
+            # 提取 token 使用
+            tokens_used = self._get_total_tokens(result)
+            self.session_tokens += tokens_used
+
+            # 检查是否需要 Memory Flush
+            flush_result = self._check_and_flush(
+                conversation_id,
+                result.get("messages", []),
+                self.session_tokens,
+            )
+
+            # 如果触发了 flush，运行 flush turn
+            if flush_result:
+                flush_message = self._run_flush_turn(conversation_id)
+
             # 提取响应
             response = self._extract_response(result)
 
@@ -296,6 +511,9 @@ class BAAgent:
                 "response": response,
                 "success": True,
                 "timestamp": datetime.now().isoformat(),
+                "tokens_used": tokens_used,
+                "session_tokens": self.session_tokens,
+                "flush_triggered": flush_result is not None,
             }
 
         except Exception as e:
