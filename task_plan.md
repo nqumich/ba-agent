@@ -153,10 +153,18 @@
   - [x] USER.md - 用户信息
   - [x] MEMORY.md - 长期策划知识
   - [x] memory/YYYY-MM-DD.md - 每日日志
+- [x] **实现双记忆系统架构 (2026-02-05)**
+  - [x] 分离开发记忆 (~/.ba-agent-dev/) 和用户记忆 (memory/)
+  - [x] 创建 SOUL.md - Agent 身份定义
+  - [x] 创建 bank/ - 结构化知识库 (world/experience/opinions)
+  - [x] 更新 AGENTS.md - 移除开发引用
+  - [x] 精简 CLAUDE.md - 用户视角
+  - [x] 重写 MEMORY.md - 仅用户知识
+  - [x] 迁移开发日志到 ~/.ba-agent-dev/daily-notes/
 - [ ] **实现记忆管理工具**
-  - [ ] memory_search - 语义搜索 MEMORY.md + memory/*.md
-  - [ ] memory_get - 读取特定内存文件
-  - [ ] memory_write - 写入记忆 (自动选择 Layer 1 或 Layer 2)
+  - [ ] memory_search - 语义搜索用户记忆
+  - [x] memory_get - 读取特定内存文件 ✅ (13 测试通过)
+  - [ ] memory_write - 写入记忆 (自动选择层级)
 - [x] **实现 Hooks 系统**
   - [x] PreToolUse: 统一安全检查 (check-security.sh)
   - [x] PostToolUse: 日志记录 + 输出总结 (log-and-summarize.sh)
@@ -200,7 +208,7 @@
 - ✅ US-005-MEM-02: Hooks 系统实现与优化 (5个脚本，-54%)
 - ✅ US-INFRA-01: 统一工具输出格式系统 (42 测试通过)
 
-**测试统计**: 469 passed, 6 skipped
+**测试统计**: 494 passed, 6 skipped (+13 memory_get)
 
 **下一任务**: US-015 - 示例 Skill: 异动检测
 
