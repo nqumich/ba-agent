@@ -1,7 +1,7 @@
 # BA-Agent Information Pipeline Design Document
 
 > **日期**: 2026-02-05
-> **版本**: v1.0
+> **版本**: v1.2
 > **作者**: BA-Agent Development Team
 > **状态**: Design Phase
 
@@ -321,6 +321,97 @@ User Request
 Final Response
 ```
 
+### Sequence Diagrams
+
+#### 1. Standard Tool Execution Flow
+
+```
+User          BAAgent         Tool          LangGraph
+  │              │              │               │
+  │──Request────>│              │               │
+  │              │              │               │
+  │              │──GetState──────────────────>│
+  │              │<─Messages──────────────────│
+  │              │              │               │
+  │              │──ToolCall────>│               │
+  │              │<─Result──────│               │
+  │              │              │               │
+  │              │─ResultAsUserMsg────────────>│
+  │              │              │               │
+  │              │<─NextAction────────────────│
+  │              │              │               │
+  │<─Response────│              │               │
+```
+
+#### 2. Skill Activation Flow
+
+```
+User          BAAgent      SkillSystem      LangGraph
+  │              │              │                │
+  │──Request────>│              │                │
+  │              │              │                │
+  │              │──Activate────────────────────>│
+  │              │              │                │
+  │              │<─SkillMessages───────────────│
+  │              │              │                │
+  │              │──Inject─────────────────────>│
+  │              │              │                │
+  │              │──ApplyModifier──────────────>│
+  │              │              │                │
+  │              │<─ModifiedContext────────────│
+  │              │              │                │
+  │<─Response────│              │                │
+```
+
+#### 3. Multi-Round Conversation Flow
+
+```
+User          BAAgent         Tool        Skill
+  │              │              │           │
+  │──Round1─────>│              │           │
+  │              │              │           │
+  │              │──Tool1──────>│           │
+  │              │<─Result1─────│           │
+  │              │              │           │
+  │              │──Activate───────────────>│
+  │              │<─Messages────────────────│
+  │<─Answer1─────│              │           │
+  │              │              │           │
+  │──Round2─────>│              │           │
+  │              │              │           │
+  │              │──Tool2──────>│           │
+  │              │<─Result2─────│           │
+  │              │              │           │
+  │<─Answer2─────│              │           │
+  │              │              │           │
+  │ [Context compression if needed]
+  │              │              │           │
+  │──Round3─────>│              │           │
+  │              │              │           │
+  │<─Answer3─────│              │           │
+```
+
+#### 4. Error Handling with Retry Flow
+
+```
+User          BAAgent         Tool        RetryPolicy
+  │              │              │              │
+  │──Request────>│              │              │
+  │              │              │              │
+  │              │──ToolCall────>│              │
+  │              │<─Timeout─────│              │
+  │              │              │              │
+  │              │──ShouldRetry──────────────>│
+  │              │<─Yes────────────────────────│
+  │              │              │              │
+  │              │──Wait───────>(delay)        │
+  │              │              │              │
+  │              │──ToolCall────>│              │
+  │              │<─Success─────│              │
+  │              │              │              │
+  │<─Response────│              │              │
+```
+
 ---
 
 ## Message Format Specifications
@@ -412,6 +503,9 @@ class StandardMessage(BaseModel):
     role: MessageType
     content: List[ContentBlock]
 
+    # Schema version for compatibility
+    schema_version: str = "1.2"
+
     # Metadata
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -426,6 +520,7 @@ class StandardMessage(BaseModel):
         return {
             "role": self.role.value,  # Always use enum value
             "content": [block.model_dump(exclude_none=True) for block in self.content],
+            "schema_version": self.schema_version,
             "timestamp": self.timestamp,
             "message_id": self.message_id
         }
@@ -704,23 +799,36 @@ class SkillActivationRequest(BaseModel):
 
     # Circular dependency prevention
     activation_depth: int = 0
-    max_depth: int = 3
+    max_depth: int = Field(default=3, description="Maximum nesting depth (configurable)")
+    activation_chain: List[str] = Field(default_factory=list, description="Track activation path")
 
-    def can_activate_nested(self) -> bool:
-        """Check if nested skill activation is allowed"""
-        return self.activation_depth < self.max_depth
+    def can_activate_nested(self, skill_name: str) -> bool:
+        """
+        Check if nested skill activation is allowed.
+
+        Prevents both depth overflow and circular dependencies (A→B→A).
+        """
+        return (
+            self.activation_depth < self.max_depth and
+            skill_name not in self.activation_chain
+        )
 
     def create_nested_request(self, nested_skill: str) -> "SkillActivationRequest":
         """Create request for nested skill activation"""
-        if not self.can_activate_nested():
-            raise ValueError(f"Maximum skill activation depth ({self.max_depth}) exceeded")
+        if not self.can_activate_nested(nested_skill):
+            if nested_skill in self.activation_chain:
+                raise ValueError(f"Circular dependency detected: {' → '.join(self.activation_chain)} → {nested_skill}")
+            else:
+                raise ValueError(f"Maximum skill activation depth ({self.max_depth}) exceeded")
+
         return SkillActivationRequest(
             skill_name=nested_skill,
             conversation_id=self.conversation_id,
             user_request=self.user_request,
             conversation_history=self.conversation_history,
             activation_depth=self.activation_depth + 1,
-            max_depth=self.max_depth
+            max_depth=self.max_depth,
+            activation_chain=self.activation_chain + [self.skill_name]
         )
 ```
 
@@ -774,13 +882,14 @@ class SkillActivationResult(BaseModel):
 
 ```python
 import threading
+import weakref
 from contextlib import contextmanager
 
 class MessageInjectionProtocol:
     """
     Protocol for injecting skill messages into conversation.
 
-    Thread-safe with atomic state updates.
+    Thread-safe with atomic state updates and automatic lock cleanup.
 
     Based on Claude Code's sub-agent communication pattern.
     """
@@ -788,20 +897,59 @@ class MessageInjectionProtocol:
     # Per-conversation locks for thread safety
     _locks: Dict[str, threading.Lock] = {}
     _locks_lock = threading.Lock()
+    _lock_refs: Dict[str, int] = {}  # Reference counting for cleanup
 
     @classmethod
     @contextmanager
     def _conversation_lock(cls, conversation_id: str):
-        """Get or create lock for conversation"""
+        """Get or create lock for conversation with reference counting"""
         with cls._locks_lock:
             if conversation_id not in cls._locks:
                 cls._locks[conversation_id] = threading.Lock()
+                cls._lock_refs[conversation_id] = 0
+            cls._lock_refs[conversation_id] += 1
+
         lock = cls._locks[conversation_id]
         lock.acquire()
         try:
             yield
         finally:
             lock.release()
+            # Decrement reference and cleanup if zero
+            with cls._locks_lock:
+                cls._lock_refs[conversation_id] -= 1
+                if cls._lock_refs[conversation_id] == 0:
+                    # No more references, clean up
+                    del cls._locks[conversation_id]
+                    del cls._lock_refs[conversation_id]
+
+    @classmethod
+    def cleanup_lock(cls, conversation_id: str) -> bool:
+        """
+        Manually cleanup lock for a specific conversation.
+
+        Called when conversation ends explicitly.
+        """
+        with cls._locks_lock:
+            if conversation_id in cls._locks:
+                del cls._locks[conversation_id]
+                if conversation_id in cls._lock_refs:
+                    del cls._lock_refs[conversation_id]
+                return True
+            return False
+
+    @classmethod
+    def cleanup_all_locks(cls) -> int:
+        """
+        Cleanup all locks (emergency use).
+
+        Returns number of locks cleaned up.
+        """
+        with cls._locks_lock:
+            count = len(cls._locks)
+            cls._locks.clear()
+            cls._lock_refs.clear()
+            return count
 
     @staticmethod
     def inject_into_state(
@@ -1179,7 +1327,7 @@ Research sources for this design:
 
 ---
 
-**Document Status**: Design v1.1 - Updated based on review feedback
+**Document Status**: Design v1.2 - Production-ready enhancements
 **Last Updated**: 2026-02-05
 **Next Review Date**: 2026-02-12
 **Approval Required**: @ba-agent-team
@@ -1187,6 +1335,38 @@ Research sources for this design:
 ---
 
 ## Change History
+
+### v1.2 (2026-02-05) - Production Environment Enhancements
+
+Addressed 5 additional issues from second review:
+
+1. **Added Message Version Control** (Issue #1)
+   - Added `schema_version` field to `StandardMessage` (default: "1.2")
+   - Enables backward compatibility when message format evolves
+   - Version included in `to_langchain_format()` output
+
+2. **Fixed Lock Memory Leak** (Issue #2) 🔴 Critical
+   - Added reference counting with `_lock_refs` dictionary
+   - Automatic cleanup when reference count reaches zero
+   - New `cleanup_lock(conversation_id)` for explicit cleanup
+   - New `cleanup_all_locks()` for emergency cleanup
+
+3. **Enhanced Circular Dependency Detection** (Issue #3)
+   - Added `activation_chain` to track skill activation path
+   - `can_activate_nested()` now checks for cycles (A→B→A)
+   - Improved error messages showing full activation chain
+   - `max_depth` is now configurable (default: 3)
+
+4. **Added Sequence Diagrams** (Issue #4)
+   - Standard Tool Execution Flow
+   - Skill Activation Flow
+   - Multi-Round Conversation Flow
+   - Error Handling with Retry Flow
+
+5. **Configurable Depth Limit** (Issue #5)
+   - `max_depth` changed from hardcoded to Field(default=3)
+   - Can be overridden per-request if needed
+   - Supports different depth requirements for different skills
 
 ### v1.1 (2026-02-05) - Review Response
 
@@ -1225,3 +1405,24 @@ Addressed 7 issues identified in design review:
    - Distinguishes between Chinese and English text
    - Weighted char/token ratio: 4.0 (EN) vs 1.5 (ZH)
    - More accurate context compression triggers
+
+---
+
+## Future Enhancements (Backlog)
+
+### Low Priority Optimizations
+
+1. **tiktoken Integration**
+   - Replace char-based estimation with tiktoken for exact token counting
+   - Improves accuracy for context compression triggers
+   - Requires additional dependency
+
+2. **Token Usage Tracking**
+   - Add `tokens_input` and `tokens_output` to telemetry
+   - Track API call counts per conversation
+   - Enable cost monitoring and optimization
+
+3. **Async Lock Management**
+   - Convert to `asyncio.Lock` for async-first architecture
+   - Support concurrent message injection
+   - Better performance under high load
