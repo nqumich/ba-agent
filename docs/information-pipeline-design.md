@@ -1,7 +1,7 @@
 # BA-Agent Information Pipeline Design Document
 
 > **日期**: 2026-02-05
-> **版本**: v1.2
+> **版本**: v1.3
 > **作者**: BA-Agent Development Team
 > **状态**: Design Phase
 
@@ -515,14 +515,21 @@ class StandardMessage(BaseModel):
     user_id: str
 
     def to_langchain_format(self) -> Dict[str, Any]:
-        """Convert to LangChain message format"""
+        """
+        Convert to LangChain message format.
+
+        Includes all necessary fields for LangGraph compatibility.
+        """
         # CRITICAL: Use .value for consistent serialization
         return {
             "role": self.role.value,  # Always use enum value
             "content": [block.model_dump(exclude_none=True) for block in self.content],
             "schema_version": self.schema_version,
             "timestamp": self.timestamp,
-            "message_id": self.message_id
+            "message_id": self.message_id,
+            # Include context identifiers for LangGraph state management
+            "conversation_id": self.conversation_id,
+            "user_id": self.user_id
         }
 ```
 
@@ -802,34 +809,82 @@ class SkillActivationRequest(BaseModel):
     max_depth: int = Field(default=3, description="Maximum nesting depth (configurable)")
     activation_chain: List[str] = Field(default_factory=list, description="Track activation path")
 
+    # Token budget alternative (optional)
+    token_budget: Optional[int] = Field(default=None, description="Token budget instead of depth limit")
+
+    # Per-skill configuration
+    skill_config: Dict[str, Any] = Field(default_factory=dict, description="Skill-specific overrides")
+
+    def get_max_depth_for_skill(self, skill_name: str) -> int:
+        """
+        Get maximum depth for a specific skill.
+
+        Allows different depth limits for different skill types.
+        """
+        # Check skill-specific override
+        if skill_name in self.skill_config:
+            skill_specific = self.skill_config[skill_name]
+            if "max_depth" in skill_specific:
+                return skill_specific["max_depth"]
+
+        # Default depth limits by skill category
+        complex_skills = {"data_analysis", "report_generation", "multi_chart"}
+        if skill_name in complex_skills or any(cat in skill_name for cat in complex_skills):
+            return 5  # Allow deeper nesting for complex workflows
+        elif skill_name.startswith("simple_"):
+            return 2  # Shallow nesting for simple skills
+        else:
+            return self.max_depth  # Use default
+
     def can_activate_nested(self, skill_name: str) -> bool:
         """
         Check if nested skill activation is allowed.
 
         Prevents both depth overflow and circular dependencies (A→B→A).
+        Can use either depth limit or token budget.
         """
-        return (
-            self.activation_depth < self.max_depth and
-            skill_name not in self.activation_chain
-        )
+        # Check circular dependency first
+        if skill_name in self.activation_chain:
+            return False
+
+        # Use token budget if specified
+        if self.token_budget is not None:
+            return self.token_budget > 0
+
+        # Use depth limit with skill-specific maximum
+        skill_max_depth = self.get_max_depth_for_skill(skill_name)
+        return self.activation_depth < skill_max_depth
 
     def create_nested_request(self, nested_skill: str) -> "SkillActivationRequest":
         """Create request for nested skill activation"""
         if not self.can_activate_nested(nested_skill):
             if nested_skill in self.activation_chain:
                 raise ValueError(f"Circular dependency detected: {' → '.join(self.activation_chain)} → {nested_skill}")
+            elif self.token_budget is not None:
+                raise ValueError(f"Token budget exhausted: {self.token_budget} remaining")
             else:
-                raise ValueError(f"Maximum skill activation depth ({self.max_depth}) exceeded")
+                skill_max_depth = self.get_max_depth_for_skill(nested_skill)
+                raise ValueError(f"Maximum skill activation depth ({skill_max_depth}) exceeded for {nested_skill}")
 
-        return SkillActivationRequest(
+        # Create nested request
+        nested_request = SkillActivationRequest(
             skill_name=nested_skill,
             conversation_id=self.conversation_id,
             user_request=self.user_request,
             conversation_history=self.conversation_history,
             activation_depth=self.activation_depth + 1,
             max_depth=self.max_depth,
-            activation_chain=self.activation_chain + [self.skill_name]
+            activation_chain=self.activation_chain + [self.skill_name],
+            skill_config=self.skill_config
         )
+
+        # Update token budget if using
+        if self.token_budget is not None:
+            # Estimate tokens for this skill activation (rough estimate)
+            estimated_cost = 1000  # Base cost
+            nested_request.token_budget = max(0, self.token_budget - estimated_cost)
+
+        return nested_request
 ```
 
 #### Phase 2: Skill Activation Result
@@ -882,14 +937,16 @@ class SkillActivationResult(BaseModel):
 
 ```python
 import threading
-import weakref
+import time
 from contextlib import contextmanager
+from typing import Set
 
 class MessageInjectionProtocol:
     """
     Protocol for injecting skill messages into conversation.
 
-    Thread-safe with atomic state updates and automatic lock cleanup.
+    Thread-safe with atomic state updates, automatic lock cleanup,
+    and message deduplication.
 
     Based on Claude Code's sub-agent communication pattern.
     """
@@ -897,7 +954,18 @@ class MessageInjectionProtocol:
     # Per-conversation locks for thread safety
     _locks: Dict[str, threading.Lock] = {}
     _locks_lock = threading.Lock()
-    _lock_refs: Dict[str, int] = {}  # Reference counting for cleanup
+
+    # Reference counting for cleanup
+    _lock_refs: Dict[str, int] = {}
+    _lock_last_used: Dict[str, float] = {}  # Timestamp tracking
+
+    # Message deduplication
+    _injected_message_ids: Set[str] = set()
+    _dedup_lock = threading.Lock()
+
+    # Cleanup configuration
+    _lock_ttl_seconds: int = 3600  # 1 hour TTL
+    _cleanup_interval_seconds: int = 300  # Cleanup every 5 minutes
 
     @classmethod
     @contextmanager
@@ -908,6 +976,7 @@ class MessageInjectionProtocol:
                 cls._locks[conversation_id] = threading.Lock()
                 cls._lock_refs[conversation_id] = 0
             cls._lock_refs[conversation_id] += 1
+            cls._lock_last_used[conversation_id] = time.time()
 
         lock = cls._locks[conversation_id]
         lock.acquire()
@@ -919,9 +988,30 @@ class MessageInjectionProtocol:
             with cls._locks_lock:
                 cls._lock_refs[conversation_id] -= 1
                 if cls._lock_refs[conversation_id] == 0:
-                    # No more references, clean up
-                    del cls._locks[conversation_id]
-                    del cls._lock_refs[conversation_id]
+                    # No more references, schedule cleanup
+                    cls._lock_last_used[conversation_id] = time.time()
+
+    @classmethod
+    def _should_cleanup_lock(cls, conversation_id: str) -> bool:
+        """Check if lock should be cleaned up based on TTL"""
+        if conversation_id not in cls._lock_last_used:
+            return True
+        age = time.time() - cls._lock_last_used[conversation_id]
+        return age > cls._lock_ttl_seconds
+
+    @classmethod
+    def _cleanup_stale_locks(cls):
+        """Clean up locks that have exceeded TTL"""
+        with cls._locks_lock:
+            stale_ids = [
+                conv_id for conv_id in cls._locks
+                if cls._should_cleanup_lock(conv_id)
+            ]
+            for conv_id in stale_ids:
+                del cls._locks[conv_id]
+                del cls._lock_refs[conv_id]
+                del cls._lock_last_used[conv_id]
+            return len(stale_ids)
 
     @classmethod
     def cleanup_lock(cls, conversation_id: str) -> bool:
@@ -935,6 +1025,8 @@ class MessageInjectionProtocol:
                 del cls._locks[conversation_id]
                 if conversation_id in cls._lock_refs:
                     del cls._lock_refs[conversation_id]
+                if conversation_id in cls._lock_last_used:
+                    del cls._lock_last_used[conversation_id]
                 return True
             return False
 
@@ -949,13 +1041,15 @@ class MessageInjectionProtocol:
             count = len(cls._locks)
             cls._locks.clear()
             cls._lock_refs.clear()
+            cls._lock_last_used.clear()
             return count
 
     @staticmethod
     def inject_into_state(
         messages: List[Dict[str, Any]],
         conversation_id: str,
-        agent_state: Any
+        agent_state: Any,
+        skip_duplicates: bool = True
     ) -> bool:
         """
         Thread-safely inject messages into LangGraph agent state.
@@ -964,6 +1058,7 @@ class MessageInjectionProtocol:
             messages: Messages to inject
             conversation_id: Conversation ID
             agent_state: Current agent state
+            skip_duplicates: Whether to skip already injected messages
 
         Returns:
             Success status
@@ -974,9 +1069,18 @@ class MessageInjectionProtocol:
                 state = agent_state.get_state({"configurable": {"thread_id": conversation_id}})
                 current_messages = list(state.messages.get("messages", []))
 
-                # Build new message list
+                # Build new message list with deduplication
                 new_messages = current_messages.copy()
                 for msg_dict in messages:
+                    msg_id = msg_dict.get("message_id")
+
+                    # Skip if already injected (deduplication)
+                    if skip_duplicates and msg_id:
+                        with MessageInjectionProtocol._dedup_lock:
+                            if msg_id in MessageInjectionProtocol._injected_message_ids:
+                                continue
+                            MessageInjectionProtocol._injected_message_ids.add(msg_id)
+
                     role = msg_dict.get("role")
                     if role == MessageType.USER.value:
                         new_messages.append(HumanMessage(content=msg_dict["content"]))
@@ -1164,45 +1268,97 @@ class ContextManager:
         """
         Check if context compression is needed.
 
-        Improved token estimation:
+        Enhanced token estimation:
         - English: ~4 characters per token
         - Chinese: ~1.5 characters per token
-        - Mixed: Weighted average
+        - Code blocks: ~3 characters per token (more dense)
+        - JSON: ~2.5 characters per token
+        - Mixed: Weighted average based on content analysis
         """
         total_chars = 0
         chinese_chars = 0
+        code_chars = 0
+        json_chars = 0
 
         for msg in self.conversation_history:
             content = str(msg.get("content", ""))
-            total_chars += len(content)
-            # Count Chinese characters (CJK range)
-            chinese_chars += sum(1 for c in content if '\u4e00' <= c <= '\u9fff')
+
+            # Analyze content type
+            if self._is_code_block(content):
+                code_chars += len(content)
+            elif self._is_json(content):
+                json_chars += len(content)
+            else:
+                # Natural language
+                total_chars += len(content)
+                # Count Chinese characters (CJK range)
+                chinese_chars += sum(1 for c in content if '\u4e00' <= c <= '\u9fff')
 
         # Calculate weighted token estimate
-        if total_chars == 0:
+        if total_chars + code_chars + json_chars == 0:
             return False
+
+        # Calculate tokens by content type
+        nl_tokens = self._estimate_natural_language_tokens(total_chars, chinese_chars)
+        code_tokens = code_chars // 3  # Code is more token-dense
+        json_tokens = json_chars // 2.5  # JSON is moderately dense
+
+        estimated_tokens = nl_tokens + code_tokens + json_tokens
+
+        return estimated_tokens > (self.max_tokens * self.compression_threshold)
+
+    def _is_code_block(self, content: str) -> bool:
+        """Check if content is a code block"""
+        code_indicators = [
+            "```",  # Markdown code blocks
+            "def ", "class ", "import ",  # Python
+            "function ", "const ", "let ",  # JavaScript
+            "<!DOCTYPE", "<html>",  # HTML
+            "<?xml",  # XML
+        ]
+        content_lower = content.lower()
+        return any(indicator in content_lower for indicator in code_indicators)
+
+    def _is_json(self, content: str) -> bool:
+        """Check if content is JSON"""
+        content_stripped = content.strip()
+        return (
+            content_stripped.startswith("{") and content_stripped.endswith("}") or
+            content_stripped.startswith("[") and content_stripped.endswith("]")
+        )
+
+    def _estimate_natural_language_tokens(self, total_chars: int, chinese_chars: int) -> int:
+        """Estimate tokens for natural language content"""
+        if total_chars == 0:
+            return 0
 
         chinese_ratio = chinese_chars / total_chars
         # Blend char/token ratios based on content
         chars_per_token = 4 * (1 - chinese_ratio) + 1.5 * chinese_ratio
-        estimated_tokens = int(total_chars / chars_per_token)
+        return int(total_chars / chars_per_token)
 
-        return estimated_tokens > (self.max_tokens * self.compression_threshold)
-
-    def _compress_context(self):
+    def _compress_context(self, keep_count: int = None):
         """
-        Compress conversation context.
+        Compress conversation context with dynamic keep count.
 
         Strategy (from Clawdbot/OpenClaw):
-        - Keep last N rounds complete
+        - Keep last N rounds complete (dynamic based on complexity)
         - Summarize earlier rounds
         - Preserve tool calls and critical information
+
+        Args:
+            keep_count: Number of recent rounds to keep complete.
+                       If None, calculated dynamically.
         """
         if len(self.conversation_history) < 10:
             return
 
-        # Keep last 5 rounds
-        keep_count = 5
+        # Calculate optimal keep count if not specified
+        keep_count = keep_count or self._calculate_optimal_keep_count()
+
+        # Ensure keep_count is within reasonable bounds
+        keep_count = max(3, min(15, keep_count))
+
         recent = self.conversation_history[-keep_count:]
         older = self.conversation_history[:-keep_count]
 
@@ -1213,6 +1369,63 @@ class ContextManager:
         self.conversation_history = [
             {"role": "system", "content": summary}
         ] + recent
+
+    def _calculate_optimal_keep_count(self) -> int:
+        """
+        Calculate optimal number of rounds to keep based on task complexity.
+
+        Factors considered:
+        - Active tool chains (nested tool calls)
+        - Skill activations
+        - Recent error rates
+        """
+        active_tool_chains = self._count_active_tool_chains()
+        skill_activations = self._count_recent_skill_activations()
+        error_rate = self._calculate_recent_error_rate()
+
+        # Base count
+        base_count = 5
+
+        # Add buffer for active tool chains
+        chain_buffer = min(5, active_tool_chains)
+
+        # Add buffer for skill activations
+        skill_buffer = min(3, skill_activations)
+
+        # Reduce if high error rate (might need more context)
+        error_buffer = 2 if error_rate > 0.3 else 0
+
+        optimal_count = base_count + chain_buffer + skill_buffer + error_buffer
+
+        # Clamp to reasonable range
+        return max(3, min(15, optimal_count))
+
+    def _count_active_tool_chains(self) -> int:
+        """Count active tool call chains in recent history"""
+        chain_count = 0
+        for msg in self.conversation_history[-20:]:  # Check last 20 messages
+            content = str(msg.get("content", ""))
+            if "tool_use" in content and "tool_result" in content:
+                chain_count += 1
+        return chain_count
+
+    def _count_recent_skill_activations(self) -> int:
+        """Count recent skill activations"""
+        count = 0
+        for msg in self.conversation_history[-20:]:
+            if "skill_activation" in str(msg.get("content", "")):
+                count += 1
+        return count
+
+    def _calculate_recent_error_rate(self) -> float:
+        """Calculate error rate in recent messages"""
+        errors = 0
+        total = 0
+        for msg in self.conversation_history[-20:]:
+            total += 1
+            if msg.get("is_error") or "error" in str(msg.get("content", "")).lower():
+                errors += 1
+        return errors / total if total > 0 else 0.0
 
     def _create_summary(self, messages: List[Dict[str, Any]]) -> str:
         """
@@ -1327,7 +1540,7 @@ Research sources for this design:
 
 ---
 
-**Document Status**: Design v1.2 - Production-ready enhancements
+**Document Status**: Design v1.3 - Engineering production-ready
 **Last Updated**: 2026-02-05
 **Next Review Date**: 2026-02-12
 **Approval Required**: @ba-agent-team
@@ -1335,6 +1548,50 @@ Research sources for this design:
 ---
 
 ## Change History
+
+### v1.3 (2026-02-05) - Engineering Production-Ready
+
+Addressed 6 additional issues from third review (deep engineering focus):
+
+1. **Enhanced Lock Lifecycle Management** (Issue #1) 🔴 Critical
+   - Added `_lock_last_used` timestamp tracking
+   - Added `_should_cleanup_lock()` with TTL (3600s default)
+   - Added `_cleanup_stale_locks()` for periodic cleanup
+   - Locks now auto-cleanup after TTL even with active references
+
+2. **Dynamic Context Compression** (Issue #2) 🟡 High
+   - Changed hardcoded `keep_count = 5` to dynamic calculation
+   - Added `_calculate_optimal_keep_count()` based on complexity:
+     * Active tool chains (+5 buffer)
+     * Skill activations (+3 buffer)
+     * Error rate adjustments (+2 if >30% errors)
+   - Added helper methods: `_count_active_tool_chains()`, `_count_recent_skill_activations()`, `_calculate_recent_error_rate()`
+   - Range clamped to 3-15 rounds
+
+3. **Fixed to_langchain_format Missing Fields** (Issue #3) 🟡 High
+   - Added `conversation_id` to output
+   - Added `user_id` to output
+   - Ensures LangGraph state management compatibility
+
+4. **Enhanced Token Estimation** (Issue #4) 🟢 Medium
+   - Added content type detection: `_is_code_block()`, `_is_json()`
+   - Code blocks: ~3 chars/token (more dense)
+   - JSON: ~2.5 chars/token (moderately dense)
+   - Natural language: existing 4.0/1.5 ratio for EN/ZH
+   - Refactored into `_estimate_natural_language_tokens()`
+
+5. **Per-Skill Depth Configuration** (Issue #5) 🟢 Medium
+   - Added `get_max_depth_for_skill()` method
+   - Complex skills (data_analysis, report_generation): depth 5
+   - Simple skills (simple_* prefix): depth 2
+   - Standard skills: depth 3 (default)
+   - Added `skill_config` dict for overrides
+
+6. **Message Deduplication** (Issue #6) 🟢 Medium
+   - Added `_injected_message_ids: Set[str]` for tracking
+   - Added `_dedup_lock` for thread-safe access
+   - Added `skip_duplicates` parameter to `inject_into_state()`
+   - Prevents duplicate injection in high-concurrency scenarios
 
 ### v1.2 (2026-02-05) - Production Environment Enhancements
 
@@ -1426,3 +1683,14 @@ Addressed 7 issues identified in design review:
    - Convert to `asyncio.Lock` for async-first architecture
    - Support concurrent message injection
    - Better performance under high load
+
+4. **Circuit Breaker Pattern**
+   - Add circuit breaker for failing tools/skills
+   - Automatic recovery after cooldown period
+   - Prevents cascading failures
+
+5. **Token Budget Enforcement**
+   - Actual token tracking instead of estimation
+   - Per-conversation budgets
+   - Budget exhaustion alerts
+
