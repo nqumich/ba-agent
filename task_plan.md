@@ -125,6 +125,25 @@
   - [x] 实现 Skill 发现和验证
   - [x] 实现 Skill 参数解析
   - [x] 支持全局配置
+- [x] **US-014-ARCH-01**: Skills 系统架构重构 (Anthropic Agent Skills)
+  - [x] 创建 backend/skills/message_protocol.py (SkillMessage, ContextModifier, SkillActivationResult)
+  - [x] 创建 backend/skills/skill_tool.py (Meta-Tool: activate_skill)
+  - [x] 创建 backend/skills/loader.py (Level 1: Frontmatter 元数据)
+  - [x] 创建 backend/skills/registry.py (技能注册缓存)
+  - [x] 创建 backend/skills/activator.py (技能激活逻辑)
+  - [x] 创建 backend/skills/formatter.py (SkillMessageFormatter)
+  - [x] 创建 backend/skills/installer.py (外部技能安装)
+  - [x] 三层渐进式披露: 元数据 → 完整 SKILL.md → 资源文件
+  - [x] 语义匹配: Agent 通过 LLM 推理选择技能
+  - [x] 消息注入: 激活后注入到对话上下文
+  - [x] 132 个单元测试全部通过
+- [x] **US-014-ARCH-02**: Context Modifier 完全实现
+  - [x] _check_tool_allowed(): 检查工具权限
+  - [x] _switch_model_for_skill(): 实际切换 LLM 模型
+  - [x] _get_active_skill_model(): 获取当前技能模型
+  - [x] _is_model_invocation_disabled(): 检查 LLM 调用禁用
+  - [x] _apply_context_modifier(): 总是设置 current_skill
+  - [x] 5 个 Context Modifier 应用测试全部通过
 - [ ] **US-015**: 示例 Skill - 异动检测
 - [ ] **US-016**: 示例 Skill - 归因分析
 - [ ] **US-017**: 示例 Skill - 报告生成
@@ -178,16 +197,16 @@
 
 ## 📊 进度统计
 
-- **总任务数**: 27 (新增 US-INFRA-01)
-- **已完成**: 17 (63.0%)
+- **总任务数**: 29 (新增 US-014-ARCH-01, US-014-ARCH-02)
+- **已完成**: 19 (65.5%)
   - Phase 1: 5/5 (100%)
   - Phase 2: 9/9 (100%) ✅
-  - Phase 3: 1/4 (25%)
+  - Phase 3: 3/4 (75%) ✅ 新增
   - Phase 4: 0/7 (0%)
   - 基础设施: 1/1 (100%)
   - 记忆管理: 2/2 (100%) ✅
-- **进行中**: 0 (0%)
-- **待开始**: 10 (37.0%)
+- **进行中**: 1 (3.4%) - US-INFRA-02: 信息管道设计
+- **待开始**: 9 (31.0%)
 
 **已完成的 User Story**:
 - ✅ US-001: 项目初始化与目录结构创建
@@ -204,11 +223,13 @@
 - ✅ US-012: 向量检索工具 (51 测试通过)
 - ✅ US-013: Skill 调用工具 (43 测试通过)
 - ✅ US-014: Skills 配置系统
+- ✅ US-014-ARCH-01: Skills 系统架构重构 (Anthropic Agent Skills, 132 测试通过)
+- ✅ US-014-ARCH-02: Context Modifier 完全实现 (5 测试通过)
 - ✅ US-005-MEM-01: 三层记忆文件结构
 - ✅ US-005-MEM-02: Hooks 系统实现与优化 (5个脚本，-54%)
 - ✅ US-INFRA-01: 统一工具输出格式系统 (42 测试通过)
 
-**测试统计**: 494 passed, 6 skipped (+13 memory_get)
+**测试统计**: 631 passed, 6 skipped (+132 Skills, +5 Context Modifier, +13 memory_get, +42 ToolOutput)
 
 **下一任务**: US-015 - 示例 Skill: 异动检测
 
@@ -258,6 +279,35 @@
 5. **Token 优化**: 紧凑格式、YAML、XML
 6. **遥测收集**: TelemetryCollector 单例
 
+### Skills 系统架构重构 (US-014-ARCH-01/02, 2026-02-05)
+
+基于 Anthropic Agent Skills 规范的 Meta-Tool 架构：
+
+**核心文件**:
+- `backend/skills/message_protocol.py` - SkillMessage, ContextModifier, SkillActivationResult
+- `backend/skills/skill_tool.py` - Meta-Tool 实现 (activate_skill)
+- `backend/skills/loader.py` - SkillLoader (渐进式披露 Level 1)
+- `backend/skills/registry.py` - SkillRegistry (缓存)
+- `backend/skills/activator.py` - SkillActivator (激活逻辑)
+- `backend/skills/formatter.py` - SkillMessageFormatter
+- `backend/skills/installer.py` - SkillInstaller (外部技能)
+- `docs/skill-system-redesign.md` - 设计文档
+- `docs/skill-implementation-compatibility-report.md` - 兼容性报告
+- `backend/agents/agent.py` - BAAgent 集成
+
+**功能特性**:
+1. **Meta-Tool 模式**: 单一 activate_skill 工具包装所有技能
+2. **三层渐进式披露**:
+   - Level 1: Frontmatter 元数据 (~100 tokens/skill) - 启动时加载
+   - Level 2: 完整 SKILL.md (<5,000 tokens) - 激活时加载
+   - Level 3: 资源文件 (scripts/, references/, assets/) - 按需加载
+3. **语义匹配**: Agent 使用 LLM 推理自主选择技能
+4. **消息注入**: 激活后注入消息到对话上下文
+5. **Context Modifier**: allowed_tools, model, disable_model_invocation
+6. **完全兼容 Claude Code**: 相同的 SKILL.md 格式和架构
+
+**测试覆盖**: 137 个 Skills 相关测试全部通过
+
 ---
 
-**最后更新**: 2025-02-05 12:00
+**最后更新**: 2026-02-05 信息管道设计完成

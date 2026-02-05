@@ -346,6 +346,41 @@
       "notes": "Skills 配置系统基础 - skills.yaml 配置文件和加载器"
     },
     {
+      "id": "US-014-ARCH-01",
+      "title": "Skills系统架构重构 (Anthropic Agent Skills)",
+      "acceptanceCriteria": [
+        "创建backend/skills/message_protocol.py (SkillMessage, ContextModifier, SkillActivationResult)",
+        "创建backend/skills/skill_tool.py (Meta-Tool实现: activate_skill)",
+        "创建backend/skills/loader.py (渐进式披露Level 1: Frontmatter元数据)",
+        "创建backend/skills/registry.py (技能注册缓存)",
+        "创建backend/skills/activator.py (技能激活逻辑)",
+        "创建backend/skills/formatter.py (SkillMessageFormatter)",
+        "创建backend/skills/installer.py (外部技能安装)",
+        "实现三层渐进式披露: 元数据 → 完整SKILL.md → 资源文件",
+        "实现语义匹配: Agent通过LLM推理自主选择技能",
+        "实现消息注入: 激活后注入消息到对话上下文",
+        "编写132个单元测试全部通过"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Skills系统重构 - 基于Anthropic Agent Skills规范 - Meta-Tool架构 + 三层渐进式披露 + 消息协议 - 132 测试通过"
+    },
+    {
+      "id": "US-014-ARCH-02",
+      "title": "Context Modifier完全实现",
+      "acceptanceCriteria": [
+        "实现_check_tool_allowed()方法: 检查工具权限",
+        "实现_switch_model_for_skill()方法: 实际切换LLM模型",
+        "实现_get_active_skill_model()方法: 获取当前技能请求的模型",
+        "实现_is_model_invocation_disabled()方法: 检查是否禁用LLM调用",
+        "修复_apply_context_modifier()方法: 总是设置current_skill",
+        "编写5个Context Modifier应用测试全部通过"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Context Modifier功能 - allowed_tools/model/disable_model_invocation - 完全实现 - 5 测试通过"
+    },
+    {
       "id": "US-015",
       "title": "示例Skill: 异动检测",
       "acceptanceCriteria": [
