@@ -2,6 +2,17 @@
 BA-Agent 数据模型
 
 导出所有 Pydantic 模型
+
+New Pipeline Models (v2.0.1):
+- OutputLevel, ToolCachePolicy, ToolInvocationRequest, ToolExecutionResult
+- Located in backend/models/pipeline/
+
+Legacy Models (to be migrated):
+- ToolInput, ToolOutput (backend/models/tool.py)
+- ResponseFormat, ToolTelemetry (backend/models/tool_output.py)
+
+Compatibility Layer:
+- See backend/models/compat.py for conversion functions
 """
 
 from .base import (
