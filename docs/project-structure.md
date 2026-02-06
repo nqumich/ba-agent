@@ -60,12 +60,13 @@ agents/
 ```
 
 **关键功能**:
-- 使用 LangGraph create_react_agent 创建 Agent
+- 使用 `langchain.agents.create_agent` (LangGraph V2.0 API)
 - 集成 Claude Sonnet 4.5 模型
 - 支持自定义 API 端点 (LingYi AI)
 - 支持工具调用和记忆管理
 - **MemoryFlush**: 基于 token 阈值的自动记忆提取和卸载
 - **Compaction**: MemoryFlush 后自动压缩对话上下文
+- **默认工具**: 10个默认工具自动加载（含 memory_search_v2_tool）
 
 **v2.1.0 Pipeline 集成**:
 - `token_counter`: DynamicTokenCounter - 多模型 Token 计数
@@ -476,8 +477,9 @@ Agent 可以通过以下工具管理记忆：
 
 ```
 docs/
-├── PRD.md                              # 产品需求文档
-├── project-structure.md                # 本文档 - 项目目录结构
+├── PRD.md                              # 产品需求文档（产品视角）
+├── project-structure.md                # 本文档 - 项目目录结构和技术架构
+├── excel-upload-flow-design.md         # Excel上传流程设计
 ├── information-pipeline-design.md      # Pipeline 设计文档（简化版）
 ├── information-pipeline-design-detailed.md  # Pipeline 设计文档（详细版）
 ├── MIGRATION_GUIDE.md                  # v2.0.0 → v2.1.0 迁移指南
@@ -488,9 +490,14 @@ docs/
 ```
 
 **v2.1.0 新增文档**:
+- `excel-upload-flow-design.md`: Excel上传处理流程设计（FastAPI + Agent）
 - `information-pipeline-design-detailed.md`: 完整的 Pipeline v2.1.0 设计文档
 - `information-pipeline-design.md`: 简化版 Pipeline 设计
 - `MIGRATION_GUIDE.md`: 非破坏性升级指南
+
+**2026-02-06 更新**:
+- `PRD.md`: 重写为产品导向文档，用户视角
+- `project-structure.md`: 更新 LangGraph API 迁移状态
 
 ### 其他重要文档
 
@@ -646,8 +653,8 @@ mcp_config = get_config_manager().get_mcp_config()
 
 ---
 
-**文档版本**: v1.5 (Pipeline v2.1.0 完成)
-**最后更新**: 2026-02-06
+**文档版本**: v1.6 (LangGraph API 迁移完成)
+**最后更新**: 2026-02-06 18:00
 **维护者**: BA-Agent Team
 **测试状态**: 746/746 通过 (100%)
 
@@ -658,3 +665,10 @@ mcp_config = get_config_manager().get_mcp_config()
 - ✅ 所有 8 个工具迁移到 ToolExecutionResult
 - ✅ Phase 7 完成：移除旧 ResponseFormat/ToolOutput 模型
 - ✅ 全部 Phase 1-7 完成，测试通过
+
+**2026-02-06 更新**:
+- ✅ LangGraph API 迁移: `langgraph.prebuilt.create_react_agent` → `langchain.agents.create_agent`
+- ✅ 使用别名避免命名冲突: `langchain_create_agent`
+- ✅ 默认工具加载机制: 10个默认工具自动加载
+- ✅ 新增 Excel 上传流程设计文档
+- ✅ PRD.md 重写为产品导向文档

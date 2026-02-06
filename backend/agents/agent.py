@@ -18,9 +18,9 @@ from langchain_core.runnables import RunnableConfig
 from langchain_anthropic import ChatAnthropic
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, END
-# TODO: LangGraph V2.0 迁移 - create_react_agent 将移至 langchain.agents
-# 当前使用 langgraph.prebuilt.create_react_agent，等待稳定 API
-from langgraph.prebuilt import create_react_agent
+# LangGraph V2.0 迁移 - 使用新的 langchain.agents API
+# 使用别名避免与本地 create_agent 便捷函数冲突
+from langchain.agents import create_agent as langchain_create_agent
 
 import logging
 
@@ -82,14 +82,16 @@ class BAAgent:
         config: Optional[AgentConfigModel] = None,
         tools: Optional[List[BaseTool]] = None,
         system_prompt: Optional[str] = None,
+        use_default_tools: bool = True,
     ):
         """
         初始化 BA-Agent
 
         Args:
             config: Agent 配置，如果不提供则从全局配置加载
-            tools: 可用工具列表
+            tools: 可用工具列表（如果为 None 且 use_default_tools=True，则加载默认工具）
             system_prompt: 系统提示词，如果不提供则使用默认提示词
+            use_default_tools: 是否加载默认工具列表（默认 True）
         """
         # 加载配置
         self.config = config or self._load_default_config()
@@ -99,7 +101,15 @@ class BAAgent:
         self.llm = self._init_llm()
 
         # 初始化工具
-        self.tools = tools or []
+        # 只有在明确请求默认工具时才加载 (use_default_tools=True 且未提供 tools)
+        # tools=None 时的默认行为：只加载 skill_tool（在后面添加）
+        if tools is None:
+            self.tools = []
+        elif use_default_tools and len(tools) == 0:
+            # 空列表 + use_default_tools=True → 加载所有默认工具
+            self.tools = self._load_default_tools()
+        else:
+            self.tools = tools
 
         # 初始化系统提示词
         self.system_prompt = system_prompt or self._get_default_system_prompt()
@@ -167,6 +177,52 @@ class BAAgent:
             memory_enabled=app_config.memory.enabled,
             hooks_enabled=True,
         )
+
+    def _load_default_tools(self) -> List[BaseTool]:
+        """
+        加载默认工具列表
+
+        Returns:
+            默认工具列表
+        """
+        from tools import (
+            execute_command_tool,
+            run_python_tool,
+            web_search_tool,
+            web_reader_tool,
+            file_reader_tool,
+            file_write_tool,
+            query_database_tool,
+            vector_search_tool,
+        )
+        # 记忆搜索工具 (clawdbot 风格：Agent 主动调用)
+        from backend.memory.tools import (
+            memory_search_v2_tool,
+        )
+
+        default_tools = [
+            # 核心执行工具
+            execute_command_tool,      # 命令行执行
+            run_python_tool,            # Python 沙盒
+
+            # Web 工具
+            web_search_tool,            # Web 搜索
+            web_reader_tool,            # Web 读取
+
+            # 文件工具
+            file_reader_tool,           # 文件读取
+            file_write_tool,            # 文件写入
+
+            # 数据工具
+            query_database_tool,        # SQL 查询
+            vector_search_tool,         # 向量检索
+
+            # 记忆搜索工具 (clawdbot 风格：Agent 主动调用)
+            memory_search_v2_tool,      # 混合搜索 (FTS5 + Vector)
+        ]
+
+        logger.info(f"Loaded {len(default_tools)} default tools")
+        return default_tools
 
     def _init_llm(self) -> ChatAnthropic:
         """
@@ -881,24 +937,17 @@ class BAAgent:
         """
         创建 LangGraph Agent
 
-        使用 langgraph.prebuilt.create_react_agent
+        使用 langchain.agents.create_agent (LangGraph V2.0)
 
         Returns:
             Agent 实例
         """
-        # 创建 prompt template
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", self.system_prompt),
-                MessagesPlaceholder(variable_name="messages"),
-            ]
-        )
-
-        # 使用 create_react_agent 创建 Agent
-        agent = create_react_agent(
+        # 使用 langchain.agents.create_agent 创建 Agent
+        # 新 API 使用 system_prompt 而不是 prompt
+        agent = langchain_create_agent(
             self.llm,
             self.tools,
-            prompt=prompt,
+            system_prompt=self.system_prompt,
         )
 
         return agent

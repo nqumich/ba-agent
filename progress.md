@@ -637,7 +637,66 @@ def _should_run_memory_flush(self, current_tokens: int) -> bool:
 
 ---
 
-**最后更新**: 2026-02-06 14:00
+**最后更新**: 2026-02-06 17:00
+
+### 2026-02-06 17:00 - Agent 工具集成修复
+
+#### 完成的工作
+
+1. **工具导出修复 (P0-1)**
+   - ✅ `tools/__init__.py` 添加 `file_write_tool` 导出
+   - ✅ 添加 `FileWriteInput`, `file_write`, `file_write_tool` 到 `__all__`
+
+2. **默认工具加载机制 (P0-2)**
+   - ✅ 创建 `_load_default_tools()` 方法
+   - ✅ 添加 `use_default_tools` 参数到 `BAAgent.__init__()`
+   - ✅ 实现 10 个默认工具的自动加载
+
+3. **记忆搜索工具集成 (Clawdbot 风格)**
+   - ✅ 添加 `memory_search_v2_tool` 到默认工具列表
+   - ✅ Agent 可以主动调用记忆搜索工具
+
+4. **工具初始化逻辑修复**
+   - ✅ 修复向后兼容性问题
+   - ✅ `tools=None` → 只加载 skill_tool
+   - ✅ `tools=[] + use_default_tools=True` → 加载所有默认工具
+   - ✅ 显式工具列表 → 使用指定工具
+
+#### 默认工具列表 (10 个)
+
+| 工具 | 说明 | 类别 |
+|------|------|------|
+| execute_command_tool | 命令行执行 | 核心 |
+| run_python_tool | Python 沙盒 | 核心 |
+| web_search_tool | Web 搜索 | Web |
+| web_reader_tool | Web 读取 | Web |
+| file_reader_tool | 文件读取 | 文件 |
+| file_write_tool | 文件写入 | 文件 |
+| query_database_tool | SQL 查询 | 数据 |
+| vector_search_tool | 向量检索 | 数据 |
+| memory_search_v2_tool | 混合搜索 | 记忆 |
+| activate_skill | Skill 调用 | 系统 (自动添加) |
+
+#### 记忆系统集成状态
+
+| 操作 | 触发方式 | 状态 |
+|------|---------|------|
+| 写入 (MemoryFlush) | 自动触发 (invoke()) | ✅ 已集成 |
+| 索引 (MemoryWatcher) | 自动监控 (后台) | ✅ 已集成 |
+| 搜索 (HybridSearchEngine) | Agent 调用工具 | ✅ 已添加 |
+
+#### 测试结果
+
+```
+总计: 746 个测试
+✅ 通过: 746 (100%)
+⏭️  跳过: 1 (MCP 相关)
+❌ 失败: 0
+```
+
+---
+
+**最后更新**: 2026-02-06 17:00
 
 ### 工具调用 (2026-02-05 02:04:48)
 
@@ -692,6 +751,43 @@ SELECT * FROM users
 1. 阅读完整总结: `memory/2026-02-05-final-summary.md`
 2. 查看待办任务: `cat task_plan.md | grep '^\- \[ \]'`
 3. 运行测试确认: `pytest -q`
+
+---
+
+### 2026-02-06 18:00 - LangGraph API 迁移完成
+
+#### 完成的工作
+
+1. **迁移到 langchain.agents.create_agent**
+   - 更新导入: `langgraph.prebuilt.create_react_agent` → `langchain.agents.create_agent`
+   - 使用别名避免命名冲突
+   - API 参数: `prompt` → `system_prompt`
+
+2. **关键修复**
+   - 识别本地 `create_agent` 便捷函数与导入函数的命名冲突
+   - 使用 `from langchain.agents import create_agent as langchain_create_agent`
+
+3. **测试验证**
+   - 15 个 agent 测试全部通过
+   - 746 个完整测试套件全部通过
+   - 弃用警告已消除
+
+#### API 变更
+
+| 项目 | 旧 API | 新 API |
+|------|--------|--------|
+| 导入 | `langgraph.prebuilt.create_react_agent` | `langchain.agents.create_agent` |
+| 函数名 | `create_react_agent` | `create_agent` |
+| 参数 | `prompt=prompt` | `system_prompt=self.system_prompt` |
+
+#### 测试状态
+
+```
+总计: 746 个测试
+✅ 通过: 746 (100%)
+⏭️  跳过: 1 (MCP 相关)
+❌ 失败: 0
+```
 
 ---
 
