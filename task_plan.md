@@ -353,20 +353,19 @@
 8. **超时处理** - ToolTimeoutHandler 异步超时控制
 9. **监控指标** - ToolMetrics, ConversationMetrics, MetricsCollector
 
-**设计文件**: `docs/information-pipeline-design.md` v1.7
+**设计文件**: `docs/information-pipeline-design.md` v1.8
 
 **文档优化** (2026-02-05):
-- **简化版** (460 行): `information-pipeline-design.md` - 快速参考
-- **详细版** (2924 行): `information-pipeline-design-detailed.md` - 完整实现
+- **简化版** (465 行): `information-pipeline-design.md` - 快速参考
+- **详细版** (3159 行): `information-pipeline-design-detailed.md` - 完整实现
 - 双文档结构：快速参考 + 完整实现
 
-**v1.7 新增** (2026-02-05):
-- 文件清理策略（DataFileManager）
-- Activation Chain 完整管理（SkillActivationStack）
-- 增强的上下文压缩（EnhancedContextManager）
-- 完整线程安全（ThreadSafeContainer）
-- Schema 版本控制（VersionedToolResult）
-- 可观测性配置（ObservabilityConfig）
+**v1.8 修复** (2026-02-05):
+- Token Counter: Claude tokenizer 修正（15% safety margin）
+- DataFileManager: threading 替代 asyncio
+- LockManager: 引用计数锁管理
+- ToolErrorType: is_retryable 属性
+- IdempotencyCache: 幂等性支持
 
 ### 信息管道设计 v1.4 (US-INFRA-02, 2026-02-05) - 概念修正
 
