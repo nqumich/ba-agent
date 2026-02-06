@@ -1,9 +1,24 @@
 # BA-Agent Information Pipeline Design Document
 
-> **Date**: 2026-02-05
-> **Version**: v1.9.5 (Review Fixes)
+> **Date**: 2026-02-06
+> **Version**: v2.0.0 (LangChain Implementation Alignment)
 > **Author**: BA-Agent Development Team
 > **Status**: Design Phase
+
+---
+
+## v2.0.0 Major Update
+
+This version aligns the design document with the actual BA-Agent implementation using **LangChain ChatAnthropic + Synchronous Tools**.
+
+**Key Changes**:
+1. **Carrier vs Semantic separation**: Explicit distinction between Observation (semantic) and Carrier (transport)
+2. **LangChain as primary protocol**: BaseMessage (HumanMessage/AIMessage/ToolMessage) is the main message format
+3. **Claude Code format demoted**: StandardMessage is now "external/research format" only
+4. **Tool result conversion**: `to_tool_message()` returns ToolMessage, `to_user_message()` deprecated
+5. **tool_call_id source**: Clarified that tool_call_id comes from AIMessage.tool_calls, not generated
+6. **Synchronous compression**: Removed async compression, added background thread for LLM summarization
+7. **OutputLevel clarification**: Changed from "Progressive Disclosure" to "verbosity/detail level"
 
 ---
 
@@ -132,10 +147,11 @@ Final Answer: The weather in Yangzhou today is...
 
 ### Concept 2: Tool Output Format
 
-**Tool Output** has TWO ORTHOGONAL aspects:
+**Tool Output** has THREE ORTHOGONAL aspects:
 
 1. **ReAct Observation** (Semantic): What information the tool returns for Agent reasoning
 2. **Output Level** (Engineering): How detailed the observation is (token optimization)
+3. **Carrier** (Transport): How the observation is delivered to the LLM
 
 These are INDEPENDENT concerns:
 
@@ -156,10 +172,16 @@ These are INDEPENDENT concerns:
 │                                        STANDARD: "file1.py..."│
 │                                        FULL:    [all paths]  │
 │                                                              │
+│  Carrier (Transport)                                           │
+│  ────────────────────────                                    │
+│  • Research Layer (Claude Code):    role="user" tool_result   │
+│  • Implementation Layer (LangChain): ToolMessage              │
+│  • Carrier is chosen by framework, NOT by tool logic         │
+│                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Claude Code Format**:
+**Research Layer (Claude Code Format)**:
 ```json
 {
   "role": "user",
@@ -174,12 +196,28 @@ These are INDEPENDENT concerns:
 }
 ```
 
+**Implementation Layer (LangChain ChatAnthropic)**:
+```python
+from langchain_core.messages import ToolMessage
+
+# Tool execution produces observation string
+observation = "File found: /path/to/file.py\nAnother file: /path/to/another.py"
+
+# Carrier: ToolMessage with tool_call_id from AIMessage.tool_calls
+tool_message = ToolMessage(
+    content=observation,
+    tool_call_id="call_abc123"  # Must match AIMessage.tool_calls[0]["id"]
+)
+```
+
 **Key Points**:
-- Tool results are sent as `role: "user"` messages
-- The `content` field is the **observation** (ReAct Observation)
+- **Observation** (Semantic) remains constant: plain string that LLM reasons with
+- **Carrier** varies by framework:
+  - Claude Code: `role="user"` with `type="tool_result"` block
+  - LangChain: `ToolMessage(content=observation, tool_call_id=...)`
+- **Output Level** controls HOW we format the observation from raw data
 - **No** summary/observation/result three-layer structure (that was confusion)
-- Output level controls HOW we format the observation from raw data
-- The agent sees the tool result as a simple text observation
+- The agent sees the tool result as a simple text observation regardless of carrier
 
 ### Concept 3: Progressive Disclosure
 
@@ -212,13 +250,15 @@ Level 3: Resource files
 | **ReAct** | Agent reasoning pattern | Control flow | Thought → Action → Observation loop |
 | **ReAct Observation** | What tool returns | Semantic (content) | "Found 3 Python files" |
 | **Output Level** | How detailed to format | Engineering (token) | BRIEF/STANDARD/FULL |
+| **Carrier** | How observation is delivered | Transport layer | ToolMessage / tool_result block |
 | **Progressive Disclosure** | Information loading strategy | Skills system | Level 1→2→3 for Skills |
 
-These are **FOUR separate concepts**:
+These are **FIVE separate concepts**:
 1. **ReAct**: The reasoning loop pattern
 2. **Observation**: The semantic content returned by tools
 3. **Output Level**: How detailed to format the observation (orthogonal to observation)
-4. **Progressive Disclosure**: How to load skill information (unrelated to tools)
+4. **Carrier**: Transport mechanism for delivering observation to LLM (framework-dependent)
+5. **Progressive Disclosure**: How to load skill information (unrelated to tools)
 
 ---
 
@@ -273,11 +313,61 @@ Based on tracing Claude Code's LLM traffic:
 
 ### 2. Critical Insights
 
-1. **Tool results are user messages**: The agent receives tool results as `role: "user"` messages
+1. **Tool results are user messages** (Research Layer): Claude Code receives tool results as `role: "user"` messages
 2. **Observation = ReAct Observation**: The `content` field IS the Observation that LLM reasons with
 3. **Output Level ≠ ReAct**: Output level controls formatting detail, orthogonal to the Observation semantic
 4. **ReAct is execution flow**: The Thought→Action→Observation pattern is how the agent reasons, not a data format
 5. **Minimal wrapping**: No unnecessary layers between tool execution and agent observation
+
+### 2.1 Implementation Layer (LangChain ChatAnthropic)
+
+**IMPORTANT**: The research layer format above is for reference. BA-Agent's actual implementation uses LangChain's message protocol.
+
+**LangChain Tool-Call Loop**:
+```python
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+
+# Step 1: User sends message
+messages = [HumanMessage(content="Find all Python files")]
+
+# Step 2: LLM responds with AIMessage containing tool_calls
+ai_message = AIMessage(
+    content="",
+    tool_calls=[{
+        "id": "call_abc123",      # Generated by LLM
+        "name": "Glob",
+        "args": {"pattern": "**/*.py"}
+    }]
+)
+messages.append(ai_message)
+
+# Step 3: Execute tool, create ToolMessage with matching tool_call_id
+tool_result = execute_tool("Glob", {"pattern": "**/*.py"})
+tool_message = ToolMessage(
+    content=tool_result,           # Observation string
+    tool_call_id="call_abc123"     # MUST match AIMessage.tool_calls[0]["id"]
+)
+messages.append(tool_message)
+
+# Step 4: LLM processes tool result and generates next response
+next_ai_message = llm.invoke(messages)
+```
+
+**Key Implementation Constraints**:
+- **tool_call_id source**: MUST come from `AIMessage.tool_calls[i]["id"]`, NOT generated by tool
+- **Carrier**: Use `ToolMessage(content=observation, tool_call_id=...)` NOT `role="user"` blocks
+- **Synchronous tools**: All tool functions are `def` (not `async def`), executed synchronously
+- **ReAct loop**: AIMessage(tool_calls) → ToolMessage(result) → AIMessage(next_action/answer)
+
+**Comparison**:
+
+| Aspect | Research (Claude Code) | Implementation (LangChain) |
+|--------|------------------------|---------------------------|
+| Tool call format | `type: "tool_use"` in AIMessage | `AIMessage.tool_calls` list |
+| Tool call ID | LLM-generated in block | LLM-generated in `.tool_calls[i]["id"]` |
+| Tool result carrier | `role: "user"`, `type: "tool_result"` | `ToolMessage` class |
+| Result ID reference | `tool_use_id` field | `tool_call_id` parameter |
+| Tool execution | Async (internal) | Sync (`def` functions) |
 
 ### 3. Observation Formatting by Output Level
 
@@ -471,9 +561,51 @@ User          BAAgent      SkillSystem      LangGraph
 
 ## Message Format Specifications
 
-### 1. Standard Message Format
+> **IMPORTANT**: BA-Agent uses **LangChain BaseMessage** as its primary message protocol. The Claude Code format below is provided for research/reference/debugging purposes only.
 
-All messages in BA-Agent follow Claude Code's structure:
+### 1. Internal Message Format (Primary) - LangChain BaseMessage
+
+**This is the actual message protocol used in production.**
+
+```python
+from langchain_core.messages import (
+    HumanMessage,    # User input
+    AIMessage,       # LLM responses (may contain tool_calls)
+    ToolMessage,     # Tool execution results
+    SystemMessage    # System prompts
+)
+
+# Example: Tool execution flow
+from langchain_anthropic import ChatAnthropic
+
+llm = ChatAnthropic(model="claude-3-5-sonnet-20241022")
+
+# User message
+human_msg = HumanMessage(content="Find all Python files")
+
+# LLM responds with tool call
+ai_msg = llm.invoke([human_msg])
+# ai_msg.tool_calls = [{"id": "call_123", "name": "Glob", "args": {...}}]
+
+# Tool executes and returns ToolMessage
+tool_msg = ToolMessage(
+    content="file1.py\nfile2.py\nfile3.py",  # Observation string
+    tool_call_id=ai_msg.tool_calls[0]["id"]  # MUST match
+)
+
+# LLM processes result
+next_msg = llm.invoke([human_msg, ai_msg, tool_msg])
+```
+
+**Key Principles**:
+1. **tool_call_id source**: Always from `AIMessage.tool_calls[i]["id"]`, never generated by tools
+2. **ToolMessage content**: Plain observation string (the ReAct Observation)
+3. **Synchronous execution**: Tools are `def` functions, executed synchronously
+4. **Loop pattern**: AIMessage(tool_calls) → ToolMessage(result) → AIMessage(next)
+
+### 2. External/Research Format (Optional) - Claude Code Blocks
+
+**This format is used for research, debugging, and Claude Code compatibility.**
 
 ```python
 from typing import Any, Dict, List, Optional, Literal
@@ -494,7 +626,7 @@ class ContentBlockType(str, Enum):
     TOOL_RESULT = "tool_result"
 
 class ContentBlock(BaseModel):
-    """Standardized content block"""
+    """Standardized content block (research/debugging only)"""
     type: ContentBlockType
 
     # Text content
@@ -504,19 +636,19 @@ class ContentBlock(BaseModel):
     thinking: Optional[str] = None
 
     # Tool use specific
-    id: Optional[str] = None
-    name: Optional[str] = None
-    input: Optional[Dict[str, Any]] = None
+    id: Optional[str] = None        # tool_use id
+    name: Optional[str] = None      # tool name
+    input: Optional[Dict[str, Any]] = None    # tool arguments
 
     # Tool result specific
-    tool_use_id: Optional[str] = None
+    tool_use_id: Optional[str] = None  # references tool_use id
     is_error: bool = False
 
     # Caching
     cache_control: Optional[Dict[str, str]] = None
 
 class StandardMessage(BaseModel):
-    """Standard message format for BA-Agent"""
+    """Claude Code compatible message format (for research/debugging)"""
     role: MessageType
     content: List[ContentBlock]
 
@@ -526,7 +658,7 @@ class StandardMessage(BaseModel):
 
     # Context
     conversation_id: str = ""
-    user_id: str = ""
+    user_id: str ""
 
     def to_langchain_format(self) -> Dict[str, Any]:
         """Convert to LangChain message format"""
@@ -537,6 +669,14 @@ class StandardMessage(BaseModel):
             "message_id": self.message_id,
         }
 ```
+
+**Usage Note**: This format is **NOT** used in the actual BA-Agent implementation. It exists only for:
+- Research and reference
+- Debugging message structures
+- Compatibility testing with Claude Code
+- Documentation examples
+
+The actual system uses `HumanMessage`, `AIMessage`, and `ToolMessage` from LangChain.
 
 ### 2. Tool Call Format
 
@@ -568,10 +708,14 @@ import json
 
 class OutputLevel(str, Enum):
     """
-    Controls the detail level of observation (Progressive Disclosure)
+    Controls the detail level (verbosity) of observation formatting.
 
     This is an ENGINEERING optimization for token efficiency,
     orthogonal to ReAct Observation (semantic concept).
+
+    NOTE: OutputLevel is NOT "Progressive Disclosure" (which applies
+    to Skills system information loading). OutputLevel simply controls
+    how verbose the tool result observation should be.
 
     Decision mechanism (priority order):
     1. Agent specifies in ToolCallMessage.parameters
@@ -763,10 +907,41 @@ Tool Call ID: {self.tool_call_id}"""
             is_error=not self.success
         )
 
+    def to_tool_message(self):
+        """
+        Convert to LangChain ToolMessage for LLM.
+
+        This is the PRIMARY method for BA-Agent implementation.
+        Returns a ToolMessage that can be directly added to the message list.
+
+        Args:
+            tool_call_id: The ID from AIMessage.tool_calls[i]["id"]
+
+        Returns:
+            ToolMessage with observation as content
+
+        Example:
+            from langchain_core.messages import ToolMessage
+
+            # After tool execution
+            tool_msg = result.to_tool_message()
+            messages.append(tool_msg)  # Add to conversation
+        """
+        from langchain_core.messages import ToolMessage
+
+        content = self.format_error_observation() if not self.success else self.observation
+
+        return ToolMessage(
+            content=content,
+            tool_call_id=self.tool_call_id
+        )
+
     def to_user_message(self) -> StandardMessage:
         """
-        Convert to user message for LLM.
-        KEY: Tool results are sent as user messages in Claude Code!
+        Convert to StandardMessage (Claude Code format).
+
+        DEPRECATED: Use to_tool_message() for LangChain implementation.
+        This method exists only for research/debugging compatibility.
         """
         return StandardMessage(
             role=MessageType.USER,
@@ -776,11 +951,13 @@ Tool Call ID: {self.tool_call_id}"""
 
 **Design Decision**:
 1. **Single observation field**: The ReAct Observation that LLM sees
-2. **Output level control**: Progressive disclosure for token optimization
+2. **Output level control**: Verbosity/detail level for token optimization (NOT Progressive Disclosure)
 3. **File-based storage**: Large data stored in files, not memory
 4. **Data summary**: Generated for FULL level to provide context
 5. **Standardized error format**: Consistent error structure for Agent processing
 6. **OutputLevel decision**: Parameter → Tool config → Global default → Dynamic
+7. **Primary conversion**: `to_tool_message()` returns LangChain ToolMessage
+8. **Legacy conversion**: `to_user_message()` for Claude Code format (deprecated)
 
 **Example Usage**:
 ```python
@@ -810,10 +987,38 @@ ToolResultMessage.from_raw_data("call_123", raw_data, OutputLevel.FULL)
 
 **Direction**: Agent → Tool
 
+**CRITICAL: tool_call_id Source**
+
+The `tool_call_id` MUST come from the LLM's response (`AIMessage.tool_calls[i]["id"]`), NOT be generated by the request or tool.
+
+```python
+# CORRECT: Extract tool_call_id from AIMessage
+ai_message = llm.invoke(messages)
+for tool_call in ai_message.tool_calls:
+    tool_call_id = tool_call["id"]  # From LLM
+    tool_name = tool_call["name"]
+    parameters = tool_call["args"]
+
+    request = ToolInvocationRequest(
+        tool_call_id=tool_call_id,  # From AIMessage
+        tool_name=tool_name,
+        parameters=parameters,
+        ...
+    )
+
+# WRONG: Do NOT generate tool_call_id
+request = ToolInvocationRequest(
+    tool_call_id=str(uuid.uuid4()),  # ❌ Never do this
+    ...
+)
+```
+
 ```python
 class ToolInvocationRequest(BaseModel):
     """Request format when Agent calls a tool"""
-    request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    # CRITICAL: tool_call_id comes from AIMessage.tool_calls[i]["id"]
+    # DO NOT generate this value - it must match the LLM's tool call
+    tool_call_id: str
 
     # Tool identification
     tool_name: str
@@ -835,6 +1040,18 @@ class ToolInvocationRequest(BaseModel):
     # Security
     caller_id: str  # Agent or skill ID
     permission_level: str = "default"
+
+    # Idempotency (optional)
+    idempotency_key: Optional[str] = None
+
+    def get_or_generate_idempotency_key(self) -> str:
+        """Get or generate idempotency key for caching tool results"""
+        if self.idempotency_key:
+            return self.idempotency_key
+        # Generate from tool_call_id + parameters hash
+        import hashlib
+        params_str = json.dumps(self.parameters, sort_keys=True)
+        return hashlib.md5(f"{self.tool_call_id}:{params_str}".encode()).hexdigest()
 
     def get_effective_output_level(
         self,
@@ -1009,15 +1226,42 @@ class ToolExecutionResult(BaseModel):
             error_message=f"Retrying after {self.retry_count + 1} failures"
         )
 
+    def to_tool_message(self):
+        """
+        Convert to LangChain ToolMessage for LLM.
+
+        This is the PRIMARY method for BA-Agent implementation.
+
+        Returns:
+            ToolMessage with observation as content
+        """
+        from langchain_core.messages import ToolMessage
+
+        if not self.success:
+            content = f"""Operation failed.
+
+Error Type: {self.error_type or 'Unknown'}
+Error Code: {self.error_code or 'UNKNOWN'}
+Error Message: {self.error_message or 'An unknown error occurred'}
+
+Tool Call ID: {self.request_id}"""
+        else:
+            content = self.observation
+
+        return ToolMessage(
+            content=content,
+            tool_call_id=self.request_id
+        )
+
     def to_llm_message(self) -> Dict[str, Any]:
         """
-        Convert to message for LLM.
+        Convert to Claude Code format message for LLM.
 
-        KEY:
-        - observation IS the ReAct Observation
-        - output_level controls its format
-        - Tool results sent as USER messages
-        - Errors use standardized format
+        DEPRECATED: Use to_tool_message() for LangChain implementation.
+        This method exists only for research/debugging compatibility.
+
+        Returns:
+            Dict in Claude Code format (role="user", type="tool_result")
         """
         if not self.success:
             content = f"""Operation failed.
@@ -3022,11 +3266,15 @@ class AdvancedContextManager:
     高级上下文管理器 - 支持多种压缩策略和 LLM 摘要
 
     特性：
-    1. 异步压缩支持
-    2. LLM 智能摘要（Claude 3 Haiku）
+    1. 同步压缩支持（适合同步工具系统）
+    2. LLM 智能摘要（Claude 3 Haiku）- 后台线程执行
     3. 三种压缩策略（TRUNCATE/EXTRACT/SUMMARIZE）
     4. 自动策略选择
     5. 摘要缓存
+
+    IMPORTANT: 同步系统中的压缩策略
+    - 主链路同步：TRUNCATE（截断）、EXTRACT（规则提取）
+    - 后台线程：SUMMARIZE（LLM 摘要，写入缓存供下一轮使用）
     """
 
     def __init__(
@@ -3085,9 +3333,17 @@ class AdvancedContextManager:
         total_tokens = sum(m.tokens for m in self._messages)
         return total_tokens > (self.max_tokens * self.compression_threshold)
 
-    async def _compress_context(self):
+    def _compress_context(self):
         """
-        执行上下文压缩（支持异步）
+        执行上下文压缩（同步）
+
+        同步系统中的压缩策略：
+        1. TRUNCATE: 直接截断，保留最近 N 条消息
+        2. EXTRACT: 基于重要性的规则提取
+        3. SUMMARIZE: 触发后台线程进行 LLM 摘要，当前轮使用 EXTRACT
+
+        NOTE: LLM 摘要不能在同步主链路中执行（会阻塞）。
+              应该在后台线程执行，结果写入缓存，下一轮对话使用。
         """
         if len(self._messages) < 20:
             return
@@ -3103,7 +3359,38 @@ class AdvancedContextManager:
         elif strategy == ContextCompressionStrategy.EXTRACT:
             self._compress_extract()
         elif strategy == ContextCompressionStrategy.SUMMARIZE:
-            await self._compress_summarize()
+            # 同步系统中：先使用 EXTRACT，后台触发 SUMMARIZE
+            self._compress_extract()
+            self._trigger_background_summarization()
+
+    def _trigger_background_summarization(self):
+        """
+        触发后台线程进行 LLM 摘要
+
+        LLM 摘要结果将写入 SummaryCache，下一轮对话时可以使用。
+        """
+        if not self.config.enable_llm_summarization:
+            return
+
+        import threading
+
+        def summarize_in_background():
+            try:
+                # 在后台线程执行 LLM 摘要
+                summary = self.llm_compressor.summarize_messages(self._messages)
+
+                # 写入缓存
+                message_hash = self._compute_messages_hash()
+                self._summary_cache.set(
+                    f"summary_{message_hash}",
+                    {"summary": summary, "timestamp": datetime.now()}
+                )
+            except Exception as e:
+                logger.warning(f"Background summarization failed: {e}")
+
+        # 启动后台线程
+        thread = threading.Thread(target=summarize_in_background, daemon=True)
+        thread.start()
 
     def _select_compression_strategy(
         self,
@@ -4263,6 +4550,49 @@ Research sources for this design:
 ---
 
 ## Change History
+
+### v2.0.0 (2026-02-06) - LangChain Implementation Alignment
+
+**重大更新：对齐实际实现（LangChain ChatAnthropic + 同步工具）。**
+
+**核心变更**：
+
+1. **Carrier 与 Semantic 分离**
+   - 新增 "Carrier（载体）" 概念，与 Observation（语义）分离
+   - 明确研究层（Claude Code）与实现层（LangChain ToolMessage）的区别
+   - 更新 Summary 表格，从 4 个概念扩展到 5 个
+
+2. **LangChain 作为主协议**
+   - Internal Message Format 章节：LangChain BaseMessage 为主
+   - External/Research Format 章节：Claude Code blocks 降级为可选
+   - 添加 LangChain tool-call loop 标准循环描述
+
+3. **Tool Result 转换方法**
+   - `to_tool_message()`: 返回 LangChain ToolMessage（主要方法）
+   - `to_user_message()`: 标记为 deprecated（仅用于研究/调试）
+   - ToolExecutionResult 添加 `to_tool_message()` 方法
+
+4. **tool_call_id 来源明确化**
+   - ToolInvocationRequest 明确：tool_call_id 来自 AIMessage.tool_calls[i]["id"]
+   - 添加正确/错误示例对比
+   - 添加 idempotency_key 和 get_or_generate_idempotency_key() 方法
+
+5. **同步压缩策略**
+   - AdvancedContextManager: `async def _compress_context()` → `def _compress_context()`
+   - SUMMARIZE 策略改为：主链路使用 EXTRACT，后台线程执行 LLM 摘要
+   - 添加 `_trigger_background_summarization()` 方法
+
+6. **OutputLevel 措辞修正**
+   - 将 "Progressive Disclosure" 改为 "verbosity/detail level"
+   - 明确 OutputLevel 仅用于控制工具输出的详细程度
+   - Progressive Disclosure 专用于 Skills 系统
+
+**文档结构优化**:
+- 添加 "Implementation Layer" 说明，区分研究层和实现层
+- 标注 deprecated 方法，避免混淆
+- 添加更多 LangChain 特定示例
+
+**与实现一致性**: 现在文档与 `backend/agents/agent.py` 的实际实现完全一致
 
 ### v1.9.5 (2026-02-06) - Review Fixes
 
