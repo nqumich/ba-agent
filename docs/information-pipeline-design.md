@@ -1,7 +1,7 @@
 # BA-Agent Information Pipeline Design Document
 
 > **Date**: 2026-02-05
-> **Version**: v1.4 (Conceptual Correction)
+> **Version**: v1.5 (Output Level Clarification)
 > **Author**: BA-Agent Development Team
 > **Status**: Design Phase
 
@@ -64,8 +64,34 @@ Final Answer: The weather in Yangzhou today is...
 
 ### Concept 2: Tool Output Format
 
-**Tool Output** is how tools return data to the agent. In Claude Code, this is **simple and straightforward**.
+**Tool Output** has TWO ORTHOGONAL aspects:
 
+1. **ReAct Observation** (Semantic): What information the tool returns for Agent reasoning
+2. **Output Level** (Engineering): How detailed the observation is (token optimization)
+
+These are INDEPENDENT concerns:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Tool Output Design                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ReAct Observation (Semantic)         Output Level (Engineering)│
+│  ────────────────────────────────     ───────────────────────│
+│  • What the LLM sees and reasons      • BRIEF: Key facts only │
+│  • The actual content string          • STANDARD: Usable info │
+│  • Direct input to next Thought        • FULL: Complete data  │
+│                                                              │
+│  Example: File search tool            Example: Same data,     │
+│  observation: "Found 3 .py files"     different formatting:  │
+│                                        BRIEF:   "3 files"     │
+│                                        STANDARD: "file1.py..."│
+│                                        FULL:    [all paths]  │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Claude Code Format**:
 ```json
 {
   "role": "user",
@@ -82,9 +108,9 @@ Final Answer: The weather in Yangzhou today is...
 
 **Key Points**:
 - Tool results are sent as `role: "user"` messages
-- The `content` field contains the plain observation string
-- **No** summary/observation/result three-layer structure
-- **No** complex nested formats
+- The `content` field is the **observation** (ReAct Observation)
+- **No** summary/observation/result three-layer structure (that was confusion)
+- Output level controls HOW we format the observation from raw data
 - The agent sees the tool result as a simple text observation
 
 ### Concept 3: Progressive Disclosure
@@ -113,13 +139,18 @@ Level 3: Resource files
 
 ### Summary of Separation
 
-| Concept | Purpose | Scope |
-|---------|---------|-------|
-| **ReAct** | Agent reasoning pattern | Control flow |
-| **Tool Output** | Data return format | Tool results |
-| **Progressive Disclosure** | Information loading strategy | Skills system |
+| Concept | Purpose | Scope | Example |
+|---------|---------|-------|---------|
+| **ReAct** | Agent reasoning pattern | Control flow | Thought → Action → Observation loop |
+| **ReAct Observation** | What tool returns | Semantic (content) | "Found 3 Python files" |
+| **Output Level** | How detailed to format | Engineering (token) | BRIEF/STANDARD/FULL |
+| **Progressive Disclosure** | Information loading strategy | Skills system | Level 1→2→3 for Skills |
 
-These are **three separate, independent concepts** that should not be conflated.
+These are **FOUR separate concepts**:
+1. **ReAct**: The reasoning loop pattern
+2. **Observation**: The semantic content returned by tools
+3. **Output Level**: How detailed to format the observation (orthogonal to observation)
+4. **Progressive Disclosure**: How to load skill information (unrelated to tools)
 
 ---
 
@@ -175,9 +206,42 @@ Based on tracing Claude Code's LLM traffic:
 ### 2. Critical Insights
 
 1. **Tool results are user messages**: The agent receives tool results as `role: "user"` messages
-2. **Simple observation format**: Tool results are plain text strings, not complex nested structures
-3. **ReAct is execution flow**: The Thought→Action→Observation pattern is how the agent reasons, not a data format
-4. **Minimal wrapping**: No unnecessary layers between tool execution and agent observation
+2. **Observation = ReAct Observation**: The `content` field IS the Observation that LLM reasons with
+3. **Output Level ≠ ReAct**: Output level controls formatting detail, orthogonal to the Observation semantic
+4. **ReAct is execution flow**: The Thought→Action→Observation pattern is how the agent reasons, not a data format
+5. **Minimal wrapping**: No unnecessary layers between tool execution and agent observation
+
+### 3. Observation Formatting by Output Level
+
+```python
+def _format_brief(data: Any) -> str:
+    """Format observation: BRIEF level - key facts only"""
+    if isinstance(data, list):
+        return f"Found {len(data)} items"
+    elif isinstance(data, dict):
+        if "success" in data:
+            status = "Success" if data["success"] else "Failed"
+            return f"{status}: {data.get('message', 'Operation completed')}"
+        return f"Result has {len(data)} fields"
+    return str(data)[:100]
+
+def _format_standard(data: Any) -> str:
+    """Format observation: STANDARD level - actionable information"""
+    if isinstance(data, list):
+        # Show first few items + count
+        preview = data[:3]
+        items_str = "\n".join(f"  - {item}" for item in preview)
+        more = f"\n  ... and {len(data) - 3} more" if len(data) > 3 else ""
+        return f"Found {len(data)} items:\n{items_str}{more}"
+    elif isinstance(data, dict):
+        # Show key fields
+        return json.dumps(data, ensure_ascii=False, indent=2)[:500]
+    return str(data)[:500]
+
+def _format_full(data: Any) -> str:
+    """Format observation: FULL level - complete data"""
+    return json.dumps(data, ensure_ascii=False, indent=2)
+```
 
 ### 3. Sub-Agent Communication
 
@@ -425,19 +489,89 @@ class ToolCallMessage(BaseModel):
         )
 ```
 
-### 3. Tool Result Format (SIMPLE)
+### 3. Tool Result Format (SIMPLE + Output Level Control)
 
 ```python
+class OutputLevel(str, Enum):
+    """
+    Controls the detail level of observation (Progressive Disclosure)
+
+    This is an ENGINEERING optimization for token efficiency,
+    orthogonal to ReAct Observation (semantic concept).
+    """
+    BRIEF = "brief"       # Key facts only (e.g., "Found 5 records")
+    STANDARD = "standard" # Actionable information (e.g., record list summary)
+    FULL = "full"         # Complete data (e.g., full JSON output)
+
 class ToolResultMessage(BaseModel):
-    """Format for tool execution results - SIMPLE format like Claude Code"""
+    """Format for tool execution results - Claude Code compatible"""
     tool_call_id: str  # References ToolCallMessage.tool_call_id
 
-    # Simple observation string (NOT multi-layer)
+    # ReAct Observation: What the LLM sees and reasons with
+    # This is formatted according to output_level
     observation: str
+
+    # Control observation detail level (Progressive Disclosure)
+    output_level: OutputLevel = OutputLevel.STANDARD
+
+    # Raw data preserved (for debugging, logging, or subsequent processing)
+    # NOT sent to LLM, but available for engineering use
+    raw_data: Optional[Any] = None
 
     # Status
     success: bool = True
     error_message: Optional[str] = None
+
+    @classmethod
+    def from_raw_data(
+        cls,
+        tool_call_id: str,
+        raw_data: Any,
+        output_level: OutputLevel = OutputLevel.STANDARD
+    ) -> "ToolResultMessage":
+        """
+        Create ToolResultMessage from raw data with specified output level.
+
+        This demonstrates the ORTHOGONAL relationship:
+        - observation: The ReAct Observation (semantic)
+        - output_level: How detailed to format it (engineering)
+        """
+        # Format observation based on output_level
+        observation = cls._format_observation(raw_data, output_level)
+
+        return cls(
+            tool_call_id=tool_call_id,
+            observation=observation,
+            output_level=output_level,
+            raw_data=raw_data if output_level == OutputLevel.FULL else None,
+            success=True
+        )
+
+    @staticmethod
+    def _format_observation(raw_data: Any, level: OutputLevel) -> str:
+        """Format observation according to output level"""
+        if level == OutputLevel.BRIEF:
+            # Brief: Just key facts
+            if isinstance(raw_data, list):
+                return f"Found {len(raw_data)} items"
+            elif isinstance(raw_data, dict):
+                return f"Operation successful with {len(raw_data)} fields"
+            else:
+                return str(raw_data)[:100]
+
+        elif level == OutputLevel.STANDARD:
+            # Standard: Actionable information
+            if isinstance(raw_data, list):
+                items = raw_data[:5]  # First 5 items
+                return f"Found {len(raw_data)} items:\n" + "\n".join(str(i) for i in items)
+            elif isinstance(raw_data, dict):
+                return json.dumps(raw_data, ensure_ascii=False, indent=2)[:500]
+            else:
+                return str(raw_data)[:500]
+
+        else:  # FULL
+            # Full: Complete data
+            return json.dumps(raw_data, ensure_ascii=False, indent=2)
 
     def to_content_block(self) -> ContentBlock:
         """Convert to ContentBlock for LLM"""
@@ -460,7 +594,29 @@ class ToolResultMessage(BaseModel):
         )
 ```
 
-**Design Decision**: Removed the `summary` and `result` fields. Tools now return a simple `observation` string, matching Claude Code's approach.
+**Design Decision**:
+1. **Single observation field**: The ReAct Observation that LLM sees
+2. **Output level control**: Progressive disclosure for token optimization
+3. **Raw data preservation**: For debugging and engineering use
+4. **Two orthogonal concepts**: Observation (semantic) vs Level (engineering)
+
+**Example Usage**:
+```python
+# Same raw data, different observation formats based on level
+raw_data = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}, ...]
+
+# BRIEF level
+ToolResultMessage.from_raw_data("call_123", raw_data, OutputLevel.BRIEF)
+# observation: "Found 10 items"
+
+# STANDARD level
+ToolResultMessage.from_raw_data("call_123", raw_data, OutputLevel.STANDARD)
+# observation: "Found 10 items:\n{'id': 1, 'name': 'Alice'}\n{'id': 2, 'name': 'Bob'}..."
+
+# FULL level
+ToolResultMessage.from_raw_data("call_123", raw_data, OutputLevel.FULL)
+# observation: "[{\"id\": 1, \"name\": \"Alice\"}, ...]"  # Full JSON
+```
 
 ---
 
@@ -492,28 +648,80 @@ class ToolInvocationRequest(BaseModel):
     permission_level: str = "default"
 ```
 
-#### Phase 2: Tool Execution Result (SIMPLE)
+#### Phase 2: Tool Execution Result (Observation + Output Level)
 
 **Direction**: Tool → Agent
 
 ```python
+class OutputLevel(str, Enum):
+    """Controls observation detail level (orthogonal to ReAct Observation)"""
+    BRIEF = "brief"       # Key facts only
+    STANDARD = "standard" # Actionable information
+    FULL = "full"         # Complete data
+
 class ToolExecutionResult(BaseModel):
-    """Simple result format from tool execution"""
+    """Result format from tool execution"""
     request_id: str
 
-    # Simple observation string
+    # ReAct Observation: What LLM sees (semantic concept)
     observation: str
+
+    # Output Level: How detailed the observation is (engineering optimization)
+    output_level: OutputLevel = OutputLevel.STANDARD
+
+    # Raw data preserved (not sent to LLM)
+    raw_data: Optional[Any] = None
 
     # Status
     success: bool
     error_code: Optional[str] = None
     error_message: Optional[str] = None
 
+    @classmethod
+    def from_raw(
+        cls,
+        request_id: str,
+        raw_data: Any,
+        output_level: OutputLevel = OutputLevel.STANDARD,
+        tool_name: str = ""
+    ) -> "ToolExecutionResult":
+        """
+        Create result from raw data with specified output level.
+
+        Demonstrates orthogonal relationship:
+        - observation: Formatted for LLM (ReAct Observation)
+        - output_level: Controls formatting (Progressive Disclosure)
+        - raw_data: Preserved for engineering use
+        """
+        # Format observation based on output_level
+        observation = cls._format_by_level(raw_data, output_level)
+
+        return cls(
+            request_id=request_id,
+            observation=observation,
+            output_level=output_level,
+            raw_data=raw_data if output_level == OutputLevel.FULL else None,
+            success=True
+        )
+
+    @staticmethod
+    def _format_by_level(data: Any, level: OutputLevel) -> str:
+        """Format data according to output level"""
+        if level == OutputLevel.BRIEF:
+            return _format_brief(data)
+        elif level == OutputLevel.STANDARD:
+            return _format_standard(data)
+        else:  # FULL
+            return json.dumps(data, ensure_ascii=False, indent=2)
+
     def to_llm_message(self) -> Dict[str, Any]:
         """
         Convert to message for LLM.
-        KEY: Simple observation string, not multi-layer format.
-        Tool results are sent as USER messages.
+
+        KEY:
+        - observation IS the ReAct Observation
+        - output_level controls its format
+        - Tool results sent as USER messages
         """
         content = self.observation if self.success else f"Error: {self.error_message}"
 
@@ -1003,16 +1211,19 @@ class ContextManager:
 
 ### Phase 1: Core Message Format (Week 1)
 
-- [ ] Simplify `ToolOutput` model - remove summary/result, keep only observation
+- [x] ~~Simplify `ToolOutput` model~~ → **Clarify**: Use `observation` + `output_level`
+- [ ] Create `OutputLevel` enum (BRIEF/STANDARD/FULL)
+- [ ] Implement `ToolResultMessage` with observation + output_level + raw_data
 - [ ] Update `StandardMessage` to match Claude Code format
-- [ ] Implement `to_langchain_format()` method
+- [ ] Implement observation formatting helpers (_format_brief, _format_standard, _format_full)
 - [ ] Write unit tests (20 tests)
 
 ### Phase 2: Tool Communication Protocol (Week 2)
 
-- [ ] Implement `ToolExecutionResult` with simple observation format
-- [ ] Update all tools to return simple observation strings
-- [ ] Implement error handling
+- [ ] Implement `ToolExecutionResult` with observation + output_level
+- [ ] Implement `from_raw()` classmethod for level-based formatting
+- [ ] Update all tools to support output_level parameter
+- [ ] Implement error handling with proper observation messages
 - [ ] Write integration tests (15 tests)
 
 ### Phase 3: Skill Communication Protocol (Week 2)
@@ -1050,7 +1261,7 @@ Research sources for this design:
 
 ---
 
-**Document Status**: Design v1.4 - Conceptual Correction
+**Document Status**: Design v1.5 - Output Level Clarification
 **Last Updated**: 2026-02-05
 **Next Review Date**: 2026-02-12
 **Approval Required**: @ba-agent-team
@@ -1058,6 +1269,38 @@ Research sources for this design:
 ---
 
 ## Change History
+
+### v1.5 (2026-02-05) - Output Level Clarification
+
+**Further clarification based on user feedback about orthogonal concepts.**
+
+Key insight: **ReAct Observation** (semantic) and **Output Level** (engineering) are ORTHOGONAL:
+
+1. **ReAct Observation** (Semantic Concept)
+   - The actual content that LLM sees and reasons with
+   - Direct input to the next Thought in ReAct loop
+   - Example: "Found 3 Python files in the project"
+
+2. **Output Level** (Engineering Optimization)
+   - Controls HOW detailed to format the observation
+   - BRIEF: Key facts only
+   - STANDARD: Actionable information
+   - FULL: Complete data
+   - Example: Same data, different formatting levels
+
+3. **Corrected Understanding**
+   - Observation ≠ Output Level (they're independent)
+   - Observation is WHAT (semantic content)
+   - Output Level is HOW (formatting detail)
+   - Both are orthogonal to Progressive Disclosure (Skills loading)
+
+**Key Changes**:
+- Added `OutputLevel` enum (BRIEF/STANDARD/FULL)
+- Updated `ToolResultMessage` with `output_level` field
+- Added `raw_data` preservation (for engineering use)
+- Updated "Summary of Separation" table with 4 concepts
+- Added observation formatting helper functions
+- Clarified the orthogonal relationship in diagrams
 
 ### v1.4 (2026-02-05) - Conceptual Correction
 
@@ -1128,10 +1371,24 @@ Final Answer: The project has three Python files...
 ### Common Misconceptions
 
 ❌ **Incorrect**: "Tool output should have summary → observation → result format"
-✅ **Correct**: "Tool output is a simple observation string; the agent formats its own response"
+✅ **Correct**: "Tool output has a single `observation` field (the ReAct Observation)"
+
+❌ **Incorrect**: "Output Level is part of ReAct"
+✅ **Correct**: "Output Level is an engineering optimization, orthogonal to ReAct Observation"
 
 ❌ **Incorrect**: "Progressive disclosure applies to tool outputs"
 ✅ **Correct**: "Progressive disclosure applies to Skills system (metadata → full → resources)"
 
 ❌ **Incorrect**: "ReAct defines the tool output format"
 ✅ **Correct**: "ReAct defines the agent's reasoning loop, not tool output format"
+
+### Orthogonal Concepts Summary
+
+| Concept | Type | Purpose |
+|---------|------|---------|
+| **ReAct** | Control Flow | Agent reasoning pattern |
+| **Observation** | Semantic | What the tool returns (LLM input) |
+| **Output Level** | Engineering | How detailed to format (token optimization) |
+| **Progressive Disclosure** | Information Loading | How to load Skills (3-level) |
+
+These are **four independent, orthogonal concepts**.
