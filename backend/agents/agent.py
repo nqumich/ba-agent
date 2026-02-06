@@ -44,7 +44,7 @@ from backend.skills import (
     create_skill_tool,
     SkillMessage,
     ContextModifier,
-    MessageType,
+    MessageType as SkillMessageType,  # 别名避免冲突
     MessageVisibility,
 )
 # NEW v2.1: Pipeline components integration

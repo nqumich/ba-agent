@@ -551,7 +551,93 @@ def _should_run_memory_flush(self, current_tokens: int) -> bool:
 
 ---
 
-**最后更新**: 2025-02-05 15:00
+### 2026-02-06 - Pipeline v2.1.0 完成与 Phase 7 移除工作
+
+#### 10:00 - Pipeline v2.1.0 工具迁移完成
+
+**完成的工作**:
+
+1. **工具迁移 Phase 3 (6/6 完成)**
+   - ✅ `file_reader.py` → ToolExecutionResult
+   - ✅ `execute_command.py` → ToolExecutionResult
+   - ✅ `python_sandbox.py` → ToolExecutionResult
+   - ✅ `web_search.py` → ToolExecutionResult
+   - ✅ `web_reader.py` → ToolExecutionResult
+   - ✅ `file_write.py` → ToolExecutionResult
+
+2. **关键 Bug 修复**
+   - ✅ 修复 `ToolExecutionResult.from_raw_data()` success 字段处理
+   - ✅ 修复 `tools/database.py` config.connections 字典访问 bug
+   - ✅ 修复 `tests/backend/test_flush.py::test_multiple_flushes` 断言
+
+3. **测试更新**
+   - ✅ 所有工具测试已适配 ToolExecutionResult
+   - ✅ 更新断言使用 `result.observation` 和 `result.success`
+
+**测试结果**:
+- 746 个测试通过
+- 1 个跳过 (MCP 相关)
+- 0 个失败
+
+#### 12:00 - Phase 7: 移除旧模型完成
+
+**完成的工作**:
+
+1. **删除旧模型文件**
+   - ✅ 删除 `backend/models/compat.py`
+   - ✅ 删除 `backend/models/tool_output.py` (旧 ToolOutput/ToolTelemetry)
+   - ✅ 删除 `tests/models/test_tool_output.py`
+
+2. **清理代码引用**
+   - ✅ `tools/base.py` 移除 old ResponseFormat/ToolOutput 导入
+   - ✅ 移除 `unified_tool` 装饰器 (已不再需要)
+   - ✅ 所有工具移除 `use_pipeline` 参数
+
+3. **验证清理完成**
+   - ✅ Grep 搜索确认无遗留引用
+   - ✅ 746 个测试全部通过
+
+**Pipeline v2.1.0 总体完成状态**:
+
+| Phase | 描述 | 状态 |
+|-------|------|------|
+| Phase 1 | 核心模型定义 | ✅ 完成 |
+| Phase 2 | Pipeline 组件实现 | ✅ 完成 |
+| Phase 3 | 工具迁移 (8/8) | ✅ 完成 |
+| Phase 4 | BAAgent 集成 | ✅ 完成 |
+| Phase 5 | 测试更新 | ✅ 完成 |
+| Phase 6 | 旧系统移除 | ✅ 完成 |
+| Phase 7 | 删除旧模型 | ✅ 完成 |
+
+**已迁移的工具**:
+1. database.py - SQL 查询工具
+2. vector_search.py - 向量检索工具
+3. file_reader.py - 文件读取工具
+4. execute_command.py - 命令行执行工具
+5. python_sandbox.py - Python 沙盒工具
+6. web_search.py - Web 搜索工具
+7. web_reader.py - Web 读取工具
+8. file_write.py - 文件写入工具
+
+#### 14:00 - 文档更新完成
+
+**更新的文档**:
+- ✅ `README.md` - 更新测试统计 (746 passed)、Pipeline v2.1 完成状态
+- ✅ `task_plan.md` - 添加 Pipeline v2.1.0 完成记录
+- ✅ `docs/project-structure.md` - 更新测试统计和 Pipeline 状态
+- ✅ `progress.md` - 添加本次工作记录
+
+**最新测试统计 (2026-02-06)**:
+```
+总计: 746 个测试
+✅ 通过: 746 (100%)
+⏭️  跳过: 1
+❌ 失败: 0
+```
+
+---
+
+**最后更新**: 2026-02-06 14:00
 
 ### 工具调用 (2026-02-05 02:04:48)
 

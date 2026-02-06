@@ -12,6 +12,9 @@ from tools.web_reader import (
     web_reader_tool,
 )
 
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
+
 
 class TestWebReaderInput:
     """测试 WebReaderInput 模型"""
@@ -139,8 +142,10 @@ class TestWebReaderImpl:
     def test_basic_read(self):
         """测试基本读取"""
         result = web_reader_impl(url="https://example.com")
-        assert "example.com" in result
-        assert "模拟网页内容" in result
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert "example.com" in result.observation
+        assert "模拟网页内容" in result.observation
 
     def test_with_custom_timeout(self):
         """测试自定义超时"""
@@ -148,7 +153,8 @@ class TestWebReaderImpl:
             url="https://example.com",
             timeout=60
         )
-        assert result is not None
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
     def test_with_text_format(self):
         """测试 text 返回格式"""
@@ -156,7 +162,8 @@ class TestWebReaderImpl:
             url="https://example.com",
             return_format="text"
         )
-        assert result is not None
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
     def test_with_retain_images(self):
         """测试保留图片"""
@@ -164,12 +171,15 @@ class TestWebReaderImpl:
             url="https://example.com",
             retain_images=True
         )
-        assert result is not None
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
     def test_content_contains_url(self):
         """测试返回内容包含 URL"""
         result = web_reader_impl(url="https://docs.python.org/")
-        assert "docs.python.org" in result
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert "docs.python.org" in result.observation
 
 
 class TestWebReaderTool:
@@ -194,7 +204,8 @@ class TestWebReaderTool:
             "return_format": "markdown",
             "retain_images": False,
         })
-        assert result is not None
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
 
 # 集成测试已移至 test_web_reader_integration.py

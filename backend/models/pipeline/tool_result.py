@@ -287,6 +287,9 @@ class ToolExecutionResult(BaseModel):
         data_size = len(data_json.encode('utf-8'))
         data_hash = hashlib.md5(data_json.encode()).hexdigest()
 
+        # Extract success from raw_data if present
+        is_success = raw_data.get("success", True) if isinstance(raw_data, dict) else True
+
         # Generate observation based on output level
         if output_level == OutputLevel.BRIEF:
             observation = cls._format_brief(raw_data)
@@ -306,6 +309,7 @@ class ToolExecutionResult(BaseModel):
                     artifact_id=artifact_id,
                     data_size_bytes=data_size,
                     data_hash=data_hash,
+                    success=is_success,
                     cache_policy=cache_policy,
                     **kwargs
                 )
@@ -319,6 +323,7 @@ class ToolExecutionResult(BaseModel):
             output_level=output_level,
             data_size_bytes=data_size,
             data_hash=data_hash,
+            success=is_success,
             cache_policy=cache_policy,
             **kwargs
         )

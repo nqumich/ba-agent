@@ -1,38 +1,30 @@
 """
-向量检索工具 (v2.1 - Pipeline Support)
+向量检索工具 (v2.1 - Pipeline Only)
 
 使用 ChromaDB 进行语义搜索，支持指标/维度定义检索
 提供内存回退方案当 ChromaDB 不可用时
 
-新特性：
-- 支持 ToolExecutionResult (Pipeline v2.0.1)
-- 保持与旧 ToolOutput 的兼容性
+v2.1 变更：
+- 移除旧模型 (ToolOutput, ResponseFormat)
+- 仅使用 ToolExecutionResult
+- 移除 use_pipeline 参数
 """
 
 import os
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import StructuredTool
 
 from config import get_config
 
-# 旧模型 (保持兼容)
-from backend.models.tool_output import ToolOutput, ToolTelemetry, ResponseFormat
-
-# 新模型 (Pipeline v2.0.1)
+# Pipeline v2.1 模型
 from backend.models.pipeline import (
     OutputLevel,
     ToolExecutionResult,
     ToolCachePolicy,
-)
-
-# 兼容层
-from backend.models.compat import (
-    response_format_to_output_level,
-    execution_result_to_tool_output,
 )
 
 
@@ -71,12 +63,12 @@ class VectorSearchInput(BaseModel):
     )
     filter_metadata: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="元数据过滤条件（例如: {\"category\": \"metric\"}）"
+        description="元数据过滤条件（例如: {&quot;category&quot;: &quot;metric&quot;}）"
     )
-    # 新：支持 OutputLevel 字符串
+    # 支持 OutputLevel 字符串
     response_format: Optional[str] = Field(
         default="standard",
-        description="响应格式: concise/brief, standard, detailed/full"
+        description="响应格式: brief, standard, full"
     )
 
     @field_validator('collection')
@@ -391,7 +383,7 @@ class ChromaDBVectorStore:
             return fallback.search(query, max_results, min_score, filter_metadata)
 
 
-def _get_vector_store(collection_name: str) -> Union[ChromaDBVectorStore, InMemoryVectorStore]:
+def _get_vector_store(collection_name: str):
     """
     获取向量存储实例
 
@@ -410,29 +402,23 @@ def _get_vector_store(collection_name: str) -> Union[ChromaDBVectorStore, InMemo
     return InMemoryVectorStore()
 
 
-def _parse_response_format(format_str: str) -> tuple[Union[ResponseFormat, OutputLevel], str]:
+def _parse_output_level(format_str: str) -> OutputLevel:
     """
-    解析响应格式字符串
+    解析输出格式字符串为 OutputLevel
 
-    支持：
-    - 旧格式: concise, standard, detailed, raw
-    - 新格式: brief, standard, full
-
-    Returns:
-        (format_enum, format_type) - format_type 是 'old' 或 'new'
+    支持的格式：
+    - brief/concise → OutputLevel.BRIEF
+    - standard → OutputLevel.STANDARD
+    - full/detailed → OutputLevel.FULL
     """
     format_lower = format_str.lower()
 
-    # 新格式 (OutputLevel)
-    if format_lower in ("brief", "full"):
-        return OutputLevel(format_lower), "new"
-
-    # 旧格式 (ResponseFormat)
-    if format_lower in ("concise", "standard", "detailed", "raw"):
-        return ResponseFormat(format_lower), "old"
-
-    # 默认
-    return ResponseFormat.STANDARD, "old"
+    if format_lower in ("brief", "concise"):
+        return OutputLevel.BRIEF
+    elif format_lower in ("full", "detailed"):
+        return OutputLevel.FULL
+    else:
+        return OutputLevel.STANDARD
 
 
 def vector_search_impl(
@@ -442,8 +428,7 @@ def vector_search_impl(
     min_score: float = 0.0,
     filter_metadata: Optional[Dict[str, Any]] = None,
     response_format: str = "standard",
-    use_pipeline: bool = True,  # v2.1: 默认启用 Pipeline
-) -> Union[str, ToolExecutionResult]:
+) -> ToolExecutionResult:
     """
     向量检索的实现函数
 
@@ -454,15 +439,18 @@ def vector_search_impl(
         min_score: 最小相似度分数
         filter_metadata: 元数据过滤条件
         response_format: 响应格式
-        use_pipeline: 是否使用新 Pipeline 模型 (默认 True)
 
     Returns:
-        搜索结果（JSON 字符串或 ToolExecutionResult）
+        ToolExecutionResult
     """
     start_time = time.time()
 
-    # 解析响应格式
-    format_enum, format_type = _parse_response_format(response_format)
+    # 生成 tool_call_id
+    import uuid
+    tool_call_id = f"call_search_knowledge_{uuid.uuid4().hex[:12]}"
+
+    # 解析输出级别
+    output_level = _parse_output_level(response_format)
 
     try:
         # 获取向量存储
@@ -496,93 +484,43 @@ def vector_search_impl(
             if result_types:
                 summary += f"，类型: {', '.join(sorted(result_types))}"
 
-        # 根据是否使用 Pipeline 返回不同格式
-        if use_pipeline:
-            # 新格式：ToolExecutionResult
-            import uuid
-            tool_call_id = f"call_search_knowledge_{uuid.uuid4().hex[:12]}"
+        # 创建 ToolExecutionResult
+        result_data = {
+            "query": query,
+            "collection": collection,
+            "results": search_results,
+            "result_count": result_count
+        }
 
-            # 转换 OutputLevel
-            if format_type == "new":
-                output_level = format_enum
-            else:
-                output_level = response_format_to_output_level(format_enum)
+        result = ToolExecutionResult.from_raw_data(
+            tool_call_id=tool_call_id,
+            raw_data=result_data,
+            output_level=output_level,
+            tool_name="search_knowledge",
+            cache_policy=ToolCachePolicy.TTL_SHORT,
+        )
 
-            result_data = {
-                "query": query,
-                "collection": collection,
-                "results": search_results,
-                "result_count": result_count
-            }
+        # BRIEF 模式使用 summary 作为 observation
+        if output_level == OutputLevel.BRIEF:
+            result.observation = summary
 
-            result = ToolExecutionResult.from_raw_data(
-                tool_call_id=tool_call_id,
-                raw_data=result_data,
-                output_level=output_level,
-                tool_name="search_knowledge",
-                cache_policy=ToolCachePolicy.TTL_SHORT,  # 搜索结果可短时缓存
-            )
-            result.observation = summary if output_level == OutputLevel.BRIEF else result.observation
-            result.duration_ms = duration_ms
+        result.duration_ms = duration_ms
 
-            return result
-        else:
-            # 旧格式：ToolOutput
-            telemetry = ToolTelemetry(tool_name="search_knowledge")
-            telemetry.latency_ms = duration_ms
-            telemetry.success = True
-
-            # 构建观察结果（ReAct 格式）
-            observation = f"Observation: {summary}\nStatus: Success"
-
-            # 构建输出
-            output = ToolOutput(
-                result={
-                    "query": query,
-                    "collection": collection,
-                    "results": search_results,
-                    "result_count": result_count
-                } if format_enum != ResponseFormat.CONCISE else None,
-                summary=summary,
-                observation=observation,
-                telemetry=telemetry,
-                response_format=ResponseFormat(format_enum)
-            )
-
-            return output.model_dump_json()
+        return result
 
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
 
-        if use_pipeline:
-            # 新格式错误结果
-            import uuid
-            tool_call_id = f"call_search_knowledge_{uuid.uuid4().hex[:12]}"
-            return ToolExecutionResult.create_error(
-                tool_call_id=tool_call_id,
-                error_message=str(e),
-                error_type=type(e).__name__,
-                tool_name="search_knowledge",
-            ).with_duration(duration_ms)
-        else:
-            # 旧格式错误结果
-            telemetry = ToolTelemetry(tool_name="search_knowledge")
-            telemetry.latency_ms = duration_ms
-            telemetry.success = False
-            telemetry.error_code = type(e).__name__
-            telemetry.error_message = str(e)
-
-            output = ToolOutput(
-                summary=f"搜索失败: {str(e)}",
-                observation=f"Observation: 搜索失败 - {str(e)}\nStatus: Error",
-                telemetry=telemetry,
-                response_format=ResponseFormat(format_enum)
-            )
-
-            return output.model_dump_json()
+        # 创建错误结果
+        return ToolExecutionResult.create_error(
+            tool_call_id=tool_call_id,
+            error_message=str(e),
+            error_type=type(e).__name__,
+            tool_name="search_knowledge",
+        ).with_duration(duration_ms)
 
 
-# 创建 LangChain 工具（保持兼容）
+# 创建 LangChain 工具
 vector_search_tool = StructuredTool.from_function(
     func=vector_search_impl,
     name="search_knowledge",
@@ -604,17 +542,13 @@ vector_search_tool = StructuredTool.from_function(
 - 查询维度说明: "品类维度是什么?"
 - 搜索相关概念: "广告相关指标"
 
-响应格式：
-- concise/brief: 仅摘要
-- standard: 摘要 + 结果
-- detailed/full: 完整信息
-
 参数说明：
 - query: 搜索查询文本
 - collection: 集合名称（默认: ba_agent）
 - max_results: 最大返回结果数（1-50）
 - min_score: 最小相似度分数（0-1）
 - filter_metadata: 元数据过滤，例如 {"type": "metric", "category": "sales"}
+- response_format: 响应格式（brief/standard/full，默认: standard）
 """,
     args_schema=VectorSearchInput
 )

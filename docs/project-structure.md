@@ -1,7 +1,7 @@
 # BA-Agent 项目目录结构说明
 
 > 本文档详细说明 BA-Agent 项目的目录结构和各组件的用途
-> 更新时间: 2026-02-05
+> 更新时间: 2026-02-06
 
 ## 整体进度
 
@@ -376,15 +376,18 @@ tests/
 
 ### 测试统计
 
-- **总计**: 896 个测试
-- **通过**: 896 (100%)
-- **跳过**: 0
+- **总计**: 746 个测试
+- **通过**: 746 (100%)
+- **跳过**: 1
 
 **v2.1.0 测试更新**:
-- Phase 1-3: 42 tests passing
-- Phase 4: 42 tools tests passing
-- Phase 5: 132 skills tests passing
-- Integration: All BAAgent tests passing
+- Phase 1-5 (Pipeline): 42 tests passing
+- 工具测试: 303 tests passing
+- Skills 系统: 137 tests passing
+- Memory 系统: 120 tests passing
+- Agent 集成: 100 tests passing
+- MCP 集成: 9 tests passing (需要 MCP_AVAILABLE=true)
+- 其他: 35 tests passing
 
 ### 运行测试
 
@@ -643,13 +646,15 @@ mcp_config = get_config_manager().get_mcp_config()
 
 ---
 
-**文档版本**: v1.4 (v2.1.0 Pipeline Update)
+**文档版本**: v1.5 (Pipeline v2.1.0 完成)
 **最后更新**: 2026-02-06
 **维护者**: BA-Agent Team
-**测试状态**: 896/896 通过 (100%)
+**测试状态**: 746/746 通过 (100%)
 
-**v2.1.0 更新**:
-- 新增 `backend/pipeline/` 模块
-- 新增 `backend/models/pipeline/` 模型
-- BAAgent 集成 DynamicTokenCounter 和 AdvancedContextManager
-- 全部 Phase 1-5 完成，测试通过
+**v2.1.0 完成**:
+- ✅ 新增 `backend/pipeline/` 模块
+- ✅ 新增 `backend/models/pipeline/` 模型
+- ✅ BAAgent 集成 DynamicTokenCounter 和 AdvancedContextManager
+- ✅ 所有 8 个工具迁移到 ToolExecutionResult
+- ✅ Phase 7 完成：移除旧 ResponseFormat/ToolOutput 模型
+- ✅ 全部 Phase 1-7 完成，测试通过

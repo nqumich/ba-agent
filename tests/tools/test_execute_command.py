@@ -1,5 +1,5 @@
 """
-命令行执行工具单元测试
+命令行执行工具单元测试 (v2.1 - Pipeline Only)
 """
 
 import pytest
@@ -12,6 +12,9 @@ from tools.execute_command import (
     execute_command_tool,
 )
 from backend.docker.sandbox import reset_sandbox
+
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
 
 
 class TestExecuteCommandInput:
@@ -105,9 +108,11 @@ class TestExecuteCommandImpl:
         # 执行
         result = execute_command_impl("ls -la", timeout=30)
 
-        # 验证
-        assert 'file1.txt' in result
-        assert 'file2.txt' in result
+        # 验证 (v2.1: result 是 ToolExecutionResult)
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert 'file1.txt' in result.observation
+        assert 'file2.txt' in result.observation
         mock_sandbox.execute_command.assert_called_once_with(
             command="ls -la",
             timeout=30,
@@ -140,9 +145,9 @@ class TestExecuteCommandImpl:
         # 执行
         result = execute_command_impl("invalid_cmd", timeout=30)
 
-        # 验证
-        assert "命令执行失败" in result
-        assert "Command not found" in result
+        # 验证 (v2.1: result 是 ToolExecutionResult)
+        assert isinstance(result, ToolExecutionResult)
+        assert "Command not found" in result.observation
 
     @patch('tools.execute_command.get_sandbox')
     @patch('tools.execute_command.get_config')
@@ -168,8 +173,10 @@ class TestExecuteCommandImpl:
         # 执行
         result = execute_command_impl("true", timeout=30)
 
-        # 验证
-        assert result == "命令执行成功，无输出"
+        # 验证 (v2.1: result 是 ToolExecutionResult)
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert "命令执行成功" in result.observation
 
 
 class TestExecuteCommandTool:
@@ -216,7 +223,9 @@ class TestExecuteCommandTool:
                 "timeout": 30
             })
 
-            assert "test output" in result
+            # 验证 (v2.1: result 是 ToolExecutionResult)
+            assert isinstance(result, ToolExecutionResult)
+            assert "test output" in result.observation
 
 
 class TestExecuteCommandIntegration:
@@ -232,11 +241,13 @@ class TestExecuteCommandIntegration:
         """真实 Docker 环境执行（慢速测试）"""
         # 注意：这需要在 CI 环境中跳过或标记为 slow
         result = execute_command_impl("echo 'Hello from Docker'", timeout=10)
-        assert "Hello from Docker" in result
+        assert isinstance(result, ToolExecutionResult)
+        assert "Hello from Docker" in result.observation
 
     @pytest.mark.slow
     @pytest.mark.docker
     def test_real_docker_with_complex_command(self):
         """测试复杂命令"""
         result = execute_command_impl("echo 'line1\nline2\nline3' | wc -l", timeout=10)
-        assert "3" in result
+        assert isinstance(result, ToolExecutionResult)
+        assert "3" in result.observation

@@ -1,5 +1,5 @@
 """
-Web Reader 工具集成测试
+Web Reader 工具集成测试 (v2.1 - Pipeline Only)
 
 测试真实的 MCP 服务器集成
 """
@@ -10,6 +10,9 @@ import json
 import pytest
 
 from tools.web_reader import WebReaderInput, web_reader_impl
+
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
 
 
 class MCPServerManager:
@@ -181,4 +184,6 @@ class TestWebReaderSimple:
             timeout=20
         )
         assert result is not None
-        assert isinstance(result, str)
+        # v2.1: result 是 ToolExecutionResult
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success

@@ -1,7 +1,12 @@
 """
-BA-Agent 工具模块
+BA-Agent 工具模块 (v2.1 - Pipeline Only)
 
 提供 LangChain StructuredTool 封装的各种工具
+
+v2.1 变更：
+- 移除 unified_tool (旧装饰器)
+- 保留 ToolOutputParser (简化版)
+- 移除 ReActFormatter, TokenOptimizer (不再需要)
 """
 
 from .execute_command import (
@@ -52,10 +57,9 @@ from .vector_search import (
 )
 
 from .base import (
-    unified_tool,
+    pipeline_tool,
+    tool,
     ToolOutputParser,
-    ReActFormatter,
-    TokenOptimizer,
 )
 
 __all__ = [
@@ -85,8 +89,8 @@ __all__ = [
     "vector_search_tool",
     "InMemoryVectorStore",
     "ChromaDBVectorStore",
-    "unified_tool",
+    # Base decorators and utilities
+    "pipeline_tool",
+    "tool",
     "ToolOutputParser",
-    "ReActFormatter",
-    "TokenOptimizer",
 ]

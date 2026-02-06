@@ -26,6 +26,9 @@ from tools.file_reader import (
     _read_sql,
 )
 
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
+
 
 class TestFileReadInput:
     """测试 FileReadInput 模型"""
@@ -566,17 +569,17 @@ class TestFileReaderImpl:
     def test_read_nonexistent_file(self):
         """测试读取不存在的文件"""
         result = file_reader_impl(path="./data/nonexistent.csv")
-        result_dict = json.loads(result)
-        assert result_dict["success"] is False
-        assert "不存在" in result_dict["error"]
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success is False
+        assert "不存在" in result.error_message or "FileNotFound" in result.error_type
 
     def test_read_directory_as_file(self):
         """测试将目录作为文件读取"""
         os.makedirs("./data", exist_ok=True)
         result = file_reader_impl(path="./data")
-        result_dict = json.loads(result)
-        assert result_dict["success"] is False
-        assert "不是文件" in result_dict["error"]
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success is False
+        assert "不是文件" in result.error_message or "NotAFile" in result.error_type
 
     def test_read_python_file_impl(self):
         """测试通过实现函数读取 Python 文件"""
@@ -591,8 +594,11 @@ class TestFileReaderImpl:
             os.rename(temp_path, allowed_path)
 
             result = file_reader_impl(path=allowed_path)
-            result_dict = json.loads(result)
-            assert result_dict["success"] is True
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success is True
+            # With response_format="full", observation will be JSON
+            result_full = file_reader_impl(path=allowed_path, response_format="full")
+            result_dict = json.loads(result_full.observation)
             assert result_dict["format"] == "python"
         finally:
             if os.path.exists(allowed_path):
@@ -611,8 +617,11 @@ class TestFileReaderImpl:
             os.rename(temp_path, allowed_path)
 
             result = file_reader_impl(path=allowed_path, parse_metadata=True)
-            result_dict = json.loads(result)
-            assert result_dict["success"] is True
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success is True
+            # With response_format="full", observation will be JSON
+            result_full = file_reader_impl(path=allowed_path, parse_metadata=True, response_format="full")
+            result_dict = json.loads(result_full.observation)
             assert result_dict["format"] == "sql"
             assert "queries" in result_dict
         finally:
@@ -650,8 +659,12 @@ class TestFileReaderTool:
                 "path": allowed_path,
                 "format": "text",
                 "encoding": "utf-8",
+                "response_format": "full",
             })
-            result_dict = json.loads(result)
+            # The invoke() returns a ToolExecutionResult, observation is a string
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success is True
+            result_dict = json.loads(result.observation)
             assert result_dict["success"] is True
         finally:
             if os.path.exists(allowed_path):
@@ -672,8 +685,12 @@ class TestFileReaderTool:
             result = file_reader_tool.invoke({
                 "path": allowed_path,
                 "parse_metadata": True,
+                "response_format": "full",
             })
-            result_dict = json.loads(result)
+            # The invoke() returns a ToolExecutionResult
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success is True
+            result_dict = json.loads(result.observation)
             assert result_dict["success"] is True
             assert result_dict["format"] == "python"
             assert "metadata" in result_dict

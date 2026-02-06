@@ -1,18 +1,32 @@
 """
-文件读取工具
+文件读取工具 (v2.1 - Pipeline Only)
 
 支持读取 CSV、Excel、JSON、文本、Python、SQL 文件
+
+v2.1 变更：
+- 使用 ToolExecutionResult 返回
+- 支持 OutputLevel (BRIEF/STANDARD/FULL)
+- 添加 response_format 参数
 """
 
 import ast
 import json
 import os
 import re
+import time
+import uuid
 from pathlib import Path
 from typing import Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import StructuredTool
+
+# Pipeline v2.1 模型
+from backend.models.pipeline import (
+    OutputLevel,
+    ToolExecutionResult,
+    ToolCachePolicy,
+)
 
 
 # 默认允许的路径配置
@@ -52,6 +66,11 @@ class FileReadInput(BaseModel):
     parse_metadata: Optional[bool] = Field(
         default=False,
         description="是否解析元数据（Python: AST解析函数/类/导入；SQL: 提取查询语句）"
+    )
+    # 支持 OutputLevel 字符串
+    response_format: Optional[str] = Field(
+        default="standard",
+        description="响应格式: brief, standard, full"
     )
 
     @field_validator('path')
@@ -111,6 +130,25 @@ class FileReadInput(BaseModel):
         if v is not None and v <= 0:
             raise ValueError("nrows 必须大于 0")
         return v
+
+
+def _parse_output_level(format_str: str) -> OutputLevel:
+    """
+    解析输出格式字符串为 OutputLevel
+
+    支持的格式：
+    - brief/concise → OutputLevel.BRIEF
+    - standard → OutputLevel.STANDARD
+    - full/detailed → OutputLevel.FULL
+    """
+    format_lower = format_str.lower()
+
+    if format_lower in ("brief", "concise"):
+        return OutputLevel.BRIEF
+    elif format_lower in ("full", "detailed"):
+        return OutputLevel.FULL
+    else:
+        return OutputLevel.STANDARD
 
 
 def _detect_format(path: str) -> str:
@@ -460,9 +498,10 @@ def file_reader_impl(
     sheet_name: Union[str, int] = 0,
     nrows: Optional[int] = None,
     parse_metadata: bool = False,
-) -> str:
+    response_format: str = "standard",
+) -> ToolExecutionResult:
     """
-    文件读取的实现函数
+    文件读取的实现函数 (v2.1 - Pipeline)
 
     Args:
         path: 文件路径
@@ -471,50 +510,79 @@ def file_reader_impl(
         sheet_name: Excel 工作表
         nrows: 最大读取行数
         parse_metadata: 是否解析元数据
+        response_format: 响应格式
 
     Returns:
-        JSON 字符串格式的读取结果
+        ToolExecutionResult
     """
-    import json
+    start_time = time.time()
 
-    # 检查文件是否存在
-    if not os.path.exists(path):
-        result = {
-            "success": False,
-            "error": f"文件不存在: {path}",
-            "path": path
-        }
-        return json.dumps(result, ensure_ascii=False, indent=2)
+    # 生成 tool_call_id
+    tool_call_id = f"call_read_file_{uuid.uuid4().hex[:12]}"
 
-    # 检查是否是文件
-    if not os.path.isfile(path):
-        result = {
-            "success": False,
-            "error": f"路径不是文件: {path}",
-            "path": path
-        }
-        return json.dumps(result, ensure_ascii=False, indent=2)
+    # 解析输出级别
+    output_level = _parse_output_level(response_format)
 
-    # 检测格式
-    if format is None:
-        format = _detect_format(path)
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(path):
+            return ToolExecutionResult.create_error(
+                tool_call_id=tool_call_id,
+                error_message=f"文件不存在: {path}",
+                error_type="FileNotFound",
+                tool_name="read_file",
+            ).with_duration((time.time() - start_time) * 1000)
 
-    # 根据格式读取文件
-    if format == "csv":
-        result = _read_csv(path, encoding, nrows)
-    elif format == "excel":
-        result = _read_excel(path, sheet_name, nrows)
-    elif format == "json":
-        result = _read_json(path, encoding)
-    elif format == "python":
-        result = _read_python(path, encoding, parse_metadata)
-    elif format == "sql":
-        result = _read_sql(path, encoding, parse_metadata)
-    else:  # text
-        result = _read_text(path, encoding, nrows)
+        # 检查是否是文件
+        if not os.path.isfile(path):
+            return ToolExecutionResult.create_error(
+                tool_call_id=tool_call_id,
+                error_message=f"路径不是文件: {path}",
+                error_type="NotAFile",
+                tool_name="read_file",
+            ).with_duration((time.time() - start_time) * 1000)
 
-    result["path"] = path
-    return json.dumps(result, ensure_ascii=False, indent=2)
+        # 检测格式
+        if format is None:
+            format = _detect_format(path)
+
+        # 根据格式读取文件
+        if format == "csv":
+            raw_data = _read_csv(path, encoding, nrows)
+        elif format == "excel":
+            raw_data = _read_excel(path, sheet_name, nrows)
+        elif format == "json":
+            raw_data = _read_json(path, encoding)
+        elif format == "python":
+            raw_data = _read_python(path, encoding, parse_metadata)
+        elif format == "sql":
+            raw_data = _read_sql(path, encoding, parse_metadata)
+        else:  # text
+            raw_data = _read_text(path, encoding, nrows)
+
+        raw_data["path"] = path
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        # 创建 ToolExecutionResult
+        return ToolExecutionResult.from_raw_data(
+            tool_call_id=tool_call_id,
+            raw_data=raw_data,
+            output_level=output_level,
+            tool_name="read_file",
+            cache_policy=ToolCachePolicy.NO_CACHE,
+        ).with_duration(duration_ms)
+
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+
+        # 创建错误结果
+        return ToolExecutionResult.create_error(
+            tool_call_id=tool_call_id,
+            error_message=str(e),
+            error_type=type(e).__name__,
+            tool_name="read_file",
+        ).with_duration(duration_ms)
 
 
 # 创建 LangChain 工具

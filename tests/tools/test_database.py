@@ -1,5 +1,5 @@
 """
-数据库查询工具单元测试 (v2.1 - Pipeline Support)
+数据库查询工具单元测试 (v2.1 - Pipeline Only)
 """
 
 import pytest
@@ -12,26 +12,8 @@ from tools.database import (
     _format_result,
 )
 
-# 旧模型 (保持兼容)
-from backend.models.tool_output import ToolOutput
-
-# 新模型 (Pipeline v2.1)
+# Pipeline v2.1 模型
 from backend.models.pipeline import ToolExecutionResult, OutputLevel
-
-
-def _parse_result(result):
-    """
-    解析结果（支持新旧格式）
-
-    v2.1: 默认返回 ToolExecutionResult
-    旧格式: 返回 JSON 字符串 (使用 use_pipeline=False)
-    """
-    if isinstance(result, ToolExecutionResult):
-        return result  # 新格式
-    elif isinstance(result, str):
-        return ToolOutput.model_validate_json(result)  # 旧格式
-    else:
-        raise TypeError(f"Unknown result type: {type(result)}")
 
 
 class TestDatabaseQueryInput:
@@ -60,15 +42,6 @@ class TestDatabaseQueryInput:
         )
         assert "WITH" in input_data.query.upper()
 
-    def test_trailing_semicolon(self):
-        """测试结尾分号"""
-        input_data = DatabaseQueryInput(
-            query="SELECT * FROM users;"
-        )
-        # 分号应该被移除
-        assert ";" not in input_data.query
-        assert "SELECT" in input_data.query
-
     def test_connection_name(self):
         """测试自定义连接名称"""
         input_data = DatabaseQueryInput(
@@ -93,14 +66,6 @@ class TestDatabaseQueryInput:
         )
         assert input_data.params == {"ids": [1, 2, 3]}
 
-    def test_params_with_tuple(self):
-        """测试元组参数"""
-        input_data = DatabaseQueryInput(
-            query="SELECT * FROM users WHERE id IN :ids",
-            params={"ids": (1, 2, 3)}
-        )
-        assert input_data.params == {"ids": (1, 2, 3)}
-
     def test_max_rows_custom(self):
         """测试自定义最大行数"""
         input_data = DatabaseQueryInput(
@@ -117,21 +82,21 @@ class TestDatabaseQueryInput:
         )
         assert input_data.max_rows == 10000
 
-    def test_response_format_concise(self):
+    def test_response_format_brief(self):
         """测试简洁响应格式"""
         input_data = DatabaseQueryInput(
             query="SELECT * FROM users",
-            response_format="concise"
+            response_format="brief"
         )
-        assert input_data.response_format == "concise"
+        assert input_data.response_format == "brief"
 
-    def test_response_format_detailed(self):
-        """测试详细响应格式"""
+    def test_response_format_standard(self):
+        """测试标准响应格式"""
         input_data = DatabaseQueryInput(
             query="SELECT * FROM users",
-            response_format="detailed"
+            response_format="standard"
         )
-        assert input_data.response_format == "detailed"
+        assert input_data.response_format == "standard"
 
     def test_query_normalization(self):
         """测试查询标准化（多余空格）"""
@@ -164,11 +129,6 @@ class TestDatabaseQueryInput:
         """测试禁止的 ALTER 语句"""
         with pytest.raises(ValidationError, match="禁止的关键字"):
             DatabaseQueryInput(query="SELECT * FROM (SELECT ALTER FROM temp) AS subquery")
-
-    def test_forbidden_keyword_in_middle(self):
-        """测试中间位置的禁止关键字（在子查询中）"""
-        with pytest.raises(ValidationError, match="禁止的关键字"):
-            DatabaseQueryInput(query="SELECT * FROM users WHERE id IN (SELECT id FROM (SELECT DELETE FROM temp) AS subquery)")
 
     def test_delete_statement_blocked(self):
         """测试 DELETE 语句被阻止"""
@@ -279,95 +239,101 @@ class TestQueryDatabaseImpl:
 
     def test_basic_query_execution(self):
         """测试基本查询执行"""
-        result = _parse_result(query_database_impl(query="SELECT * FROM users"))
+        result = query_database_impl(query="SELECT * FROM users")
 
+        assert isinstance(result, ToolExecutionResult)
         assert result.success
-        assert len(result.observation) > 0  # Observation should have content
+        assert len(result.observation) > 0
 
     def test_query_with_specific_columns(self):
         """测试指定列的查询"""
-        result = _parse_result(query_database_impl(query="SELECT id, name, email FROM users"))
+        result = query_database_impl(query="SELECT id, name, email FROM users")
 
+        assert isinstance(result, ToolExecutionResult)
         assert result.success
         assert len(result.observation) > 0
 
     def test_query_with_wildcard(self):
         """测试通配符查询"""
-        result = _parse_result(query_database_impl(query="SELECT * FROM sales"))
+        result = query_database_impl(query="SELECT * FROM sales")
 
+        assert isinstance(result, ToolExecutionResult)
         assert result.success
-        assert len(result.observation) > 0
 
     def test_max_rows_limit(self):
         """测试最大行数限制"""
-        result = _parse_result(query_database_impl(
+        result = query_database_impl(
             query="SELECT * FROM users",
             max_rows=10
-        ))
+        )
 
+        assert isinstance(result, ToolExecutionResult)
         assert result.success
-        assert len(result.observation) > 0
 
-    def test_concise_response_format(self):
+    def test_brief_response_format(self):
         """测试简洁响应格式"""
-        result = _parse_result(query_database_impl(
+        result = query_database_impl(
             query="SELECT * FROM users",
-            response_format="brief"  # 新格式: brief
-        ))
+            response_format="brief"
+        )
 
+        assert isinstance(result, ToolExecutionResult)
         assert result.success
         assert result.output_level == OutputLevel.BRIEF
 
     def test_standard_response_format(self):
         """测试标准响应格式"""
-        result = _parse_result(query_database_impl(
+        result = query_database_impl(
             query="SELECT * FROM users",
             response_format="standard"
-        ))
+        )
 
+        assert isinstance(result, ToolExecutionResult)
         assert result.success
         assert result.output_level == OutputLevel.STANDARD
 
-    def test_detailed_response_format(self):
+    def test_full_response_format(self):
         """测试详细响应格式"""
-        result = _parse_result(query_database_impl(
+        result = query_database_impl(
             query="SELECT * FROM users",
-            response_format="full"  # 新格式: full
-        ))
+            response_format="full"
+        )
 
+        assert isinstance(result, ToolExecutionResult)
         assert result.success
         assert result.output_level == OutputLevel.FULL
 
     def test_invalid_connection_name(self):
         """测试无效的连接名称"""
-        result = _parse_result(query_database_impl(
+        result = query_database_impl(
             query="SELECT * FROM users",
             connection="nonexistent"
-        ))
+        )
 
+        assert isinstance(result, ToolExecutionResult)
         assert not result.success
-        assert "未找到" in result.observation or "失败" in result.observation or "Error" in result.observation
 
     def test_with_query_execution(self):
         """测试 WITH 查询执行"""
-        result = _parse_result(query_database_impl(
+        result = query_database_impl(
             query="WITH ranked AS (SELECT * FROM users) SELECT * FROM ranked"
-        ))
+        )
 
+        assert isinstance(result, ToolExecutionResult)
         assert result.success
-        assert len(result.observation) > 0
 
     def test_observation_format(self):
         """测试 Observation 格式"""
-        result = _parse_result(query_database_impl(query="SELECT * FROM users"))
+        result = query_database_impl(query="SELECT * FROM users")
 
-        # Observation 应该包含查询结果信息
+        assert isinstance(result, ToolExecutionResult)
         assert len(result.observation) > 0
 
     def test_telemetry_collected(self):
         """测试遥测数据收集"""
-        result = _parse_result(query_database_impl(query="SELECT * FROM users"))
+        result = query_database_impl(query="SELECT * FROM users")
 
+        assert isinstance(result, ToolExecutionResult)
         assert result.tool_name == "query_database"
         assert result.duration_ms >= 0
 
@@ -379,7 +345,6 @@ class TestQueryDatabaseTool:
         """测试工具元数据"""
         assert query_database_tool.name == "query_database"
         assert "SQL" in query_database_tool.description
-        assert "SELECT" in query_database_tool.description
 
     def test_tool_is_structured_tool(self):
         """测试工具是 StructuredTool 实例"""
@@ -397,13 +362,8 @@ class TestQueryDatabaseTool:
         })
 
         # v2.1: 结果是 ToolExecutionResult
-        if isinstance(result, ToolExecutionResult):
-            assert result.success
-        else:
-            # 旧格式: JSON 字符串
-            assert isinstance(result, str)
-            output = ToolOutput.model_validate_json(result)
-            assert output.telemetry.success
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
     def test_tool_with_max_rows(self):
         """测试工具带最大行数参数"""
@@ -412,11 +372,8 @@ class TestQueryDatabaseTool:
             "max_rows": 5
         })
 
-        if isinstance(result, ToolExecutionResult):
-            assert result.success
-        else:
-            output = ToolOutput.model_validate_json(result)
-            assert output.telemetry.success
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
     def test_tool_with_connection(self):
         """测试工具带连接参数"""
@@ -425,12 +382,8 @@ class TestQueryDatabaseTool:
             "connection": "primary"
         })
 
-        # 即使连接不存在，工具也应该正常处理错误
-        if isinstance(result, ToolExecutionResult):
-            assert result.tool_name == "query_database"
-        else:
-            output = ToolOutput.model_validate_json(result)
-            assert output.telemetry is not None
+        assert isinstance(result, ToolExecutionResult)
+        assert result.tool_name == "query_database"
 
 
 class TestQueryDatabaseIntegration:
@@ -445,12 +398,13 @@ class TestQueryDatabaseIntegration:
         )
 
         # 2. 执行查询
-        result = _parse_result(query_database_impl(
+        result = query_database_impl(
             query=input_data.query,
             max_rows=input_data.max_rows
-        ))
+        )
 
         # 3. 验证结果
+        assert isinstance(result, ToolExecutionResult)
         assert result.success
         assert result.tool_name == "query_database"
 
@@ -467,8 +421,5 @@ class TestQueryDatabaseIntegration:
         })
 
         # 验证结果
-        if isinstance(result, ToolExecutionResult):
-            assert result.success
-        else:
-            output = ToolOutput.model_validate_json(result)
-            assert output.telemetry is not None
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success

@@ -229,7 +229,24 @@
 - ✅ US-005-MEM-02: Hooks 系统实现与优化 (5个脚本，-54%)
 - ✅ US-INFRA-01: 统一工具输出格式系统 (42 测试通过)
 
-**测试统计**: 631 passed, 6 skipped (+132 Skills, +5 Context Modifier, +13 memory_get, +42 ToolOutput)
+**测试统计**: 746 passed, 1 skipped
+
+**Pipeline v2.1.0 完成** (2026-02-06):
+- [x] Phase 1: 核心模型定义 (ToolExecutionResult, OutputLevel, ToolCachePolicy)
+- [x] Phase 2: Pipeline 组件实现 (TokenCounter, ContextManager, Cache, Storage, Timeout)
+- [x] Phase 3: 工具迁移 - 所有 8 个工具已迁移
+  - [x] database.py → ToolExecutionResult
+  - [x] vector_search.py → ToolExecutionResult
+  - [x] file_reader.py → ToolExecutionResult
+  - [x] execute_command.py → ToolExecutionResult
+  - [x] python_sandbox.py → ToolExecutionResult
+  - [x] web_search.py → ToolExecutionResult
+  - [x] web_reader.py → ToolExecutionResult
+  - [x] file_write.py → ToolExecutionResult
+- [x] Phase 4: BAAgent 集成 (DynamicTokenCounter, AdvancedContextManager)
+- [x] Phase 5: 测试更新 (所有测试已适配 ToolExecutionResult)
+- [x] Phase 6: 旧工具输出格式系统移除
+- [x] Phase 7: 删除旧模型文件 (compat.py, tool_output.py)
 
 **下一任务**: US-015 - 示例 Skill: 异动检测
 
@@ -367,6 +384,63 @@
 - ToolErrorType: is_retryable 属性
 - IdempotencyCache: 幂等性支持
 
+### Pipeline v2.1.0 完整实现 (US-INFRA-02, 2026-02-06)
+
+基于信息管道设计的完整 Pipeline 系统实现：
+
+**核心文件**:
+- `backend/models/pipeline/output_level.py` - OutputLevel 枚举 (BRIEF/STANDARD/FULL)
+- `backend/models/pipeline/cache_policy.py` - ToolCachePolicy (NO_CACHE/CACHEABLE/TTL_*)
+- `backend/models/pipeline/tool_result.py` - ToolExecutionResult（单一源模型）
+- `backend/models/pipeline/tool_request.py` - ToolInvocationRequest
+- `backend/pipeline/wrapper.py` - PipelineToolWrapper（LangChain 集成）
+- `backend/pipeline/cache/idempotency_cache.py` - IdempotencyCache（跨轮次缓存）
+- `backend/pipeline/token/token_counter.py` - DynamicTokenCounter（多模型支持）
+- `backend/pipeline/context/context_manager.py` - AdvancedContextManager（智能压缩）
+- `backend/pipeline/timeout/__init__.py` - ToolTimeoutHandler（同步超时）
+- `backend/pipeline/storage/__init__.py` - DataStorage（artifact 存储）
+
+**功能特性**:
+1. **OutputLevel**: BRIEF/STANDARD/FULL 三级输出控制
+2. **ToolCachePolicy**: NO_CACHE/CACHEABLE/TTL_*/ETERNAL 缓存策略
+3. **ToolExecutionResult**: 统一工具执行结果模型
+4. **IdempotencyCache**: 跨轮次语义缓存（排除 tool_call_id）
+5. **DynamicTokenCounter**: 多模型 Token 计数（OpenAI/Anthropic/fallback）
+6. **AdvancedContextManager**: 智能上下文压缩（优先级过滤 + LLM 摘要）
+7. **ToolTimeoutHandler**: 同步超时控制（线程池，非 asyncio）
+8. **DataStorage**: 安全 artifact 存储（ID 替代真实路径）
+
+**工具迁移** (Phase 3, 8/8 完成):
+- [x] database.py → ToolExecutionResult
+- [x] vector_search.py → ToolExecutionResult
+- [x] file_reader.py → ToolExecutionResult
+- [x] execute_command.py → ToolExecutionResult
+- [x] python_sandbox.py → ToolExecutionResult
+- [x] web_search.py → ToolExecutionResult
+- [x] web_reader.py → ToolExecutionResult
+- [x] file_write.py → ToolExecutionResult
+
+**Phase 7: 移除旧模型** (2026-02-06):
+- [x] 删除 `backend/models/compat.py`
+- [x] 删除 `backend/models/tool_output.py` (旧的 ToolOutput/ToolTelemetry)
+- [x] 删除 `tests/models/test_tool_output.py`
+- [x] 更新 `tools/base.py` 移除 old ResponseFormat/ToolOutput 引用
+- [x] 更新所有工具移除 use_pipeline 参数
+
+**测试覆盖**: 746 个测试全部通过
+
+**文档优化** (2026-02-05):
+- **简化版** (465 行): `information-pipeline-design.md` - 快速参考
+- **详细版** (3159 行): `information-pipeline-design-detailed.md` - 完整实现
+- 双文档结构：快速参考 + 完整实现
+
+**v1.8 修复** (2026-02-05):
+- Token Counter: Claude tokenizer 修正（15% safety margin）
+- DataFileManager: threading 替代 asyncio
+- LockManager: 引用计数锁管理
+- ToolErrorType: is_retryable 属性
+- IdempotencyCache: 幂等性支持
+
 ### 信息管道设计 v1.4 (US-INFRA-02, 2026-02-05) - 概念修正
 
 基于 Claude Code 和 Manus AI 的实际实现，修正了之前设计中三个概念混淆的问题：
@@ -419,4 +493,4 @@
 
 ---
 
-**最后更新**: 2026-02-05 信息管道设计 v1.6 (生产环境增强)
+**最后更新**: 2026-02-06 Pipeline v2.1.0 完成与 Phase 7 移除工作
