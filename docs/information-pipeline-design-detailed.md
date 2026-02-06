@@ -1,7 +1,7 @@
 # BA-Agent Information Pipeline Design Document
 
 > **Date**: 2026-02-05
-> **Version**: v1.9.4 (Refactored - P2 Config Unification)
+> **Version**: v1.9.5 (Review Fixes)
 > **Author**: BA-Agent Development Team
 > **Status**: Design Phase
 
@@ -30,6 +30,9 @@
 所有配置类都实现了统一的接口：
 
 ```python
+from abc import ABC, abstractmethod
+from typing import Dict, Any
+
 class BaseConfig(ABC):
     """配置类基类接口"""
 
@@ -1173,58 +1176,29 @@ class ToolErrorResponse(BaseModel):
 
 ### Idempotency Support
 
+> **注意**: `ToolInvocationRequest` 类已在 [Tool Invocation Request](#phase-1-tool-invocation-request) 节定义（Line 811），包含完整的 idempotency 支持。
+
+幂等性特性：
+- `idempotency_key`: 可选的幂等键
+- `get_or_generate_idempotency_key()`: 自动生成幂等键
+- 配合 `IdempotencyCache` 防止重复执行
+
 ```python
-class ToolInvocationRequest(BaseModel):
-    """Request format when Agent calls a tool"""
-    request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+# 使用示例
+request = ToolInvocationRequest(
+    tool_name="web_search",
+    parameters={"query": "扬州天气"}
+)
 
-    # Tool identification
-    tool_name: str
-    tool_version: str = "1.0.0"
+# 生成幂等键
+key = request.get_or_generate_idempotency_key()
 
-    # Parameters
-    parameters: Dict[str, Any]
-
-    # Output level control
-    output_level: Optional[OutputLevel] = None
-
-    # Execution context
-    timeout_ms: int = 120000
-    retry_on_timeout: bool = True
-
-    # Storage context
-    storage_dir: Optional[str] = None
-
-    # Security
-    caller_id: str
-    permission_level: str = "default"
-
-    # Idempotency support
-    idempotency_key: Optional[str] = None
-
-    def get_effective_output_level(
-        self,
-        tool_config_default: Optional[OutputLevel] = None,
-        global_default: OutputLevel = OutputLevel.STANDARD,
-        context_window_usage: float = 0.0
-    ) -> OutputLevel:
-        """Determine effective output level with fallback chain"""
-        if self.output_level is not None:
-            return self.output_level
-        if tool_config_default is not None:
-            return tool_config_default
-        if context_window_usage > 0.8:
-            return OutputLevel.BRIEF
-        return global_default
-
-    def get_or_generate_idempotency_key(self) -> str:
-        """获取或生成幂等键"""
-        if self.idempotency_key is None:
-            # 基于参数自动生成幂等键
-            params_str = json.dumps(self.parameters, sort_keys=True)
-            key_content = f"{self.tool_name}:{params_str}:{self.tool_version}"
-            self.idempotency_key = hashlib.sha256(key_content.encode()).hexdigest()[:16]
-        return self.idempotency_key
+# 检查缓存
+cache = get_idempotency_cache()
+cached = cache.get_cached_result(key)
+if cached:
+    return cached  # 返回缓存结果
+```
 
 # ========== 通用 TTL 缓存基类 ==========
 from typing import TypeVar, Generic, ABC
@@ -4067,12 +4041,14 @@ class SchemaVersion(str, Enum):
     V1_0 = "1.0"  # 初始版本
     V1_4 = "1.4"  # 概念修正版本
     V1_5 = "1.5"  # Output Level 澄清版本
-    V1_6 = "1.6"  # 生产增强版本（当前）
-    LATEST = "1.6"
+    V1_6 = "1.6"  # 生产增强版本
+    V1_9 = "1.9"  # 重构优化版本（P0/P1/P2）
+    LATEST = "1.9"  # 当前版本
 
 # 版本兼容性矩阵
 COMPATIBILITY = {
-    "1.6": ["1.6", "1.5", "1.4"],  # v1.6 可读取 1.4-1.6
+    "1.9": ["1.9", "1.6", "1.5", "1.4"],  # v1.9 可向后兼容读取
+    "1.6": ["1.6", "1.5", "1.4"],
     "1.5": ["1.5", "1.4"],
     "1.4": ["1.4"],
 }
@@ -4287,6 +4263,29 @@ Research sources for this design:
 ---
 
 ## Change History
+
+### v1.9.5 (2026-02-06) - Review Fixes
+
+**修复文档 review 发现的问题。**
+
+**修复内容**:
+
+1. **删除重复的 ToolInvocationRequest 定义**
+   - 删除 Line 1177 的重复定义
+   - 保留 Line 811 的完整版本
+   - 添加交叉引用说明
+
+2. **更新 SchemaVersion**
+   - 添加 V1_9 = "1.9" 版本
+   - 更新 LATEST = "1.9"
+   - 更新版本兼容性矩阵
+
+3. **修复 ABC import 位置**
+   - 在 BaseConfig 定义前添加 `from abc import ABC, abstractmethod`
+
+4. **文档优化**
+   - 从 4689 行减少到 4665 行（节省 24 行）
+   - 添加幂等性使用示例
 
 ### v1.9.4 (2026-02-06) - P2 Configuration Unification
 

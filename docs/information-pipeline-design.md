@@ -1,6 +1,6 @@
 # BA-Agent Information Pipeline Design
 
-> **Version**: v1.9.4
+> **Version**: v1.9.5
 > **Status**: Production-Grade
 > **Last Updated**: 2026-02-06
 
@@ -379,6 +379,9 @@ class DataStorage:
 ---
 
 ## 版本历史
+
+### v1.9.5 (2026-02-06) - Review 修复
+**修复**: 删除重复定义、更新 SchemaVersion、修复 ABC import
 
 ### v1.9.4 (2026-02-06) - P2 配置类统一
 **新增**:
