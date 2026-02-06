@@ -1,7 +1,7 @@
 # BA-Agent Information Pipeline Design Document
 
 > **Date**: 2026-02-05
-> **Version**: v1.7 (Production-Grade Completeness)
+> **Version**: v1.9 (LLM-Enhanced Context Management)
 > **Author**: BA-Agent Development Team
 > **Status**: Design Phase
 
@@ -2107,10 +2107,511 @@ class MultiRoundConversation(BaseModel):
 
 ## Context Management Strategy
 
-### Context Manager
+### Compression Strategy Selection
 
 ```python
-class ContextManager:
+from enum import Enum
+from typing import Callable, Optional, Dict, Any
+
+class ContextCompressionStrategy(str, Enum):
+    """上下文压缩策略"""
+    TRUNCATE = "truncate"      # 简单截断（快速，免费）
+    EXTRACT = "extract"        # 提取关键信息（规则，快速）
+    SUMMARIZE = "summarize"    # LLM 摘要（高质量，有成本）
+
+class CompressionCostEstimate:
+    """压缩成本估算"""
+
+    # Token 估算（每 1000 tokens）
+    TRUNCATE_COST = 0.0          # 免费
+    EXTRACT_COST = 0.001        # 规则处理成本极低
+    SUMMARIZE_COST = 0.003       # LLM 摘要成本（假设使用小模型）
+
+    @classmethod
+    def estimate_cost(cls, strategy: ContextCompressionStrategy, input_tokens: int) -> float:
+        """估算压缩成本（美元）"""
+        tokens_in_k = input_tokens / 1000
+        return tokens_in_k * {
+            ContextCompressionStrategy.TRUNCATE: cls.TRUNCATE_COST,
+            ContextCompressionStrategy.EXTRACT: cls.EXTRACT_COST,
+            ContextCompressionStrategy.SUMMARIZE: cls.SUMMARIZE_COST,
+        }[strategy]
+
+class LLMCompressor:
+    """
+    LLM 摘要器
+
+    使用小模型生成上下文摘要，平衡质量和成本
+    """
+
+    def __init__(
+        self,
+        model: str = "claude-3-haiku",  # 小模型，快速且便宜
+        max_summary_tokens: int = 500,
+        timeout_ms: int = 10000
+    ):
+        self.model = model
+        self.max_summary_tokens = max_summary_tokens
+        self.timeout_ms = timeout_ms
+
+    async def summarize_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        focus_areas: Optional[List[str]] = None
+    ) -> str:
+        """
+        使用 LLM 生成消息摘要
+
+        Args:
+            messages: 要摘要的消息列表
+            focus_areas: 关注点（如 tool_calls, errors, decisions）
+
+        Returns:
+            生成的摘要文本
+        """
+        import anthropic
+
+        # 构建提示词
+        prompt = self._build_summary_prompt(messages, focus_areas)
+
+        try:
+            client = anthropic.Anthropic()
+            response = await asyncio.to_thread(
+                lambda: client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_summary_tokens,
+                    messages=[{"role": "user", "content": prompt}]
+                ),
+                timeout=self.timeout_ms / 1000
+            )
+
+            return response.content[0].text
+
+        except Exception as e:
+            logger.error(f"LLM summarization failed: {e}")
+            # 降级到提取模式
+            return self._extract_key_info(messages)
+
+    def _build_summary_prompt(
+        self,
+        messages: List[Dict[str, Any]],
+        focus_areas: Optional[List[str]] = None
+    ) -> str:
+        """构建 LLM 摘要提示词"""
+        parts = [
+            "请将以下对话历史总结为简洁的摘要（最多 300 字）：\n\n"
+        ]
+
+        # 添加关注点
+        if focus_areas:
+            parts.append(f"重点关注：{', '.join(focus_areas)}\n")
+
+        # 添加对话内容
+        for msg in messages[-20:]:  # 只发送最近 20 条消息
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            if isinstance(content, list):
+                content_str = self._format_content_blocks(content)
+            else:
+                content_str = str(content)[:200]  # 限制每条消息长度
+
+            parts.append(f"{role}: {content_str}\n")
+
+        parts.append("\n摘要应包括：")
+        parts.append("- 用户的主要请求")
+        parts.append("- 执行的工具调用和结果")
+        parts.append("- 重要的决策和发现")
+        parts.append("- 最终结论")
+
+        return "\n".join(parts)
+
+    def _format_content_blocks(self, blocks: List[Dict]) -> str:
+        """格式化内容块"""
+        formatted = []
+        for block in blocks:
+            block_type = block.get("type", "")
+            if block_type == "text":
+                formatted.append(block.get("text", "")[:200])
+            elif block_type == "tool_use":
+                tool_name = block.get("name", "")
+                formatted.append(f"[调用工具: {tool_name}]")
+            elif block_type == "tool_result":
+                formatted.append("[工具结果]")
+            elif block_type == "thinking":
+                formatted.append("[思考过程]")
+        return " ".join(formatted)
+
+    def _extract_key_info(self, messages: List[Dict[str, Any]]) -> str:
+        """降级方法：提取关键信息"""
+        key_info = []
+
+        # 提取用户请求
+        for msg in messages:
+            if msg.get("role") == "user":
+                content = str(msg.get("content", ""))[:200]
+                key_info.append(f"用户: {content}...")
+                break
+
+        # 提取工具调用
+        tool_calls = []
+        for msg in messages:
+            if "tool_use" in str(msg.get("content", "")):
+                tool_calls.append("[工具调用]")
+
+        # 提取最终答案
+        for msg in reversed(messages):
+            if msg.get("role") == "assistant":
+                content = str(msg.get("content", ""))[:200]
+                if "tool" not in content.lower():  # 不是工具调用
+                    key_info.append(f"助手: {content}...")
+                break
+
+        return "\n".join(key_info) if key_info else "[对话摘要不可用]"
+
+class SummaryCache:
+    """摘要缓存 - 避免重复摘要"""
+
+    def __init__(self, max_entries: int = 1000, ttl_hours: int = 24):
+        self._cache: Dict[str, Dict] = {}
+        self._timestamps: Dict[str, datetime] = {}
+        self._max_entries = max_entries
+        self._ttl = timedelta(hours=ttl_hours)
+        self._lock = threading.Lock()
+
+    def get_cached_summary(
+        self,
+        conversation_id: str,
+        message_hash: str
+    ) -> Optional[str]:
+        """获取缓存的摘要"""
+        with self._lock:
+            key = f"{conversation_id}:{message_hash}"
+            if key in self._cache:
+                if datetime.now() - self._timestamps[key] < self._ttl:
+                    logger.debug(f"Summary cache hit: {key}")
+                    return self._cache[key]["summary"]
+                else:
+                    # 过期清理
+                    del self._cache[key]
+                    del self._timestamps[key]
+            return None
+
+    def cache_summary(
+        self,
+        conversation_id: str,
+        message_hash: str,
+        summary: str,
+        metadata: Optional[Dict] = None
+    ):
+        """缓存摘要"""
+        with self._lock:
+            key = f"{conversation_id}:{message_hash}"
+            self._cache[key] = {
+                "summary": summary,
+                "timestamp": datetime.now().isoformat(),
+                "metadata": metadata or {}
+            }
+            self._timestamps[key] = datetime.now()
+
+            # 清理过期条目
+            if len(self._cache) > self._max_entries:
+                self._cleanup_expired()
+
+    def _cleanup_expired(self):
+        """清理过期条目"""
+        now = datetime.now()
+        expired_keys = [
+            k for k, ts in self._timestamps.items()
+            if now - datetime.fromisoformat(ts) > self._ttl
+        ]
+        for key in expired_keys:
+            del self._cache[key]
+            del self._timestamps[key]
+
+class ContextCompressionConfig:
+    """上下文压缩配置"""
+
+    def __init__(
+        self,
+        strategy: ContextCompressionStrategy = ContextCompressionStrategy.EXTRACT,
+        enable_llm_summarization: bool = True,
+        llm_summarization_threshold: int = 50,  # 超过 50 条消息才使用 LLM
+        summary_cache_ttl: int = 24,  # 摘要缓存 24 小时
+        max_compression_cost_per_hour: float = 0.1  # 每小时最大压缩成本
+    ):
+        self.strategy = strategy
+        self.enable_llm_summarization = enable_llm_summarization
+        self.llm_threshold = llm_summarization_threshold
+        self.summary_cache_ttl = summary_cache_ttl
+        self.max_cost_per_hour = max_compression_cost_per_hour
+
+class EnhancedContextManager:
+    """
+    增强的上下文管理器 - 支持多种压缩策略
+    """
+
+    def __init__(
+        self,
+        max_tokens: int = 200000,
+        compression_config: Optional[ContextCompressionConfig] = None
+    ):
+        self.max_tokens = max_tokens
+        self.compression_threshold = 0.8
+
+        # 压缩配置
+        self.config = compression_config or ContextCompressionConfig()
+
+        # 组件
+        self._messages: List[MessageWrapper] = []
+        self._token_counter = TokenCounter()
+        self._lock = threading.Lock()
+
+        # LLM 压缩器（按需创建）
+        self._llm_compressor: Optional[LLMCompressor] = None
+        self._summary_cache = SummaryCache()
+
+    @property
+    def llm_compressor(self) -> LLMCompressor:
+        """懒加载 LLM 压缩器"""
+        if self._llm_compressor is None and self.config.enable_llm_summarization:
+            self._llm_compressor = LLMCompressor()
+        return self._llm_compressor
+
+    def add_message(
+        self,
+        message: Dict[str, Any],
+        importance: MessageImportance = MessageImportance.MEDIUM,
+        round_id: str = ""
+    ):
+        """添加消息（线程安全）"""
+        with self._lock:
+            tokens = self._token_counter.count_message_tokens(message)
+
+            wrapper = MessageWrapper(
+                message=message,
+                importance=importance,
+                timestamp=datetime.now(),
+                tokens=tokens,
+                round_id=round_id
+            )
+
+            self._messages.append(wrapper)
+
+            # 检查是否需要压缩
+            if self._should_compress():
+                self._compress_context()
+
+    def _should_compress(self) -> bool:
+        """检查是否需要压缩"""
+        total_tokens = sum(m.tokens for m in self._messages)
+        return total_tokens > (self.max_tokens * self.compression_threshold)
+
+    async def _compress_context(self):
+        """
+        执行上下文压缩（支持异步）
+        """
+        if len(self._messages) < 20:
+            return
+
+        # 计算当前成本
+        current_tokens = sum(m.tokens for m in self._messages)
+
+        # 决定压缩策略
+        strategy = self._select_compression_strategy(current_tokens)
+
+        if strategy == ContextCompressionStrategy.TRUNCATE:
+            self._compress_truncate()
+        elif strategy == ContextCompressionStrategy.EXTRACT:
+            self._compress_extract()
+        elif strategy == ContextCompressionStrategy.SUMMARIZE:
+            await self._compress_summarize()
+
+    def _select_compression_strategy(
+        self,
+        current_tokens: int
+    ) -> ContextCompressionStrategy:
+        """
+        根据配置和成本选择压缩策略
+
+        决策逻辑：
+        1. 如果配置了固定策略，使用配置的策略
+        2. 如果消息少，使用 EXTRACT
+        3. 如果消息多且成本允许，使用 SUMMARIZE
+        4. 否则使用 TRUNCATE
+        """
+        # 使用配置的策略
+        if self.config.strategy != ContextCompressionStrategy.EXTRACT:
+            return self.config.strategy
+
+        # 自动选择
+        message_count = len(self._messages)
+
+        if message_count < 30:
+            return ContextCompressionStrategy.EXTRACT
+        elif message_count >= self.config.llm_threshold:
+            # 估算 LLM 成本
+            estimated_cost = CompressionCostEstimate.estimate_cost(
+                ContextCompressionStrategy.SUMMARIZE,
+                current_tokens
+            )
+
+            if estimated_cost < self.config.max_cost_per_hour:
+                return ContextCompressionStrategy.SUMMARIZE
+
+        return ContextCompressionStrategy.EXTRACT
+
+    def _compress_truncate(self):
+        """截断策略：保留最近 N 条消息"""
+        keep_count = 5
+        if len(self._messages) > keep_count:
+            # 删除旧消息
+            del self._messages[:-keep_count]
+
+    def _compress_extract(self):
+        """提取策略：基于重要性的提取"""
+        rounds = self._group_by_round()
+
+        # 找出需要压缩的轮次
+        rounds_to_compress = []
+        for round_id, group in rounds.items():
+            has_important = any(
+                m.importance in (MessageImportance.HIGH, MessageImportance.CRITICAL)
+                for m in group
+            )
+
+            if not has_important and len(rounds) > 5:
+                rounds_to_compress.append(round_id)
+
+        # 压缩
+        for round_id in rounds_to_compress:
+            self._compress_round_extract(round_id)
+
+    async def _compress_summarize(self):
+        """LLM 摘要策略：使用 LLM 生成摘要"""
+        rounds = self._group_by_round()
+        current_round = self._messages[-1].round_id if self._messages else ""
+
+        # 找出需要摘要的轮次
+        rounds_to_summarize = []
+        for round_id, group in rounds.items():
+            if round_id == current_round:
+                continue
+
+            has_critical = any(
+                m.importance == MessageImportance.CRITICAL
+                for m in group
+            )
+
+            if not has_critical:
+                rounds_to_summarize.append(round_id)
+
+        if not rounds_to_summarize:
+            return
+
+        # 使用 LLM 生成摘要
+        compressor = self.llm_compressor
+        if compressor is None:
+            # 降级到提取模式
+            for round_id in rounds_to_summarize:
+                self._compress_round_extract(round_id)
+            return
+
+        # 按 round_id 分组生成摘要
+        for round_id in rounds_to_summarize:
+            messages = [
+                m.message for m in self._messages
+                if m.round_id == round_id
+            ]
+
+            # 生成消息哈希用于缓存
+            import hashlib
+            content_str = json.dumps(messages, sort_keys=True)
+            message_hash = hashlib.sha256(content_str.encode()).hexdigest()[:16]
+
+            # 检查缓存
+            cached_summary = self._summary_cache.get_cached_summary(
+                round_id, message_hash
+            )
+
+            if cached_summary:
+                summary = cached_summary
+            else:
+                # 生成新摘要
+                focus_areas = ["tool_calls", "errors", "decisions"]
+                summary = await compressor.summarize_messages(messages, focus_areas)
+
+                # 缓存摘要
+                self._summary_cache.cache_summary(round_id, message_hash, summary)
+
+            # 替换为摘要
+            for i, wrapper in enumerate(self._messages):
+                if wrapper.round_id == round_id:
+                    wrapper.compressed_content = summary
+                    wrapper.is_compressed = True
+
+    def _compress_round_extract(self, round_id: str):
+        """提取策略：压缩单个轮次"""
+        for wrapper in self._messages:
+            if wrapper.round_id == round_id and not wrapper.is_compressed:
+                wrapper.compressed_content = self._create_compressed_summary(wrapper)
+                wrapper.is_compressed = True
+
+    def _create_compressed_summary(self, wrapper: MessageWrapper) -> str:
+        """创建压缩摘要"""
+        msg = wrapper.message
+
+        # Tool observation 保留关键信息
+        if "tool_result" in str(msg.get("content", "")):
+            content = msg.get("content", [])
+            if isinstance(content, list):
+                for block in content:
+                    if block.get("type") == "tool_result":
+                        tool_content = str(block.get("content", ""))[:200]
+                        return f"[Tool Result: {tool_content}...]"
+
+        # 其他消息压缩为简单摘要
+        role = msg.get("role", "")
+        content_str = str(msg.get("content", ""))[:100]
+
+        return f"[{role}] {content_str}..."
+
+    def _group_by_round(self) -> Dict[str, List[MessageWrapper]]:
+        """按轮次分组消息"""
+        rounds: Dict[str, List[MessageWrapper]] = {}
+        for wrapper in self._messages:
+            round_id = wrapper.round_id or "default"
+            if round_id not in rounds:
+                rounds[round_id] = []
+            rounds[round_id].append(wrapper)
+        return rounds
+
+    def get_compressed_messages(self) -> List[Dict[str, Any]]:
+        """获取压缩后的消息列表（线程安全）"""
+        with self._lock:
+            result = []
+            for wrapper in self._messages:
+                if wrapper.is_compressed and wrapper.compressed_content:
+                    result.append({
+                        "role": "system",
+                        "content": wrapper.compressed_content,
+                        "compressed": True,
+                        "original_round_id": wrapper.round_id
+                    })
+                else:
+                    result.append(wrapper.message)
+            return result
+
+    @property
+    def total_tokens(self) -> int:
+        """获取当前总 Token 数（线程安全）"""
+        with self._lock:
+            return sum(m.tokens for m in self._messages)
+```
+
+---
+
+## Implementation Roadmap
     """
     Manages conversation context and memory.
 
@@ -3041,7 +3542,7 @@ Research sources for this design:
 
 ---
 
-**Document Status**: Design v1.7 - Production-Grade Completeness
+**Document Status**: Design v1.9 - LLM-Enhanced Context Management
 **Last Updated**: 2026-02-05
 **Next Review Date**: 2026-02-12
 **Approval Required**: @ba-agent-team
@@ -3049,6 +3550,81 @@ Research sources for this design:
 ---
 
 ## Change History
+
+### v1.9 (2026-02-06) - LLM-Enhanced Context Management
+
+**基于用户需求实现的 LLM 摘要压缩功能。**
+
+**新增内容**:
+
+1. **LLM 摘要压缩** (ContextCompressionStrategy)
+   - 三种压缩策略：TRUNCATE（免费）/EXTRACT（规则）/SUMMARIZE（LLM）
+   - 自动策略选择：根据消息数量、成本、配置动态选择
+   - 使用 Claude 3 Haiku（小模型，快速，成本优化）
+
+2. **LLMCompressor 类**
+   - 异步摘要生成：anthropic.AsyncAnthropic
+   - 智能摘要 Prompt：保留关键信息（用户意图、工具调用、结果）
+   - Token 成本控制：max_summary_tokens（默认 500）
+   - 超时和错误处理
+
+3. **SummaryCache 类**
+   - 避免重复摘要相同内容
+   - 基于 round_id + message_hash 的缓存键
+   - TTL 过期清理（默认 24 小时）
+   - 线程安全实现
+
+4. **EnhancedContextManager 升级**
+   - `_compress_truncate()`: 简单截断（快速，免费）
+   - `_compress_extract()`: 提取关键信息（规则，中等速度）
+   - `_compress_summarize()`: LLM 摘要（高质量，有成本）
+   - 智能策略选择：根据消息数量、重要性、成本
+
+5. **CompressionCostEstimate**
+   - 估算各策略的 Token 成本
+   - 输入/输出 Token 计数
+   - API 调用成本估算（Claude 定价）
+
+**v1.9 新增评分**:
+
+| 方面 | v1.7 | v1.9 |
+|------|------|------|
+| 上下文压缩 | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| 成本优化 | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| 智能化 | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+
+### v1.8 (2026-02-06) - Bug Fixes and Production Improvements
+
+**修复设计评审中的高优先级问题。**
+
+**高优先级修复**:
+
+1. **Token Counter 修正**
+   - 添加 15% safety margin 用于 Claude tokenizer
+   - cl100k_base 是 OpenAI 的，不是 Claude 的
+   - 准确计数 + 安全余量
+
+2. **DataFileManager 后台任务修复**
+   - 从 `asyncio.create_task` 改为 `threading.Thread`
+   - 显式 `start_cleanup_daemon()` 方法
+   - 优雅关闭 `stop_cleanup_daemon()`
+   - 上下文管理器支持
+
+3. **LockManager 锁管理改进**
+   - 替代 LRU 缓存避免驱逐问题
+   - 引用计数确保只驱逐未使用的锁
+   - 自动清理机制
+
+**中优先级新增**:
+
+4. **ToolErrorType 完整分类**
+   - `is_retryable` 属性：判断错误是否可重试
+   - 区分可重试（TIMEOUT, RATE_LIMIT）vs 不可重试错误
+
+5. **IdempotencyCache 幂等性支持**
+   - 防止重复执行相同工具调用
+   - TTL 过期清理
+   - 自动生成幂等键（tool_name + parameters hash）
 
 ### v1.7 (2026-02-05) - Production-Grade Completeness
 

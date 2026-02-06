@@ -1,8 +1,8 @@
 # BA-Agent Information Pipeline Design
 
-> **Version**: v1.8
+> **Version**: v1.9
 > **Status**: Production-Grade
-> **Last Updated**: 2026-02-05
+> **Last Updated**: 2026-02-06
 
 ---
 
@@ -379,6 +379,19 @@ class DataStorage:
 ---
 
 ## 版本历史
+
+### v1.9 (2026-02-06) - LLM 增强上下文管理
+**3 项新增**:
+1. LLM 摘要压缩 - 三种策略（TRUNCATE/EXTRACT/SUMMARIZE）
+2. LLMCompressor - 使用 Claude 3 Haiku 生成摘要
+3. SummaryCache - 避免重复摘要，TTL 清理
+
+**新增评分**:
+| 方面 | v1.7 | v1.9 |
+|------|------|------|
+| 上下文压缩 | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
+| 成本优化 | ⭐⭐⭐ | ⭐⭐⭐⭐ |
+| 智能化 | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |
 
 ### v1.8 (2026-02-05) - 修复评审问题
 **高优先级修复**:
