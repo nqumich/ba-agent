@@ -137,7 +137,7 @@ class AdvancedContextManager:
         # Add conversation messages from end (newest) until we'd exceed target
         for msg in reversed(conversation):
             msg_tokens = self._count_single(msg)
-            if current_count + msg_tokens > target:
+            if current_count + msg_tokens > target_tokens:
                 # Would exceed, stop here
                 break
             result.insert(len(system_msgs), msg)
@@ -176,7 +176,7 @@ class AdvancedContextManager:
 
         for priority, msg in prioritized:
             msg_tokens = self._count_single(msg)
-            if current_count + msg_tokens > target:
+            if current_count + msg_tokens > target_tokens:
                 # Would exceed, skip
                 continue
             result.append(msg)

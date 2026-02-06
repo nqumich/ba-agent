@@ -47,6 +47,12 @@ from backend.skills import (
     MessageType,
     MessageVisibility,
 )
+# NEW v2.1: Pipeline components integration
+from backend.pipeline import (
+    get_token_counter,
+    AdvancedContextManager,
+    CompressionMode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +128,17 @@ class BAAgent:
         self.skill_tool = self._init_skill_tool()
         if self.skill_tool:
             self.tools.append(self.skill_tool)
+
+        # NEW v2.1: 初始化 Pipeline 组件
+        self.token_counter = get_token_counter()
+
+        # 创建 AdvancedContextManager 实例 (使用配置和现有 LLM)
+        self.context_manager = AdvancedContextManager(
+            max_tokens=self.app_config.llm.max_tokens,
+            compression_mode=CompressionMode.EXTRACT,  # 智能压缩，非简单截断
+            llm_summarizer=self.llm,  # 复用现有 LLM 用于 SUMMARIZE 模式
+            token_counter=self.token_counter,  # 共享 token counter
+        )
 
         # Active skill context modifier tracking
         self._active_skill_context: Dict[str, Any] = {}
@@ -634,7 +651,12 @@ class BAAgent:
 
     def _get_total_tokens(self, result: Dict[str, Any]) -> int:
         """
-        从 Agent 结果中提取总 token 数
+        从 Agent 结果中提取总 token 数 (增强版 v2.1)
+
+        v2.1 改进:
+        - 优先使用 DynamicTokenCounter 进行精确计数
+        - 保留从 LLM 响应 metadata 提取的后备方案
+        - 支持调用前预计数和调用后验证
 
         Args:
             result: Agent 返回结果
@@ -644,7 +666,18 @@ class BAAgent:
         """
         total = 0
 
-        # 尝试从 response_metadata 中获取
+        # v2.1: 优先使用 DynamicTokenCounter
+        messages = result.get("messages", [])
+        if messages:
+            try:
+                # 使用新的 token_counter 精确计数
+                counted = self.token_counter.count_messages(messages)
+                if counted > 0:
+                    return counted
+            except Exception:
+                pass  # 降级到旧方法
+
+        # 后备方案：从 LLM 响应 metadata 中获取
         if "response_metadata" in result:
             metadata = result["response_metadata"]
             if "usage" in metadata:
@@ -652,8 +685,7 @@ class BAAgent:
                 total += usage.get("input_tokens", 0)
                 total += usage.get("output_tokens", 0)
 
-        # 尝试从 messages 中获取
-        messages = result.get("messages", [])
+        # 后备方案：从 messages 中的 usage_metadata 获取
         for msg in messages:
             if isinstance(msg, AIMessage):
                 if hasattr(msg, "usage_metadata"):
@@ -672,6 +704,9 @@ class BAAgent:
     def _should_run_memory_flush(self, current_tokens: int) -> bool:
         """
         判断是否应该运行 Memory Flush (Clawdbot 风格)
+
+        v2.1 改进:
+        - 使用 DynamicTokenCounter 进行更精确的 token 计算
 
         Args:
             current_tokens: 当前使用的 token 数
@@ -711,6 +746,10 @@ class BAAgent:
         """
         检查是否需要触发 Memory Flush
 
+        v2.1 改进:
+        - 使用 DynamicTokenCounter 精确计算消息 token
+        - 为后续压缩提供准确的 token 数据
+
         Args:
             conversation_id: 对话 ID
             messages: 消息列表
@@ -722,6 +761,12 @@ class BAAgent:
         if self.memory_flush is None:
             return None
 
+        # v2.1: 使用 DynamicTokenCounter 精确计算
+        try:
+            actual_tokens = self.token_counter.count_messages(messages)
+        except Exception:
+            actual_tokens = current_tokens  # 降级
+
         # 始终更新消息缓存（积累上下文）
         for msg in messages:
             if isinstance(msg, HumanMessage):
@@ -730,14 +775,14 @@ class BAAgent:
                 self.memory_flush.add_message("assistant", msg.content)
 
         # 检查是否应该运行 flush
-        if not self._should_run_memory_flush(current_tokens):
+        if not self._should_run_memory_flush(actual_tokens):
             return None
 
         # 记录当前 compaction_count
         self.memory_flush_compaction_count = self.compaction_count
 
         # 检查并触发 flush
-        result = self.memory_flush.check_and_flush(current_tokens)
+        result = self.memory_flush.check_and_flush(actual_tokens)
 
         if result["flushed"]:
             # 更新 compaction 计数
@@ -749,9 +794,26 @@ class BAAgent:
                 f"{result['memories_written']} memories written"
             )
 
-            # 执行对话压缩 - 清理旧消息，释放上下文空间
-            keep_recent = self.app_config.memory.flush.compaction_keep_recent if self.app_config.memory.flush.compaction_keep_recent else 10
-            self._compact_conversation(conversation_id, keep_recent)
+            # v2.1: 使用 AdvancedContextManager 执行智能压缩
+            # 获取当前状态以获取完整消息列表
+            config = {"configurable": {"thread_id": conversation_id}}
+            state = self.agent.get_state(config)
+            all_messages = list(state.messages.get("messages", [])) if state else []
+
+            if all_messages:
+                # 智能压缩到 50% 容量
+                target_tokens = int(self.app_config.llm.max_tokens * 0.5)
+                compressed = self.context_manager.compress(
+                    all_messages,
+                    target_tokens=target_tokens,
+                    mode=CompressionMode.EXTRACT,
+                )
+                self.agent.update_state(config, {"messages": compressed})
+
+                logger.info(
+                    f"Context compressed (v2.1): {len(all_messages)} -> {len(compressed)} messages, "
+                    f"tokens: {actual_tokens} -> {self.token_counter.count_messages(compressed)}"
+                )
 
             # 重置 token 计数
             self.session_tokens = 0
@@ -764,11 +826,17 @@ class BAAgent:
         keep_recent: int = 10
     ) -> bool:
         """
-        压缩对话历史 - 清理旧消息，只保留最近的消息
+        压缩对话历史 (v2.1: 使用 AdvancedContextManager)
+
+        v2.1 改进:
+        - 使用 AdvancedContextManager 智能压缩
+        - 按优先级保留消息 (CRITICAL/HIGH/MEDIUM/LOW)
+        - 保留系统消息和关键用户消息
+        - 代替原来的简单截断 (keep_recent=N)
 
         Args:
             conversation_id: 对话 ID
-            keep_recent: 保留最近的消息数量（默认 10 条）
+            keep_recent: 保留最近的消息数量 (降级选项，默认 10 条)
 
         Returns:
             是否成功压缩
@@ -781,21 +849,26 @@ class BAAgent:
                 return False
 
             # 获取当前所有消息
-            all_messages = state.messages.get("messages", [])
+            all_messages = list(state.messages.get("messages", []))
 
             if len(all_messages) <= keep_recent:
                 # 消息数量不足，无需压缩
                 return False
 
-            # 只保留最近的消息
-            recent_messages = all_messages[-keep_recent:]
+            # v2.1: 使用 AdvancedContextManager 智能压缩
+            target_tokens = int(self.app_config.llm.max_tokens * 0.5)  # 压缩到 50%
+            compressed_messages = self.context_manager.compress(
+                all_messages,
+                target_tokens=target_tokens,
+                mode=CompressionMode.EXTRACT,  # 智能提取，非简单截断
+            )
 
-            # 更新状态（清空旧消息，只保留最近的）
-            self.agent.update_state(config, {"messages": recent_messages})
+            # 更新状态
+            self.agent.update_state(config, {"messages": compressed_messages})
 
             logger.info(
-                f"Conversation compacted: {len(all_messages)} -> {len(recent_messages)} "
-                f"messages (kept recent {keep_recent})"
+                f"Conversation compacted (v2.1): {len(all_messages)} -> {len(compressed_messages)} "
+                f"messages (target_tokens={target_tokens}, mode=EXTRACT)"
             )
 
             return True
