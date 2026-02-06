@@ -1,9 +1,13 @@
 """
-数据库查询工具
+数据库查询工具 (v2.1 - Pipeline Support)
 
 使用 SQLAlchemy 安全执行 SQL 查询
 支持参数化查询防止 SQL 注入
 支持多数据库连接配置
+
+新特性：
+- 支持 ToolExecutionResult (Pipeline v2.0.1)
+- 保持与旧 ToolOutput 的兼容性
 """
 
 import re
@@ -13,7 +17,22 @@ from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import StructuredTool
 
 from config import get_config
+
+# 旧模型 (保持兼容)
 from backend.models.tool_output import ToolOutput, ToolTelemetry, ResponseFormat
+
+# 新模型 (Pipeline v2.0.1)
+from backend.models.pipeline import (
+    OutputLevel,
+    ToolExecutionResult,
+    ToolCachePolicy,
+)
+
+# 兼容层
+from backend.models.compat import (
+    response_format_to_output_level,
+    execution_result_to_tool_output,
+)
 
 
 class DatabaseQueryInput(BaseModel):
@@ -37,9 +56,10 @@ class DatabaseQueryInput(BaseModel):
         le=10000,
         description="最大返回行数（范围 1-10000）"
     )
+    # 新：支持 OutputLevel 字符串
     response_format: Optional[str] = Field(
         default="standard",
-        description="响应格式: concise, standard, detailed"
+        description="响应格式: concise/brief, standard, detailed/full"
     )
 
     @field_validator('query')
@@ -132,13 +152,39 @@ def _format_result(rows: List[Dict[str, Any]], columns: List[str]) -> Dict[str, 
     }
 
 
+def _parse_response_format(format_str: str) -> tuple[Union[ResponseFormat, OutputLevel], str]:
+    """
+    解析响应格式字符串
+
+    支持：
+    - 旧格式: concise, standard, detailed, raw
+    - 新格式: brief, standard, full
+
+    Returns:
+        (format_enum, format_type) - format_type 是 'old' 或 'new'
+    """
+    format_lower = format_str.lower()
+
+    # 新格式 (OutputLevel)
+    if format_lower in ("brief", "full"):
+        return OutputLevel(format_lower), "new"
+
+    # 旧格式 (ResponseFormat)
+    if format_lower in ("concise", "standard", "detailed", "raw"):
+        return ResponseFormat(format_lower), "old"
+
+    # 默认
+    return ResponseFormat.STANDARD, "old"
+
+
 def query_database_impl(
     query: str,
     connection: str = "primary",
     params: Optional[Dict[str, Any]] = None,
     max_rows: int = 1000,
-    response_format: str = "standard"
-) -> str:
+    response_format: str = "standard",
+    use_pipeline: bool = False,
+) -> Union[str, ToolExecutionResult]:
     """
     执行数据库查询的实现函数
 
@@ -148,12 +194,15 @@ def query_database_impl(
         params: 查询参数（参数化查询）
         max_rows: 最大返回行数
         response_format: 响应格式
+        use_pipeline: 是否使用新 Pipeline 模型 (默认 False 保持兼容)
 
     Returns:
-        查询结果 JSON 字符串
+        查询结果（JSON 字符串或 ToolExecutionResult）
     """
     start_time = time.time()
-    telemetry = ToolTelemetry(tool_name="query_database")
+
+    # 解析响应格式
+    format_enum, format_type = _parse_response_format(response_format)
 
     try:
         config = get_config()
@@ -179,8 +228,7 @@ def query_database_impl(
         # 在实际部署时，应该替换为真实的数据库连接
 
         # 模拟查询执行
-        telemetry.latency_ms = (time.time() - start_time) * 1000
-        telemetry.success = True
+        duration_ms = (time.time() - start_time) * 1000
 
         # 解析查询以生成模拟结果
         # 提取列名（简单模拟）
@@ -226,38 +274,82 @@ def query_database_impl(
         # 构建摘要
         summary = f"查询执行成功，返回 {result_data['row_count']} 行，{result_data['column_count']} 列"
 
-        # 构建观察结果（ReAct 格式）
-        observation = f"Observation: {summary}\nStatus: Success"
+        # 根据是否使用 Pipeline 返回不同格式
+        if use_pipeline:
+            # 新格式：ToolExecutionResult
+            import uuid
+            tool_call_id = f"call_query_database_{uuid.uuid4().hex[:12]}"
 
-        # 构建输出（不排除 telemetry，用于内部测试）
-        output = ToolOutput(
-            result=result_data if response_format != "concise" else None,
-            summary=summary,
-            observation=observation,
-            telemetry=telemetry,
-            response_format=ResponseFormat(response_format)
-        )
+            # 转换 OutputLevel
+            if format_type == "new":
+                output_level = format_enum
+            else:
+                output_level = response_format_to_output_level(format_enum)
 
-        # 内部使用返回完整 JSON（包含 telemetry），集成时可以排除
-        return output.model_dump_json()
+            result = ToolExecutionResult.from_raw_data(
+                tool_call_id=tool_call_id,
+                raw_data=result_data,
+                output_level=output_level,
+                tool_name="query_database",
+                cache_policy=ToolCachePolicy.TTL_SHORT,  # 查询结果可短时缓存
+            )
+            result.observation = summary if output_level == OutputLevel.BRIEF else result.observation
+            result.duration_ms = duration_ms
+
+            return result
+        else:
+            # 旧格式：ToolOutput
+            telemetry = ToolTelemetry(tool_name="query_database")
+            telemetry.latency_ms = duration_ms
+            telemetry.success = True
+
+            # 构建观察结果（ReAct 格式）
+            observation = f"Observation: {summary}\nStatus: Success"
+
+            # 构建输出
+            output = ToolOutput(
+                result=result_data if format_enum != ResponseFormat.CONCISE else None,
+                summary=summary,
+                observation=observation,
+                telemetry=telemetry,
+                response_format=ResponseFormat(format_enum)
+            )
+
+            # 返回完整 JSON（包含 telemetry），集成时可以排除
+            return output.model_dump_json()
 
     except Exception as e:
-        telemetry.latency_ms = (time.time() - start_time) * 1000
-        telemetry.success = False
-        telemetry.error_code = type(e).__name__
-        telemetry.error_message = str(e)
+        duration_ms = (time.time() - start_time) * 1000
 
-        output = ToolOutput(
-            summary=f"查询执行失败: {str(e)}",
-            observation=f"Observation: 查询执行失败 - {str(e)}\nStatus: Error",
-            telemetry=telemetry,
-            response_format=ResponseFormat(response_format)
-        )
+        if use_pipeline:
+            # 新格式错误结果
+            import uuid
+            tool_call_id = f"call_query_database_{uuid.uuid4().hex[:12]}"
+            return ToolExecutionResult.create_error(
+                tool_call_id=tool_call_id,
+                error_message=str(e),
+                error_type=type(e).__name__,
+                tool_name="query_database",
+            ).with_duration(duration_ms)
+        else:
+            # 旧格式错误结果
+            telemetry = ToolTelemetry(tool_name="query_database")
+            telemetry.latency_ms = duration_ms
+            telemetry.success = False
+            telemetry.error_code = type(e).__name__
+            telemetry.error_message = str(e)
 
-        return output.model_dump_json()
+            output = ToolOutput(
+                summary=f"查询执行失败: {str(e)}",
+                observation=f"Observation: 查询执行失败 - {str(e)}\nStatus: Error",
+                telemetry=telemetry,
+                response_format=ResponseFormat(format_enum)
+            )
+
+            return output.model_dump_json()
 
 
-# 创建 LangChain 工具
+# 创建 LangChain 工具（保持兼容）
 query_database_tool = StructuredTool.from_function(
     func=query_database_impl,
     name="query_database",
@@ -277,6 +369,11 @@ query_database_tool = StructuredTool.from_function(
 多数据库支持：
 - primary: 主数据库（PostgreSQL）
 - clickhouse: 分析数据库（ClickHouse）
+
+响应格式：
+- concise/brief: 仅摘要
+- standard: 摘要 + 数据
+- detailed/full: 完整信息
 
 示例：
 - 查询所有数据: SELECT * FROM sales
