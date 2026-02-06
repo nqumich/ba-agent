@@ -356,10 +356,9 @@
 **设计文件**: `docs/information-pipeline-design.md` v1.6
 
 **文档优化** (2026-02-05):
-- 精简冗余内容：2120 行 → 456 行 (74% 压缩)
-- 移除完整 Change History（保留摘要）
-- 移除重复概念说明
-- 简化代码示例为接口定义
+- **简化版** (456 行): `information-pipeline-design.md` - 快速参考
+- **详细版** (2120 行): `information-pipeline-design-detailed.md` - 完整实现
+- 两个文档区分使用场景
 
 ### 信息管道设计 v1.4 (US-INFRA-02, 2026-02-05) - 概念修正
 
