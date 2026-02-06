@@ -1,6 +1,6 @@
 # BA-Agent Information Pipeline Design
 
-> **Version**: v1.9.5
+> **Version**: v1.9.6
 > **Status**: Production-Grade
 > **Last Updated**: 2026-02-06
 
@@ -232,21 +232,49 @@ class MessageInjectionProtocol:
 
 ## Token 计数与监控
 
-### 准确 Token 计数（使用 tiktoken）
+### 动态 Token 计数器
+
+**支持多模型的动态 Token 计数系统。**
 
 ```python
-class TokenCounter:
-    @classmethod
-    def count_tokens(cls, text: str, model: str = "claude-3") -> int:
-        encoder = tiktoken.get_encoding("cl100k_base")
-        return len(encoder.encode(text))
+class DynamicTokenCounter:
+    """
+    动态 Token 计数器 - 支持多模型和插件式编码器注册
 
-    @classmethod
-    def count_message_tokens(cls, message: Dict, model: str) -> int
+    特性：
+    - 自动识别模型系列（Claude, GPT, Gemini, GLM 等）
+    - 配置文件支持（config/token_encoders.yaml）
+    - 精确计数 + 安全余量
+    """
 
-    @classmethod
-    def count_conversation_tokens(cls, messages: List[Dict], model: str) -> int
+    def count_tokens(self, text: str, model: str = "claude-3-sonnet") -> int:
+        """计算文本的 Token 数量（自动选择编码器）"""
+        config = self._registry.get_encoder_config(model)
+        encoder = self._registry.get_encoder(model)
+        estimated = len(encoder.encode(text))
+        return int(estimated * config.safety_margin)
+
+    def count_message_tokens(self, message: Dict, model: str) -> int:
+        """计算消息的 Token 数量"""
+
+    def count_conversation_tokens(self, messages: List[Dict], model: str) -> int:
+        """计算对话的总 Token 数量"""
+
+# 全局单例
+def get_token_counter() -> DynamicTokenCounter:
+    """获取全局 Token 计数器实例"""
+
+# 便捷函数
+def count_tokens(text: str, model: str = "claude-3-sonnet") -> int:
+    """计算文本的 Token 数量（使用全局计数器）"""
 ```
+
+**支持的模型系列**:
+- Claude: cl100k_base + 15% margin
+- GPT-4/3.5: cl100k_base（精确）
+- Gemini: cl100k_base + 20% margin
+- GLM: cl100k_base + 25% margin
+- Qwen, Llama, Mistal 等
 
 ### 监控指标
 
@@ -279,6 +307,71 @@ class MetricsCollector:
 
 ---
 
+## 核心组件（v1.9 新增）
+
+### 1. TTL 缓存基类
+
+**通用的 TTL 缓存抽象，支持泛型键值对。**
+
+```python
+class TTLCache(Generic[K, V], ABC):
+    """
+    通用 TTL 缓存基类
+
+    特性：
+    - 泛型键值对支持
+    - 自动过期清理
+    - 线程安全
+    - 最大条目限制
+    """
+
+    def get(self, key: K) -> Optional[V]: ...
+    def set(self, key: K, value: V): ...
+    def clear(self): ...
+```
+
+**子类**:
+- `IdempotencyCache(TTLCache[str, ToolExecutionResult])`: 幂等性缓存
+- `SummaryCache(TTLCache[str, Dict[str, Any]])`: 摘要缓存
+
+### 2. ThreadSafeMixin
+
+**为类提供简单的线程安全支持。**
+
+```python
+class ThreadSafeMixin:
+    """线程安全混入类（Mixin）"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+
+    @contextmanager
+    def _with_lock(self):
+        """获取锁的上下文管理器"""
+        ...
+```
+
+### 3. 配置类统一接口
+
+**所有配置类实现了统一的接口。**
+
+```python
+class BaseConfig(ABC):
+    @abstractmethod
+    def to_dict(self) -> Dict[str, Any]: ...      # 序列化
+    @abstractmethod
+    def from_dict(cls, data: Dict) -> "BaseConfig": ...  # 反序列化
+    @abstractmethod
+    def validate(self) -> bool: ...                # 验证
+```
+
+**配置类列表**:
+- `EncoderConfig`: Token 编码器配置
+- `ContextCompressionConfig`: 上下文压缩配置
+- `ObservabilityConfig`: 可观测性配置
+
+---
+
 ## 多轮对话流程
 
 ### 对话轮次
@@ -296,21 +389,67 @@ class ConversationRound(BaseModel):
 
 ### 上下文管理
 
+**两种上下文管理器，满足不同场景需求。**
+
+#### AdvancedContextManager（高级）
+
 ```python
-class ContextManager:
+class AdvancedContextManager:
+    """
+    高级上下文管理器 - 支持多种压缩策略和 LLM 摘要
+
+    特性：
+    1. 异步压缩支持
+    2. LLM 智能摘要（Claude 3 Haiku）
+    3. 三种压缩策略（TRUNCATE/EXTRACT/SUMMARIZE）
+    4. 自动策略选择
+    5. 摘要缓存
+    """
+
+    def __init__(
+        self,
+        max_tokens: int = 200000,
+        compression_config: Optional[ContextCompressionConfig] = None
+    ):
+        self._token_counter = get_token_counter()  # 使用单例
+        self._llm_compressor: Optional[LLMCompressor] = None
+        self._summary_cache = SummaryCache()
+
+    async def _compress_context(self):
+        """执行上下文压缩（支持异步）"""
+        strategy = self._select_compression_strategy(current_tokens)
+        if strategy == ContextCompressionStrategy.SUMMARIZE:
+            await self._compress_summarize()
+```
+
+#### BasicContextManager（基础）
+
+```python
+class BasicContextManager:
+    """
+    基础上下文管理器 - 简单的基于重要性的压缩
+
+    特性：
+    1. 基于重要性的智能压缩
+    2. 保留关键 Tool observations
+    3. Token 准确计数
+    4. 线程安全
+    5. 同步操作（无 LLM 依赖）
+
+    适用场景：
+    - 不需要 LLM 摘要的简单应用
+    - 对延迟敏感的场景
+    - 资源受限环境
+    """
+
     def __init__(self, max_tokens: int = 200000):
-        self.max_tokens = max_tokens
-        self.compression_threshold = 0.8
+        self._token_counter = get_token_counter()  # 使用单例
+        self._lock = threading.Lock()
 
-    def should_compress_context(self) -> bool:
-        """使用准确 Token 计数判断"""
-
-    def get_compressed_history(self) -> List[Dict]:
-        """策略：
-        - 保留最近 5 轮完整
-        - 旧轮次压缩为摘要
-        - 保留 tool observations
-        """
+    def _compress_context(self):
+        """基于重要性的智能压缩"""
+        # CRITICAL 永不压缩
+        # HIGH/LOW 按时间压缩
 ```
 
 ---
@@ -379,6 +518,12 @@ class DataStorage:
 ---
 
 ## 版本历史
+
+### v1.9.6 (2026-02-06) - 简化版文档同步
+**同步 detailed 版本的核心更新**:
+1. Token Counter → DynamicTokenCounter（多模型支持）
+2. 新增核心组件章节（TTLCache, ThreadSafeMixin, 配置类接口）
+3. ContextManager → AdvancedContextManager/BasicContextManager
 
 ### v1.9.5 (2026-02-06) - Review 修复
 **修复**: 删除重复定义、更新 SchemaVersion、修复 ABC import
