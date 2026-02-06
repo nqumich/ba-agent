@@ -308,6 +308,36 @@
 
 **测试覆盖**: 137 个 Skills 相关测试全部通过
 
+### 信息管道设计 v1.5 (US-INFRA-02, 2026-02-05) - Output Level 澄清
+
+进一步澄清：**ReAct Observation**（语义）和 **Output Level**（工程）是正交关系：
+
+**四个独立概念**:
+
+| 概念 | 类型 | 目的 |
+|------|------|------|
+| **ReAct** | 控制流程 | Agent 推理模式 |
+| **Observation** | 语义 | 工具返回什么（LLM 输入）|
+| **Output Level** | 工程优化 | 返回多详细（Token 优化）|
+| **Progressive Disclosure** | 信息加载 | Skills 如何加载（3-level）|
+
+**核心洞察**:
+- Observation 是 WHAT（语义内容）
+- Output Level 是 HOW（格式化详细程度）
+- 两者正交，不应混淆
+- 示例：同一数据，不同级别
+  - BRIEF: "Found 10 items"
+  - STANDARD: "Found 10 items:\n  - item1\n  - item2..."
+  - FULL: [完整 JSON]
+
+**设计变更**:
+- 添加 `OutputLevel` 枚举（BRIEF/STANDARD/FULL）
+- 更新 `ToolResultMessage` 包含 `output_level` 字段
+- 添加 `raw_data` 保存（用于工程用途）
+- 添加观察结果格式化辅助函数
+
+**设计文件**: `docs/information-pipeline-design.md` v1.5
+
 ### 信息管道设计 v1.4 (US-INFRA-02, 2026-02-05) - 概念修正
 
 基于 Claude Code 和 Manus AI 的实际实现，修正了之前设计中三个概念混淆的问题：
@@ -360,4 +390,4 @@
 
 ---
 
-**最后更新**: 2026-02-05 信息管道设计 v1.4 (概念修正)
+**最后更新**: 2026-02-05 信息管道设计 v1.5 (Output Level 澄清)
