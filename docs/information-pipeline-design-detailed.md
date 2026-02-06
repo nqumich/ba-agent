@@ -1297,10 +1297,12 @@ class ToolTimeoutHandler:
     """
     Handles tool execution timeouts with graceful degradation.
 
-    Strategy:
+    Strategy (synchronous system):
     1. Pre-execution check: Validate input size
-    2. During execution: Monitor with timeout
-    3. Post-timeout: Return partial results if available
+    2. During execution: Monitor with timeout (using threading)
+    3. Post-timeout: Return error result (DO NOT raise exception)
+
+    IMPORTANT: This is a SYNCHRONOUS handler for sync tools.
     """
 
     @staticmethod
@@ -1312,45 +1314,101 @@ class ToolTimeoutHandler:
         return size_mb <= max_size_mb
 
     @staticmethod
-    async def execute_with_timeout(
+    def execute_with_timeout(
         func: Callable,
-        timeout_ms: int,
-        on_timeout: Optional[Callable] = None
+        request_id: str,
+        timeout_ms: int = 30000
     ) -> Any:
         """
-        Execute function with timeout handling.
+        Execute function with timeout handling (synchronous).
 
         Args:
-            func: Function to execute
-            timeout_ms: Timeout in milliseconds
-            on_timeout: Optional callback for timeout handling
+            func: Function to execute (must be sync def, not async def)
+            request_id: Tool call ID for error result
+            timeout_ms: Timeout in milliseconds (default: 30s)
 
         Returns:
-            Function result or timeout fallback
-        """
-        import asyncio
+            Function result on success
 
-        try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(func),
-                timeout=timeout_ms / 1000
-            )
-        except asyncio.TimeoutError:
-            if on_timeout:
-                return await on_timeout()
-            raise ToolErrorType.TIMEOUT
+        Raises:
+            TimeoutException: On timeout (caller should catch and return error result)
+        """
+        import threading
+        import queue
+
+        result_queue = queue.Queue()
+        exception_queue = queue.Queue()
+
+        def target():
+            try:
+                result = func()
+                result_queue.put(result)
+            except Exception as e:
+                exception_queue.put(e)
+
+        thread = threading.Thread(target=target, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout_ms / 1000)
+
+        if thread.is_alive():
+            # Timeout occurred - thread still running
+            # Note: We can't actually kill the thread, but we return timeout immediately
+            raise TimeoutException(f"Tool execution exceeded {timeout_ms}ms timeout")
+
+        # Check for exceptions
+        if not exception_queue.empty():
+            raise exception_queue.get()
+
+        # Return result
+        return result_queue.get()
 
     @staticmethod
-    def create_timeout_fallback(request_id: str) -> ToolExecutionResult:
-        """Create fallback result on timeout"""
+    def create_timeout_result(request_id: str, timeout_ms: int) -> ToolExecutionResult:
+        """Create error result on timeout"""
         return ToolExecutionResult(
             request_id=request_id,
-            observation="Tool execution timed out. Partial results may be available.",
+            observation=f"Tool execution timed out after {timeout_ms}ms",
             output_level=OutputLevel.BRIEF,
             success=False,
-            error_type="TIMEOUT",
+            error_type="timeout",
             error_code="TIMEOUT",
-            error_message="Tool execution exceeded timeout limit"
+            error_message=f"Tool execution exceeded timeout limit ({timeout_ms}ms)"
+        )
+
+
+class TimeoutException(Exception):
+    """Exception raised when tool execution times out"""
+    pass
+
+
+# Usage example (synchronous tool execution):
+def execute_tool_sync(request: ToolInvocationRequest) -> ToolExecutionResult:
+    ''''
+    Synchronous tool execution with timeout handling.
+    '''
+    try:
+        result = ToolTimeoutHandler.execute_with_timeout(
+            func=lambda: actual_tool_function(request.parameters),
+            request_id=request.tool_call_id,
+            timeout_ms=request.timeout_ms
+        )
+        return ToolExecutionResult(
+            request_id=request.tool_call_id,
+            observation=str(result),
+            success=True
+        )
+    except TimeoutException:
+        return ToolTimeoutHandler.create_timeout_result(
+            request_id=request.tool_call_id,
+            timeout_ms=request.timeout_ms
+        )
+    except Exception as e:
+        return ToolExecutionResult(
+            request_id=request.tool_call_id,
+            observation="",
+            success=False,
+            error_type="execution_error",
+            error_message=str(e)
         )
 ```
 
@@ -1358,7 +1416,15 @@ class ToolTimeoutHandler:
 
 ```python
 class ToolErrorType(str, Enum):
-    """Standardized error types with retry classification"""
+    """
+    Standardized error types for tool execution results.
+
+    IMPORTANT: This is an ENUM, not an Exception.
+    DO NOT raise ToolErrorType.TIMEOUT - instead, use it as error_type value:
+
+    WRONG:  raise ToolErrorType.TIMEOUT
+    RIGHT:  ToolExecutionResult(error_type=ToolErrorType.TIMEOUT.value, ...)
+    """
 
     # 可重试错误 (Transient)
     TIMEOUT = "timeout"                      # 超时
