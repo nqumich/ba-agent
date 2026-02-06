@@ -183,7 +183,7 @@ def query_database_impl(
     params: Optional[Dict[str, Any]] = None,
     max_rows: int = 1000,
     response_format: str = "standard",
-    use_pipeline: bool = False,
+    use_pipeline: bool = True,  # v2.1: 默认启用 Pipeline
 ) -> Union[str, ToolExecutionResult]:
     """
     执行数据库查询的实现函数
@@ -194,7 +194,7 @@ def query_database_impl(
         params: 查询参数（参数化查询）
         max_rows: 最大返回行数
         response_format: 响应格式
-        use_pipeline: 是否使用新 Pipeline 模型 (默认 False 保持兼容)
+        use_pipeline: 是否使用新 Pipeline 模型 (默认 True)
 
     Returns:
         查询结果（JSON 字符串或 ToolExecutionResult）

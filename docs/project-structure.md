@@ -43,7 +43,7 @@ ba-agent/
 
 ## 1. backend/ - 后端核心模块
 
-后端核心代码，包含 Agent 实现、Memory 系统、Docker 集成、数据模型等。
+后端核心代码，包含 Agent 实现、Memory 系统、Docker 集成、数据模型、Pipeline 组件等。
 
 ### 1.1 backend/agents/ - Agent 实现
 
@@ -56,6 +56,7 @@ agents/
                             - MemorySaver 对话历史
                             - MemoryFlush (Clawdbot 风格)
                             - Conversation Compaction
+                            - v2.1: Pipeline 集成
 ```
 
 **关键功能**:
@@ -65,6 +66,13 @@ agents/
 - 支持工具调用和记忆管理
 - **MemoryFlush**: 基于 token 阈值的自动记忆提取和卸载
 - **Compaction**: MemoryFlush 后自动压缩对话上下文
+
+**v2.1.0 Pipeline 集成**:
+- `token_counter`: DynamicTokenCounter - 多模型 Token 计数
+- `context_manager`: AdvancedContextManager - 智能上下文压缩
+- `_get_total_tokens()`: 使用 DynamicTokenCounter 精确计数
+- `_compact_conversation()`: 使用 AdvancedContextManager 优先级过滤
+- `_check_and_flush()`: 双组件协同工作
 
 ### 1.2 backend/memory/ - 三层记忆系统
 
@@ -108,7 +116,45 @@ docker/
 - CPU quota 和内存限制
 - 超时控制
 
-### 1.4 backend/hooks/ - 系统钩子
+### 1.4 backend/pipeline/ - Pipeline 组件 (v2.1.0)
+
+```
+pipeline/
+├── __init__.py             # Pipeline 统一导出
+├── timeout/                # 超时处理
+│   └── __init__.py         # ToolTimeoutHandler（同步）
+├── storage/                # 数据存储
+│   └── __init__.py         # DataStorage（artifact 存储）
+├── wrapper.py              # PipelineToolWrapper（LangChain 集成）
+├── cache/                  # 幂等性缓存
+│   └── idempotency_cache.py  # IdempotencyCache（跨轮次缓存）
+├── token/                  # Token 计数
+│   └── token_counter.py    # DynamicTokenCounter（多模型支持）
+└── context/                # 上下文管理
+    └── context_manager.py  # AdvancedContextManager（智能压缩）
+```
+
+**Pipeline 核心模型** (backend/models/pipeline/):
+```
+models/pipeline/
+├── __init__.py
+├── output_level.py         # OutputLevel (BRIEF/STANDARD/FULL)
+├── cache_policy.py         # ToolCachePolicy (NO_CACHE/CACHEABLE/TTL_*)
+├── tool_result.py          # ToolExecutionResult（单一源模型）
+└── tool_request.py         # ToolInvocationRequest（工具调用请求）
+```
+
+**v2.1.0 特性**:
+
+| 组件 | 功能 | 优势 |
+|------|------|------|
+| **DynamicTokenCounter** | 多模型 Token 计数 | OpenAI tiktoken、Anthropic、fallback |
+| **AdvancedContextManager** | 智能上下文压缩 | 优先级过滤（EXTRACT）+ LLM 摘要（SUMMARIZE） |
+| **IdempotencyCache** | 跨轮次缓存 | 语义键（排除 tool_call_id） |
+| **DataStorage** | Artifact 存储 | 安全 ID 替代真实路径 |
+| **ToolTimeoutHandler** | 同步超时 | 线程池（非 asyncio） |
+
+### 1.5 backend/hooks/ - 系统钩子
 
 ```
 hooks/
@@ -142,10 +188,16 @@ models/
 ├── report.py              # 报告模型
 ├── skill.py               # Skill 相关模型
 ├── tool.py                # 工具调用模型
-└── tool_output.py         # 工具输出格式模型
-                            - ToolOutput
-                            - ToolTelemetry
-                            - ResponseFormat
+├── tool_output.py         # 工具输出格式模型（v2.0.0）
+│                           - ToolOutput
+│                           - ToolTelemetry
+│                           - ResponseFormat
+└── pipeline/              # Pipeline 模型（v2.1.0）
+    ├── __init__.py
+    ├── output_level.py    # OutputLevel (BRIEF/STANDARD/FULL)
+    ├── cache_policy.py    # ToolCachePolicy (NO_CACHE/CACHEABLE/TTL_*)
+    ├── tool_result.py     # ToolExecutionResult（单一源模型）
+    └── tool_request.py    # ToolInvocationRequest（工具调用请求）
 ```
 
 **导入方式**:
@@ -324,9 +376,15 @@ tests/
 
 ### 测试统计
 
-- **总计**: 764 个测试
-- **通过**: 764 (100%)
+- **总计**: 896 个测试
+- **通过**: 896 (100%)
 - **跳过**: 0
+
+**v2.1.0 测试更新**:
+- Phase 1-3: 42 tests passing
+- Phase 4: 42 tools tests passing
+- Phase 5: 132 skills tests passing
+- Integration: All BAAgent tests passing
 
 ### 运行测试
 
@@ -417,10 +475,19 @@ Agent 可以通过以下工具管理记忆：
 docs/
 ├── PRD.md                              # 产品需求文档
 ├── project-structure.md                # 本文档 - 项目目录结构
+├── information-pipeline-design.md      # Pipeline 设计文档（简化版）
+├── information-pipeline-design-detailed.md  # Pipeline 设计文档（详细版）
+├── MIGRATION_GUIDE.md                  # v2.0.0 → v2.1.0 迁移指南
+├── context-manager-guide.md            # Context Manager 使用指南
 ├── tool-output-format-design.md        # 工具输出格式设计
 ├── mcp-setup.md                        # MCP 服务器配置
 └── memory-flush-redesign.md            # MemoryFlush 重设计文档
 ```
+
+**v2.1.0 新增文档**:
+- `information-pipeline-design-detailed.md`: 完整的 Pipeline v2.1.0 设计文档
+- `information-pipeline-design.md`: 简化版 Pipeline 设计
+- `MIGRATION_GUIDE.md`: 非破坏性升级指南
 
 ### 其他重要文档
 
@@ -576,7 +643,13 @@ mcp_config = get_config_manager().get_mcp_config()
 
 ---
 
-**文档版本**: v1.3
-**最后更新**: 2026-02-05
+**文档版本**: v1.4 (v2.1.0 Pipeline Update)
+**最后更新**: 2026-02-06
 **维护者**: BA-Agent Team
-**测试状态**: 743/764 通过 (21 个测试断言待修复)
+**测试状态**: 896/896 通过 (100%)
+
+**v2.1.0 更新**:
+- 新增 `backend/pipeline/` 模块
+- 新增 `backend/models/pipeline/` 模型
+- BAAgent 集成 DynamicTokenCounter 和 AdvancedContextManager
+- 全部 Phase 1-5 完成，测试通过

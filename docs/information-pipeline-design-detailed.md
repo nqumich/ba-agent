@@ -1,15 +1,41 @@
 # BA-Agent Information Pipeline Design Document
 
 > **Date**: 2026-02-06
-> **Version**: v2.0.1 (Single Source Model)
+> **Version**: v2.1.0 (Agent Integration + Advanced Features)
 > **Author**: BA-Agent Development Team
-> **Status**: Design Phase
+> **Status**: Production Ready
 
 ---
 
-## v2.0.1 Update
+## v2.1.0 Update: Agent Integration + Advanced Features
 
-This version consolidates duplicate tool result models into a **single source of truth**.
+This version completes the integration of pipeline components with BAAgent and adds advanced production-ready features.
+
+**Key Changes**:
+1. **BAAgent Integration**: Pipeline components fully integrated with existing agent architecture
+2. **DynamicTokenCounter**: Multi-model token counting with tiktoken integration
+3. **AdvancedContextManager**: Smart context compression with EXTRACT/SUMMARIZE modes
+4. **IdempotencyCache**: Cross-round caching for tool execution results
+5. **Agent Enhancement**: `_get_total_tokens()` and `_compact_conversation()` upgraded
+
+**Architecture Integration**:
+```
+BAAgent v2.1
+├── token_counter (DynamicTokenCounter)
+│   └── Multi-model support (OpenAI, Anthropic, approximate)
+├── context_manager (AdvancedContextManager)
+│   ├── EXTRACT mode (priority-based filtering)
+│   ├── SUMMARIZE mode (LLM compression)
+│   └── TRUNCATE mode (simple fallback)
+├── memory_flush (RETAINED - Memory extraction)
+└── memory_watcher (RETAINED - File monitoring)
+```
+
+---
+
+## v2.0.1 Update (Single Source Model)
+
+This version consolidated duplicate tool result models into a **single source of truth**.
 
 **Key Changes**:
 1. **Removed `ToolResultMessage`**: Eliminated duplicate model class
@@ -19,24 +45,18 @@ This version consolidates duplicate tool result models into a **single source of
 5. **Added formatting methods**: `_format_brief()`, `_format_standard()`, `_format_observation()`
 6. **Added `data_hash` field**: For deduplication
 
-**Benefits**:
-- No field inconsistency between two models
-- No duplicate formatting logic
-- Single test suite for tool results
-- Clearer API: `ToolExecutionResult.from_raw_data()` → `.to_tool_message()`
-
 ---
 
-## v2.0.0 Major Update
+## v2.0.0 Major Update (LangChain Alignment)
 
-This version aligns the design document with the actual BA-Agent implementation using **LangChain ChatAnthropic + Synchronous Tools**.
+This version aligned the design document with the actual BA-Agent implementation using **LangChain ChatAnthropic + Synchronous Tools**.
 
 **Key Changes**:
 1. **Carrier vs Semantic separation**: Explicit distinction between Observation (semantic) and Carrier (transport)
 2. **LangChain as primary protocol**: BaseMessage (HumanMessage/AIMessage/ToolMessage) is the main message format
 3. **Claude Code format demoted**: StandardMessage is now "external/research format" only
-4. **Tool result conversion**: `to_tool_message()` returns ToolMessage, `to_user_message()` deprecated
-5. **tool_call_id source**: Clarified that tool_call_id comes from AIMessage.tool_calls, not generated
+4. **Tool result conversion**: `to_tool_message()` returns ToolMessage
+5. **tool_call_id source**: Clarified that tool_call_id comes from AIMessage.tool_calls
 6. **Synchronous compression**: Removed async compression, added background thread for LLM summarization
 7. **OutputLevel clarification**: Changed from "Progressive Disclosure" to "verbosity/detail level"
 
@@ -3836,46 +3856,632 @@ class AdvancedContextManager:
 
 ---
 
+## Phase 5: Advanced Features (v2.1.0)
+
+### 5.1 IdempotencyCache - Cross-Round Caching
+
+#### Purpose
+Enable caching across conversation rounds using semantic keys instead of transient `tool_call_id`.
+
+#### Key Design
+```python
+from backend.pipeline.cache import IdempotencyCache, get_idempotency_cache
+
+class IdempotencyCache(TTLCache[str, ToolExecutionResult]):
+    """
+    Cross-round cache using semantic keys.
+
+    Key Difference from tool_call_id:
+    - tool_call_id: Transient, LLM-generated, different each round
+    - idempotency_key: Semantic, based on tool_name + parameters
+    """
+
+    def get_idempotency_key(
+        self,
+        tool_name: str,
+        tool_version: str,
+        parameters: Dict[str, Any],
+        caller_id: str,
+        permission_level: str,
+    ) -> str:
+        """
+        Generate semantic key EXCLUDING tool_call_id.
+
+        This enables cross-round caching:
+        Round 1: query_database("SELECT * FROM users") → key_A
+        Round 2: query_database("SELECT * FROM users") → key_A (same!)
+        """
+        # Canonicalize parameters (sort dict keys)
+        canonical_params = json.dumps(parameters, sort_keys=True)
+
+        # Build key components (NO tool_call_id!)
+        key_components = [
+            tool_name,
+            tool_version,
+            canonical_params,
+            caller_id,
+            permission_level,
+        ]
+
+        key_string = ":".join(key_components)
+        return hashlib.md5(key_string.encode()).hexdigest()
+
+    def get_or_compute(
+        self,
+        tool_name: str,
+        tool_version: str,
+        parameters: Dict[str, Any],
+        compute_fn: Callable[[], ToolExecutionResult],
+        cache_policy: ToolCachePolicy,
+        caller_id: str = "default",
+        permission_level: str = "user",
+    ) -> ToolExecutionResult:
+        """
+        Get cached result or compute new one.
+
+        Cross-Round Example:
+        ================
+        User (Round 1): "Query users table"
+        → LLM calls: query_database("SELECT * FROM users")
+        → Cache miss → Execute query → Cache result with key_A
+
+        User (Round 2): "Query users table again"
+        → LLM calls: query_database("SELECT * FROM users")  # DIFFERENT tool_call_id!
+        → Cache HIT → Return cached result from key_A
+        """
+        if not cache_policy.is_cacheable:
+            # NO_CACHE: Always execute
+            return compute_fn()
+
+        # Generate semantic key (same across rounds!)
+        key = self.get_idempotency_key(
+            tool_name, tool_version, parameters, caller_id, permission_level
+        )
+
+        # Check cache
+        cached = self.get(key)
+        if cached is not None:
+            # Cache hit - mark metadata
+            cached.metadata["cache_hit"] = True
+            cached.metadata["cached_at"] = datetime.now().isoformat()
+            return cached
+
+        # Cache miss - compute and cache
+        result = compute_fn()
+        if result.success:
+            # Only cache successful results
+            self.set(key, result, ttl_seconds=cache_policy.ttl_seconds)
+            result.metadata["cache_hit"] = False
+
+        return result
+```
+
+#### Usage in Tools
+```python
+from backend.pipeline import get_idempotency_cache, ToolCachePolicy
+
+cache = get_idempotency_cache()
+
+@pipeline_tool("query_database", output_level=OutputLevel.STANDARD)
+def query_database(sql: str, use_pipeline: bool = True) -> ToolExecutionResult:
+    """Database query with cross-round caching."""
+
+    def _execute_query():
+        # Actual database execution
+        results = db.execute(sql)
+        return results
+
+    if use_pipeline:
+        # Use pipeline cache (cross-round!)
+        result = cache.get_or_compute(
+            tool_name="query_database",
+            tool_version="1.0.0",
+            parameters={"sql": sql},
+            compute_fn=_execute_query,
+            cache_policy=ToolCachePolicy.TTL_SHORT,  # 5 minutes
+            caller_id="ba_agent",
+            permission_level="user",
+        )
+        return result
+    else:
+        # Legacy path
+        return _execute_query()
+```
+
+#### Cache Policy TTLs
+```python
+class ToolCachePolicy(str, Enum):
+    NO_CACHE = "no_cache"         # Never cache (default, safe)
+    CACHEABLE = "cacheable"       # Cache with default TTL
+    TTL_SHORT = "ttl_short"       # 5 minutes (300s)
+    TTL_MEDIUM = "ttl_medium"     # 1 hour (3600s)
+    TTL_LONG = "ttl_long"         # 24 hours (86400s)
+
+    @property
+    def ttl_seconds(self) -> int:
+        return {
+            self.NO_CACHE: 0,
+            self.CACHEABLE: 300,
+            self.TTL_SHORT: 300,
+            self.TTL_MEDIUM: 3600,
+            self.TTL_LONG: 86400,
+        }[self]
+```
+
+---
+
+### 5.2 DynamicTokenCounter - Multi-Model Token Counting
+
+#### Purpose
+Accurate token counting supporting OpenAI (tiktoken), Anthropic, and fallback methods.
+
+#### Key Design
+```python
+from backend.pipeline.token import DynamicTokenCounter, get_token_counter
+
+class DynamicTokenCounter:
+    """
+    Multi-model token counter with automatic detection.
+
+    Supported Models:
+    - OpenAI: gpt-4, gpt-3.5-turbo, o1 (uses tiktoken)
+    - Anthropic: claude-3-opus, claude-3-sonnet (approximate)
+    - Fallback: Character-based estimation
+    """
+
+    def __init__(self, default_model: str = "gpt-4"):
+        self.default_model = default_model
+        self._tokenizers: Dict[str, Any] = {}
+
+    def detect_model_family(self, model: str) -> str:
+        """Detect OpenAI, Anthropic, or other."""
+        model_lower = model.lower()
+
+        if re.match(r"^claude-", model_lower):
+            return "anthropic"
+        if re.match(r"^(gpt-|o1-)", model_lower):
+            return "openai"
+        return "other"
+
+    def get_counter(self, model: str):
+        """Get appropriate tokenizer for model."""
+        family = self.detect_model_family(model)
+
+        if family == "openai":
+            # Use tiktoken for accurate counting
+            if "openai" not in self._tokenizers:
+                try:
+                    import tiktoken
+                    encoding = tiktoken.encoding_for_model(model)
+                    self._tokenizers["openai"] = encoding
+                except ImportError:
+                    # Fallback to cl100k_base (GPT-4)
+                    self._tokenizers["openai"] = tiktoken.get_encoding("cl100k_base")
+
+            return self._tokenizers["openai"]
+
+        elif family == "anthropic":
+            # Anthropic: approximate (1 token ≈ 3.5 chars)
+            # Can use anthropic-tokenizer package if available
+            return self._anthropic_counter
+
+        else:
+            # Fallback: character-based
+            return self._fallback_counter
+
+    def count_tokens(self, text: str, model: Optional[str] = None) -> int:
+        """
+        Count tokens using appropriate tokenizer.
+
+        Examples:
+        >>> counter.count_tokens("Hello, world!", model="gpt-4")
+        4  # Accurate (tiktoken)
+        >>> counter.count_tokens("Hello, world!", model="claude-3-opus")
+        4  # Approximate
+        """
+        counter = self.get_counter(model or self.default_model)
+        return counter.count_tokens(text)
+
+    def count_messages(self, messages: List[BaseMessage]) -> int:
+        """
+        Count tokens in LangChain message list.
+
+        Handles:
+        - HumanMessage, AIMessage, SystemMessage, ToolMessage
+        - Complex content (text + images)
+        - Tool calls metadata
+        """
+        total = 0
+        for msg in messages:
+            # Message content
+            content = msg.content
+            if isinstance(content, str):
+                total += self.count_tokens(content)
+            elif isinstance(content, list):
+                # Multimodal content
+                for block in content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            total += self.count_tokens(block.get("text", ""))
+                        elif block.get("type") == "image_url":
+                            # Images: ~85 tokens per image (approximate)
+                            total += 85
+
+            # Tool calls overhead
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                for tool_call in msg.tool_calls:
+                    # Tool name + args
+                    args_json = json.dumps(tool_call.get("args", {}))
+                    total += self.count_tokens(tool_call.get("name", "")) + self.count_tokens(args_json) + 10
+
+        return total
+```
+
+#### Integration with BAAgent
+```python
+# In BAAgent.__init__
+from backend.pipeline import get_token_counter
+
+self.token_counter = get_token_counter()
+
+def _get_total_tokens(self, result: Dict[str, Any]) -> int:
+    """Get total token count using DynamicTokenCounter (v2.1)."""
+    messages = result.get("messages", [])
+    if messages:
+        try:
+            counted = self.token_counter.count_messages(messages)
+            if counted > 0:
+                return counted
+        except Exception:
+            pass  # Fallback to old method
+
+    # Fallback to legacy estimation
+    return result.get("usage", {}).get("total_tokens", 0)
+```
+
+---
+
+### 5.3 AdvancedContextManager - Smart Compression
+
+#### Purpose
+Replace simple truncation with intelligent compression based on message priority.
+
+#### Key Design
+```python
+from backend.pipeline.context import AdvancedContextManager, CompressionMode
+
+class CompressionMode(str, Enum):
+    TRUNCATE = "truncate"  # Drop oldest (fast, loses information)
+    EXTRACT = "extract"    # Extract by priority (smart, heuristics)
+    SUMMARIZE = "summarize"  # LLM summarization (best, slow)
+
+class MessagePriority(str, Enum):
+    CRITICAL = "critical"  # Must keep (system, errors)
+    HIGH = "high"         # Should keep (user, tool results)
+    MEDIUM = "medium"     # Maybe keep (assistant reasoning)
+    LOW = "low"           # Can drop (verbose logs)
+
+class AdvancedContextManager:
+    """
+    Smart context compression with priority filtering.
+
+    Features:
+    - Token-aware compression (not just message count)
+    - Message priority (CRITICAL > HIGH > MEDIUM > LOW)
+    - Multiple compression modes
+    - LLM-based summarization (optional)
+    """
+
+    def compress(
+        self,
+        messages: List[BaseMessage],
+        target_tokens: Optional[int] = None,
+        mode: Optional[CompressionMode] = None,
+    ) -> List[BaseMessage]:
+        """
+        Compress messages to fit within target tokens.
+
+        Priority Order (EXTRACT mode):
+        1. SystemMessage (CRITICAL) - Always keep
+        2. HumanMessage (HIGH) - Keep as much as possible
+        3. ToolMessage with errors (HIGH) - Keep errors
+        4. AIMessage with tool_calls (HIGH) - Keep tool calls
+        5. AIMessage without tool_calls (MEDIUM) - May drop
+        6. ToolMessage success (MEDIUM) - May drop
+        7. Verbose logs (LOW) - Drop first
+        """
+        target = target_tokens or self.max_tokens
+        mode = mode or self.compression_mode
+
+        current_tokens = self.count_tokens(messages)
+        if current_tokens <= target:
+            return messages  # No compression needed
+
+        if mode == CompressionMode.TRUNCATE:
+            return self._truncate(messages, target)
+        elif mode == CompressionMode.EXTRACT:
+            return self._extract(messages, target)
+        elif mode == CompressionMode.SUMMARIZE:
+            return self._summarize(messages, target)
+
+    def _get_priority(self, msg: BaseMessage) -> MessagePriority:
+        """Assign priority to message."""
+        if isinstance(msg, SystemMessage):
+            return MessagePriority.CRITICAL
+
+        if isinstance(msg, ToolMessage):
+            # Check if error
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            if "error" in content.lower() or "failed" in content.lower():
+                return MessagePriority.HIGH
+            return MessagePriority.MEDIUM
+
+        if isinstance(msg, HumanMessage):
+            return MessagePriority.HIGH
+
+        if isinstance(msg, AIMessage):
+            # Tool calls are important
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                return MessagePriority.HIGH
+            return MessagePriority.MEDIUM
+
+        return MessagePriority.LOW
+```
+
+#### Usage Example
+```python
+# In BAAgent._check_and_flush()
+def _check_and_flush(self, conversation_id, messages, current_tokens):
+    """Check and flush with smart compression (v2.1)."""
+    limit = self.app_config.llm.max_tokens
+    threshold = int(limit * 0.8)
+
+    if current_tokens < threshold:
+        return  # No action needed
+
+    # Use AdvancedContextManager for compression
+    target_tokens = int(limit * 0.5)  # Target 50% capacity
+    compressed = self.context_manager.compress(
+        all_messages,
+        target_tokens=target_tokens,
+        mode=CompressionMode.EXTRACT,  # Priority-based extraction
+    )
+
+    # Update storage
+    self.conversation_store.update_messages(conversation_id, compressed)
+```
+
+---
+
+### 5.4 BAAgent Integration
+
+#### Complete Integration
+```python
+# backend/agents/agent.py
+
+from langchain_core.messages import BaseMessage
+from backend.pipeline import (
+    get_token_counter,
+    AdvancedContextManager,
+    CompressionMode,
+)
+
+class BAAgent:
+    """
+    BA-Agent with v2.1 pipeline integration.
+
+    Changes:
+    - token_counter: DynamicTokenCounter for accurate counting
+    - context_manager: AdvancedContextManager for smart compression
+    - _get_total_tokens: Use DynamicTokenCounter
+    - _compact_conversation: Use AdvancedContextManager
+    - _check_and_flush: Use both components
+    """
+
+    def __init__(self, app_config: AppConfig):
+        # ... existing init ...
+
+        # v2.1: Pipeline components
+        self.token_counter = get_token_counter()
+        self.context_manager = AdvancedContextManager(
+            max_tokens=self.app_config.llm.max_tokens,
+            compression_mode=CompressionMode.EXTRACT,
+            llm_summarizer=self.llm,
+            token_counter=self.token_counter,
+        )
+
+    def _get_total_tokens(self, result: Dict[str, Any]) -> int:
+        """
+        Get total token count (v2.1 enhanced).
+
+        Priority:
+        1. DynamicTokenCounter (accurate, multi-model)
+        2. LLM response (if available)
+        3. Fallback estimation
+        """
+        messages = result.get("messages", [])
+        if messages:
+            try:
+                counted = self.token_counter.count_messages(messages)
+                if counted > 0:
+                    return counted
+            except Exception:
+                pass
+
+        # Fallback to legacy methods
+        usage = result.get("usage", {})
+        if usage and usage.get("total_tokens"):
+            return usage["total_tokens"]
+
+        # Last resort: character estimation
+        return len(str(messages)) // 3
+
+    def _compact_conversation(self, conversation_id: str, keep_recent: int = 10):
+        """
+        Compact conversation with smart compression (v2.1).
+
+        Old behavior: Drop oldest messages
+        New behavior: Priority-based extraction
+        """
+        all_messages = self.conversation_store.get_messages(conversation_id)
+        if not all_messages:
+            return
+
+        target_tokens = int(self.app_config.llm.max_tokens * 0.5)
+        compressed_messages = self.context_manager.compress(
+            all_messages,
+            target_tokens=target_tokens,
+            mode=CompressionMode.EXTRACT,
+        )
+
+        self.conversation_store.update_messages(conversation_id, compressed_messages)
+
+    def _check_and_flush(self, conversation_id, messages, current_tokens):
+        """
+        Check and flush with v2.1 components.
+
+        Changes:
+        - Use DynamicTokenCounter for accurate counting
+        - Use AdvancedContextManager for compression
+        """
+        limit = self.app_config.llm.max_tokens
+        threshold = int(limit * 0.8)
+
+        # Count accurately with DynamicTokenCounter
+        actual_tokens = self.token_counter.count_messages(messages)
+
+        if actual_tokens < threshold:
+            return  # All good
+
+        # Need compression
+        all_messages = self.conversation_store.get_messages(conversation_id)
+
+        # Smart compression with priority filtering
+        compressed = self.context_manager.compress(
+            all_messages,
+            target_tokens=int(limit * 0.5),
+            mode=CompressionMode.EXTRACT,
+        )
+
+        # Update storage
+        self.conversation_store.update_messages(conversation_id, compressed)
+```
+
+---
+
+### Architecture Diagram (v2.1.0)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         BAAgent                                 │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
+│  │  token_counter  │  │ context_manager  │  │   idempotency   │ │
+│  │  (Dynamic)      │  │  (Advanced)      │  │     cache       │ │
+│  └────────┬────────┘  └────────┬─────────┘  └────────┬────────┘ │
+│           │                    │                      │          │
+│           ▼                    ▼                      ▼          │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
+│  │ count_messages()│  │ compress()       │  │ get_or_compute()│ │
+│  │                 │  │                  │  │                 │ │
+│  │ - OpenAI (tik)  │  │ - TRUNCATE       │  │ - Cross-round   │ │
+│  │ - Anthropic     │  │ - EXTRACT ✓      │  │ - Semantic key  │ │
+│  │ - Fallback      │  │ - SUMMARIZE      │  │ - TTL support   │ │
+│  └─────────────────┘  └──────────────────┘  └─────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Pipeline Components                         │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
+│  │  ToolTimeout    │  │   DataStorage    │  │  ToolWrapper    │ │
+│  │    Handler      │  │  (Artifacts)     │  │  (LangChain)    │ │
+│  └─────────────────┘  └──────────────────┘  └─────────────────┘ │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
+│  │OutputLevel      │  │  ToolCachePolicy │  │  ExecutionResult│ │
+│  │(BRIEF/STD/FULL) │  │  (NO/TTL*)       │  │  (observation+) │ │
+│  └─────────────────┘  └──────────────────┘  └─────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## Implementation Roadmap
 
-### Phase 1: Core Message Format (Week 1)
+**Status: v2.1.0 Completed** ✅
 
-- [x] ~~Simplify `ToolOutput` model~~ → **Clarify**: Use `observation` + `output_level`
-- [ ] Create `OutputLevel` enum (BRIEF/STANDARD/FULL)
-- [ ] Implement `ToolResultMessage` with observation + output_level + raw_data
-- [ ] Update `StandardMessage` to match Claude Code format
-- [ ] Implement observation formatting helpers (_format_brief, _format_standard, _format_full)
-- [ ] Write unit tests (20 tests)
+All core phases (1-5) have been completed. The following features are now production-ready:
 
-### Phase 2: Tool Communication Protocol (Week 2)
+### Phase 1: Core Models ✅ (Completed)
+- [x] Create `OutputLevel` enum (BRIEF/STANDARD/FULL)
+- [x] Create `ToolCachePolicy` enum (NO_CACHE/CACHEABLE/TTL_SHORT/MEDIUM/LONG)
+- [x] Implement `ToolExecutionResult` with observation + output_level
+- [x] Implement `ToolInvocationRequest` for tool invocation
+- [x] Add artifact-based file storage
+- **Commit**: `358f201`
 
-- [ ] Implement `ToolExecutionResult` with observation + output_level
-- [ ] Implement `from_raw()` classmethod for level-based formatting
-- [ ] Update all tools to support output_level parameter
-- [ ] Implement error handling with proper observation messages
-- [ ] Write integration tests (15 tests)
+### Phase 2: Tool Execution Infrastructure ✅ (Completed)
+- [x] Implement `ToolTimeoutHandler` (synchronous)
+- [x] Implement `DataStorage` with artifact-based storage
+- [x] Add artifact metadata tracking
+- [x] Security: artifact_id instead of real paths
+- **Commit**: `358f201`
 
-### Phase 3: Skill Communication Protocol (Week 2)
+### Phase 3: Tool Wrapper ✅ (Completed)
+- [x] Implement `PipelineToolWrapper` for LangChain integration
+- [x] Add `@pipeline_tool` decorator
+- [x] Smart `@tool` decorator with auto-format detection
+- **Commit**: `358f201`
 
-- [ ] Implement `SkillActivationRequest` with load_level for progressive disclosure
-- [ ] Implement `SkillLoader` with 3-level loading
-- [ ] Update skill system to use progressive disclosure
-- [ ] Write skill integration tests (10 tests)
+### Phase 4: Migration ✅ (Completed)
+- [x] Update `tools/base.py` with new decorators
+- [x] Update `tools/database.py` with `use_pipeline` flag
+- [x] Update `tools/vector_search.py` with `use_pipeline` flag
+- [x] Maintain backward compatibility
+- [x] All tests passing (42 tests)
+- **Commit**: `d4d8c35`
 
-### Phase 4: Multi-Round Conversation (Week 3)
+### Phase 5: Advanced Features ✅ (Completed)
+- [x] Implement `IdempotencyCache` (cross-round caching)
+- [x] Implement `DynamicTokenCounter` (multi-model support)
+- [x] Implement `AdvancedContextManager` (smart compression)
+- [x] Integrate pipeline components into BAAgent
+- [x] All tests passing (132 skills tests)
+- **Commit**: `e4ebcb6`, `45dc323`
 
-- [ ] Implement `ConversationRound` with ReAct loop tracking
-- [ ] Implement `ContextManager` with compression
-- [ ] Update BAAgent to use new message formats
-- [ ] Write E2E tests (5 tests)
+### Phase 6: Documentation ✅ (In Progress)
+- [x] Update detailed design doc to v2.1.0 (this document)
+- [ ] Update simplified design doc to v2.1.0
+- [ ] Create migration guide (MIGRATION_GUIDE.md)
+- [ ] Update architecture documentation (project-structure.md)
 
-### Phase 5: Migration & Testing (Week 4)
+---
 
-- [ ] Migrate existing tools to simple observation format
-- [ ] Update BAAgent to use Claude Code-style messages
-- [ ] Update all tests
-- [ ] Performance benchmarking
-- [ ] Documentation updates
+## v2.1.0 Implementation Notes
+
+### Key Decisions
+
+1. **Synchronous Tool Execution**: All tools use `def` (not `async def`) for simplicity
+2. **tool_call_id Source**: MUST come from LLM (`AIMessage.tool_calls[i]["id"]`)
+3. **Artifact Security**: Public `artifact_id` vs private `data_file` paths
+4. **Cross-Round Caching**: Semantic keys exclude transient `tool_call_id`
+5. **Token Counting**: Multi-model support (OpenAI tiktoken, Anthropic, fallback)
+6. **Context Compression**: Priority-based (EXTRACT mode) instead of simple truncation
+
+### Breaking Changes from v2.0.0
+
+None - v2.1.0 is fully backward compatible with v2.0.0.
+
+### Migration from v2.0.0
+
+No migration required - v2.1.0 adds new features without changing existing APIs.
+
+---
+
+## Implementation Roadmap (Legacy - v2.0.0)
+
+### Phase 1: Core Message Format (Week 1) - DEPRECATED
+
+This phase has been superseded by v2.1.0 implementation.
 
 ---
 

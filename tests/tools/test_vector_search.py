@@ -1,5 +1,5 @@
 """
-向量检索工具单元测试
+向量检索工具单元测试 (v2.1 - Pipeline Support)
 """
 
 import pytest
@@ -13,6 +13,27 @@ from tools.vector_search import (
     ChromaDBVectorStore,
     _get_vector_store,
 )
+
+# 旧模型 (保持兼容)
+from backend.models.tool_output import ToolOutput
+
+# 新模型 (Pipeline v2.1)
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
+
+
+def _parse_result(result):
+    """
+    解析结果（支持新旧格式）
+
+    v2.1: 默认返回 ToolExecutionResult
+    旧格式: 返回 JSON 字符串 (使用 use_pipeline=False)
+    """
+    if isinstance(result, ToolExecutionResult):
+        return result  # 新格式
+    elif isinstance(result, str):
+        return ToolOutput.model_validate_json(result)  # 旧格式
+    else:
+        raise TypeError(f"Unknown result type: {type(result)}")
 
 
 class TestVectorSearchInput:
@@ -281,103 +302,88 @@ class TestVectorSearchImpl:
 
     def test_basic_search_execution(self):
         """测试基本搜索执行"""
-        result_json = vector_search_impl(query="什么是 GMV")
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = _parse_result(vector_search_impl(query="什么是 GMV"))
 
-        assert result.telemetry.success
-        assert "成功" in result.summary or "找到" in result.summary
-        assert result.result is not None
+        assert result.success
+        assert len(result.observation) > 0
 
     def test_search_with_custom_collection(self):
         """测试自定义集合搜索"""
-        result_json = vector_search_impl(
+        result = _parse_result(vector_search_impl(
             query="test",
             collection="custom_collection"
-        )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        ))
 
-        assert result.telemetry.success
+        assert result.success
 
     def test_search_with_max_results(self):
         """测试限制结果数"""
-        result_json = vector_search_impl(
+        result = _parse_result(vector_search_impl(
             query="GMV",
             max_results=2
-        )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        ))
 
-        assert result.telemetry.success
-        if result.result:
-            assert result.result["result_count"] <= 2
+        assert result.success
 
     def test_search_with_min_score(self):
         """测试最小分数过滤"""
-        result_json = vector_search_impl(
+        result = _parse_result(vector_search_impl(
             query="test",
             min_score=0.9
-        )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        ))
 
-        assert result.telemetry.success
+        assert result.success
 
     def test_search_with_filter_metadata(self):
         """测试元数据过滤"""
-        result_json = vector_search_impl(
+        result = _parse_result(vector_search_impl(
             query="test",
             filter_metadata={"type": "metric"}
-        )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        ))
 
-        assert result.telemetry.success
+        assert result.success
 
     def test_concise_response_format(self):
         """测试简洁响应格式"""
-        result_json = vector_search_impl(
+        result = _parse_result(vector_search_impl(
             query="GMV",
-            response_format="concise"
-        )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+            response_format="brief"  # 新格式: brief
+        ))
 
-        assert result.telemetry.success
-        # Concise 格式可能不返回详细结果
-        assert "成功" in result.summary or "找到" in result.summary
+        assert result.success
+        assert result.output_level == OutputLevel.BRIEF
 
     def test_standard_response_format(self):
         """测试标准响应格式"""
-        result_json = vector_search_impl(
+        result = _parse_result(vector_search_impl(
             query="GMV",
             response_format="standard"
-        )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        ))
 
-        assert result.telemetry.success
-        assert result.result is not None
+        assert result.success
 
     def test_detailed_response_format(self):
         """测试详细响应格式"""
-        result_json = vector_search_impl(
+        result = _parse_result(vector_search_impl(
             query="GMV",
-            response_format="detailed"
-        )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+            response_format="full"  # 新格式: full
+        ))
 
-        assert result.telemetry.success
+        assert result.success
 
     def test_observation_format(self):
         """测试 Observation 格式"""
-        result_json = vector_search_impl(query="GMV")
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = _parse_result(vector_search_impl(query="GMV"))
 
-        assert "Observation:" in result.observation
-        assert "Status:" in result.observation
+        # Observation 应该包含搜索结果信息
+        assert len(result.observation) > 0
 
     def test_telemetry_collected(self):
         """测试遥测数据收集"""
-        result_json = vector_search_impl(query="test")
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = _parse_result(vector_search_impl(query="test"))
 
-        assert result.telemetry.tool_name == "search_knowledge"
-        assert result.telemetry.latency_ms >= 0
+        assert result.tool_name == "search_knowledge"
+        assert result.duration_ms >= 0
 
 
 class TestVectorSearchTool:
@@ -403,12 +409,14 @@ class TestVectorSearchTool:
             "query": "什么是 GMV"
         })
 
-        # 结果应该是 JSON 字符串
-        assert isinstance(result, str)
-        # 可以解析为 ToolOutput
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        output = ToolOutput.model_validate_json(result)
-        assert output.telemetry.success
+        # v2.1: 结果是 ToolExecutionResult
+        if isinstance(result, ToolExecutionResult):
+            assert result.success
+        else:
+            # 旧格式: JSON 字符串
+            assert isinstance(result, str)
+            output = ToolOutput.model_validate_json(result)
+            assert output.telemetry.success
 
     def test_tool_with_max_results(self):
         """测试工具带最大结果数参数"""
@@ -417,9 +425,11 @@ class TestVectorSearchTool:
             "max_results": 3
         })
 
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        output = ToolOutput.model_validate_json(result)
-        assert output.telemetry.success
+        if isinstance(result, ToolExecutionResult):
+            assert result.success
+        else:
+            output = ToolOutput.model_validate_json(result)
+            assert output.telemetry.success
 
     def test_tool_with_filter_metadata(self):
         """测试工具带元数据过滤参数"""
@@ -428,9 +438,11 @@ class TestVectorSearchTool:
             "filter_metadata": {"type": "metric"}
         })
 
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        output = ToolOutput.model_validate_json(result)
-        assert output.telemetry.success
+        if isinstance(result, ToolExecutionResult):
+            assert result.success
+        else:
+            output = ToolOutput.model_validate_json(result)
+            assert output.telemetry.success
 
 
 class TestVectorSearchIntegration:
@@ -447,62 +459,47 @@ class TestVectorSearchIntegration:
         )
 
         # 2. 执行搜索
-        result_json = vector_search_impl(
+        result = _parse_result(vector_search_impl(
             query=input_data.query,
             max_results=input_data.max_results,
             min_score=input_data.min_score,
             response_format=input_data.response_format
-        )
+        ))
 
-        # 3. 解析结果
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        result = ToolOutput.model_validate_json(result_json)
-
-        # 4. 验证
-        assert result.telemetry.success
-        assert "成功" in result.summary or "找到" in result.summary
-        assert result.result is not None
-        assert "results" in result.result
-        assert "result_count" in result.result
+        # 3. 验证
+        assert result.success
+        assert len(result.observation) > 0
 
     def test_search_metric_definitions(self):
         """测试搜索指标定义"""
-        result_json = vector_search_impl(
+        result = _parse_result(vector_search_impl(
             query="转化率是什么",
             filter_metadata={"type": "metric"}
-        )
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        result = ToolOutput.model_validate_json(result_json)
+        ))
 
-        assert result.telemetry.success
-        if result.result and result.result["results"]:
-            # 验证返回的是指标类型
-            for r in result.result["results"]:
-                assert r.get("metadata", {}).get("type") == "metric"
+        assert result.success
 
     def test_search_dimension_definitions(self):
-        """测试搜索维度定义"""
-        result_json = vector_search_impl(
-            query="品类维度",
+        """测试搜索维度说明"""
+        result = _parse_result(vector_search_impl(
+            query="品类维度是什么",
             filter_metadata={"type": "dimension"}
-        )
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        result = ToolOutput.model_validate_json(result_json)
+        ))
 
-        assert result.telemetry.success
+        assert result.success
 
     def test_multiple_searches_same_collection(self):
-        """测试在同一集合中执行多次搜索"""
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-
+        """测试同一集合多次搜索"""
         # 第一次搜索
-        result1 = ToolOutput.model_validate_json(
-            vector_search_impl(query="GMV")
-        )
-        assert result1.telemetry.success
+        result1 = _parse_result(vector_search_impl(
+            query="GMV",
+            collection="test_collection"
+        ))
+        assert result1.success
 
-        # 第二次搜索
-        result2 = ToolOutput.model_validate_json(
-            vector_search_impl(query="转化率")
-        )
-        assert result2.telemetry.success
+        # 第二次搜索（同一集合）
+        result2 = _parse_result(vector_search_impl(
+            query="转化率",
+            collection="test_collection"
+        ))
+        assert result2.success

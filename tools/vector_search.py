@@ -442,7 +442,7 @@ def vector_search_impl(
     min_score: float = 0.0,
     filter_metadata: Optional[Dict[str, Any]] = None,
     response_format: str = "standard",
-    use_pipeline: bool = False,
+    use_pipeline: bool = True,  # v2.1: 默认启用 Pipeline
 ) -> Union[str, ToolExecutionResult]:
     """
     向量检索的实现函数
@@ -454,7 +454,7 @@ def vector_search_impl(
         min_score: 最小相似度分数
         filter_metadata: 元数据过滤条件
         response_format: 响应格式
-        use_pipeline: 是否使用新 Pipeline 模型 (默认 False 保持兼容)
+        use_pipeline: 是否使用新 Pipeline 模型 (默认 True)
 
     Returns:
         搜索结果（JSON 字符串或 ToolExecutionResult）
