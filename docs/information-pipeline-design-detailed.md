@@ -671,7 +671,7 @@ class ContentBlock(BaseModel):
     cache_control: Optional[Dict[str, str]] = None
 
 class StandardMessage(BaseModel):
-    """Claude Code compatible message format (for research/debugging)"""
+    """Claude Code compatible message format (for research/debugging only)"""
     role: MessageType
     content: List[ContentBlock]
 
@@ -681,15 +681,27 @@ class StandardMessage(BaseModel):
 
     # Context
     conversation_id: str = ""
-    user_id: str ""
+    user_id: str = ""
 
-    def to_langchain_format(self) -> Dict[str, Any]:
-        """Convert to LangChain message format"""
+    def to_debug_dict(self) -> Dict[str, Any]:
+        """
+        Convert to dictionary for debugging/research.
+
+        NOTE: This does NOT produce a valid LangChain message format.
+        The name is intentionally `to_debug_dict()` to avoid confusion.
+
+        For actual LangChain messages, use:
+        - HumanMessage(content=...)
+        - AIMessage(content=..., tool_calls=...)
+        - ToolMessage(content=..., tool_call_id=...)
+        """
         return {
             "role": self.role.value,
             "content": [block.model_dump(exclude_none=True) for block in self.content],
             "timestamp": self.timestamp,
             "message_id": self.message_id,
+            "conversation_id": self.conversation_id,
+            "user_id": self.user_id,
         }
 ```
 
