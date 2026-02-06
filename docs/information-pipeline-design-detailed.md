@@ -629,10 +629,13 @@ class ContentBlock(BaseModel):
     """Standardized content block (research/debugging only)"""
     type: ContentBlockType
 
-    # Text content
+    # Generic content field (used by most block types)
+    content: Optional[str] = None
+
+    # Text content (alias for TEXT type, can use 'content' instead)
     text: Optional[str] = None
 
-    # Thinking content
+    # Thinking content (for THINKING type)
     thinking: Optional[str] = None
 
     # Tool use specific
