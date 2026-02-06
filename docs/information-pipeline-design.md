@@ -1,7 +1,7 @@
 # BA-Agent Information Pipeline Design
 
-> **Version**: v1.6
-> **Status**: Production-Ready
+> **Version**: v1.7
+> **Status**: Production-Grade
 > **Last Updated**: 2026-02-05
 
 ---
@@ -380,6 +380,15 @@ class DataStorage:
 
 ## 版本历史
 
+### v1.7 (2026-02-05) - 生产级完整性
+**6 项新增**:
+1. 文件清理策略（时间 + 大小 + LRU）
+2. Activation Chain 完整管理（push/pop）
+3. 增强的上下文压缩（重要性评分）
+4. 完整线程安全（ThreadSafeContainer）
+5. Schema 版本控制（迁移支持）
+6. 可观测性配置（OpenTelemetry）
+
 ### v1.6 (2026-02-05) - 生产环境增强
 
 **9 项关键改进**:
@@ -451,6 +460,6 @@ FULL:     "[{\"id\": 1, \"name\": \"Alice\"}, ...]"  # 完整 JSON
 
 ---
 
-**文档版本**: v1.6 (Simplified)
-**原始版本**: 2120 行 → **精简版本**: ~550 行
-**压缩率**: ~74%
+**文档版本**: v1.7 (Simplified)
+**详细版**: 2924 行 | **简化版**: ~460 行
+**双文档结构**: 快速参考 + 完整实现
