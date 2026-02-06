@@ -1,7 +1,7 @@
 # BA-Agent Information Pipeline Design Document
 
 > **Date**: 2026-02-05
-> **Version**: v1.9.3 (Refactored - P1 Improvements)
+> **Version**: v1.9.4 (Refactored - P2 Config Unification)
 > **Author**: BA-Agent Development Team
 > **Status**: Design Phase
 
@@ -13,12 +13,77 @@
 2. [Core Concepts Clarification](#core-concepts-clarification)
 3. [Claude Code Research Findings](#claude-code-research-findings)
 4. [Proposed Information Pipeline Architecture](#proposed-information-pipeline-architecture)
+5. [Configuration Classes](#configuration-classes)
 5. [Message Format Specifications](#message-format-specifications)
 6. [Tool ↔ Agent Communication Protocol](#tool--agent-communication-protocol)
 7. [Skill ↔ Agent Communication Protocol](#skill--agent-communication-protocol)
 8. [Multi-Round Conversation Flow](#multi-round-conversation-flow)
 9. [Context Management Strategy](#context-management-strategy)
 10. [Implementation Roadmap](#implementation-roadmap)
+
+---
+
+## Configuration Classes
+
+> **v1.9.4 新增**: 统一的配置类架构
+
+所有配置类都实现了统一的接口：
+
+```python
+class BaseConfig(ABC):
+    """配置类基类接口"""
+
+    @abstractmethod
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典（用于序列化）"""
+        ...
+
+    @classmethod
+    @abstractmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "BaseConfig":
+        """从字典创建配置"""
+        ...
+
+    @abstractmethod
+    def validate(self) -> bool:
+        """验证配置有效性"""
+        ...
+```
+
+### 配置类列表
+
+| 配置类 | 用途 | 格式 |
+|--------|------|------|
+| `EncoderConfig` | Token 编码器配置 | @dataclass |
+| `ContextCompressionConfig` | 上下文压缩配置 | 普通类 |
+| `ObservabilityConfig` | 可观测性配置 | @dataclass |
+
+### 统一方法
+
+所有配置类支持：
+- `to_dict()`: 序列化为字典
+- `from_dict()`: 从字典反序列化
+- `validate()`: 验证配置有效性
+
+### 使用示例
+
+```python
+# 序列化配置
+config = ContextCompressionConfig()
+config_dict = config.to_dict()
+
+# 保存到文件
+import json
+with open("config.json", "w") as f:
+    json.dump(config_dict, f)
+
+# 从文件加载
+with open("config.json") as f:
+    loaded = ContextCompressionConfig.from_dict(json.load(f))
+
+# 验证配置
+loaded.validate()  # 抛出 ValueError 如果无效
+```
 
 ---
 
@@ -1773,6 +1838,30 @@ class EncoderConfig:
         if self.encoder_params is None:
             self.encoder_params = {}
 
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            "model_family": self.model_family.value,
+            "encoding_name": self.encoding_name,
+            "safety_margin": self.safety_margin,
+            "use_exact_counting": self.use_exact_counting,
+            "exact_counting_api": self.exact_counting_api,
+            "encoder_params": self.encoder_params,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "EncoderConfig":
+        """从字典创建配置"""
+        if "model_family" in data and isinstance(data["model_family"], str):
+            data["model_family"] = ModelFamily(data["model_family"])
+        return cls(**data)
+
+    def validate(self) -> bool:
+        """验证配置有效性"""
+        if self.safety_margin < 1.0:
+            raise ValueError("safety_margin must be >= 1.0")
+        return True
+
 class TokenEncoder(Protocol):
     """Token 编码器协议"""
 
@@ -2910,7 +2999,7 @@ class SummaryCache(TTLCache[str, Dict[str, Any]]):
         self.set(key, value)
 
 class ContextCompressionConfig:
-    """上下文压缩配置"""
+    """上下文压缩配置 - 统一的配置基类"""
 
     def __init__(
         self,
@@ -2925,6 +3014,34 @@ class ContextCompressionConfig:
         self.llm_threshold = llm_summarization_threshold
         self.summary_cache_ttl = summary_cache_ttl
         self.max_cost_per_hour = max_compression_cost_per_hour
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典（用于序列化）"""
+        return {
+            "strategy": self.strategy.value if isinstance(self.strategy, Enum) else self.strategy,
+            "enable_llm_summarization": self.enable_llm_summarization,
+            "llm_threshold": self.llm_threshold,
+            "summary_cache_ttl": self.summary_cache_ttl,
+            "max_cost_per_hour": self.max_cost_per_hour,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ContextCompressionConfig":
+        """从字典创建配置"""
+        # 处理枚举
+        if "strategy" in data and isinstance(data["strategy"], str):
+            data["strategy"] = ContextCompressionStrategy(data["strategy"])
+        return cls(**data)
+
+    def validate(self) -> bool:
+        """验证配置有效性"""
+        if self.llm_threshold < 0:
+            raise ValueError("llm_threshold must be non-negative")
+        if self.summary_cache_ttl < 0:
+            raise ValueError("summary_cache_ttl must be non-negative")
+        if self.max_cost_per_hour < 0:
+            raise ValueError("max_cost_per_hour must be non-negative")
+        return True
 
 class AdvancedContextManager:
     """
@@ -4059,6 +4176,33 @@ class ObservabilityConfig:
         }
         return sampling_map.get(self.trace_sampling, 0.1)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        from dataclasses import asdict
+        data = asdict(self)
+        # 处理枚举
+        data["trace_sampling"] = self.trace_sampling.value
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ObservabilityConfig":
+        """从字典创建配置"""
+        if "trace_sampling" in data and isinstance(data["trace_sampling"], str):
+            data = data.copy()
+            data["trace_sampling"] = TraceSampling(data["trace_sampling"])
+        return cls(**data)
+
+    def validate(self) -> bool:
+        """验证配置有效性"""
+        valid_log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        if self.log_level.upper() not in valid_log_levels:
+            raise ValueError(f"Invalid log_level: {self.log_level}")
+        if self.log_format not in ["json", "text"]:
+            raise ValueError(f"Invalid log_format: {self.log_format}")
+        if self.metrics_export_interval_s <= 0:
+            raise ValueError("metrics_export_interval_s must be positive")
+        return True
+
 # 全局可观测性配置
 _global_observability_config: Optional[ObservabilityConfig] = None
 
@@ -4143,6 +4287,32 @@ Research sources for this design:
 ---
 
 ## Change History
+
+### v1.9.4 (2026-02-06) - P2 Configuration Unification
+
+**统一配置类接口，添加配置序列化支持。**
+
+**新增功能**:
+
+1. **统一配置类接口**
+   - `to_dict()`: 序列化为字典
+   - `from_dict()`: 从字典反序列化
+   - `validate()`: 验证配置有效性
+
+2. **配置类更新**
+   - `EncoderConfig`: 添加 to_dict/from_dict/validate
+   - `ContextCompressionConfig`: 添加 to_dict/from_dict/validate
+   - `ObservabilityConfig`: 添加 to_dict/from_dict/validate
+
+3. **配置类文档**
+   - 新增 "Configuration Classes" 章节
+   - 统一接口说明
+   - 使用示例
+
+**文档优化**:
+- 添加配置类统一接口文档
+- 添加配置序列化示例
+- 统一配置验证逻辑
 
 ### v1.9.3 (2026-02-06) - P1 Code Quality Improvements
 

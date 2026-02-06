@@ -1,6 +1,6 @@
 # BA-Agent Information Pipeline Design
 
-> **Version**: v1.9.3
+> **Version**: v1.9.4
 > **Status**: Production-Grade
 > **Last Updated**: 2026-02-06
 
@@ -379,6 +379,11 @@ class DataStorage:
 ---
 
 ## 版本历史
+
+### v1.9.4 (2026-02-06) - P2 配置类统一
+**新增**:
+1. 统一配置类接口（to_dict/from_dict/validate）
+2. EncoderConfig, ContextCompressionConfig, ObservabilityConfig 更新
 
 ### v1.9.3 (2026-02-06) - P1 代码质量改进
 **新增**:
