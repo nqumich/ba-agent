@@ -1043,12 +1043,44 @@ class ToolTimeoutHandler:
 
 ```python
 class ToolErrorType(str, Enum):
-    """Standardized error types"""
-    PERMISSION_DENIED = "permission_denied"
-    TIMEOUT = "timeout"
-    INVALID_PARAMETERS = "invalid_parameters"
-    EXECUTION_ERROR = "execution_error"
-    RESOURCE_ERROR = "resource_error"
+    """Standardized error types with retry classification"""
+
+    # 可重试错误 (Transient)
+    TIMEOUT = "timeout"                      # 超时
+    RATE_LIMIT = "rate_limit"                # 速率限制
+    RESOURCE_ERROR = "resource_error"        # 资源暂时不可用
+    TRANSIENT_ERROR = "transient_error"      # 其他临时错误
+
+    # 不可重试错误 (Permanent)
+    PERMISSION_DENIED = "permission_denied"  # 权限不足
+    INVALID_PARAMETERS = "invalid_parameters"  # 参数错误
+    NOT_FOUND = "not_found"                  # 资源不存在
+    VALIDATION_ERROR = "validation_error"    # 验证失败
+
+    # 执行错误 (需人工介入)
+    EXECUTION_ERROR = "execution_error"      # 执行失败
+    INTERNAL_ERROR = "internal_error"        # 内部错误
+    DEPENDENCY_ERROR = "dependency_error"    # 依赖服务错误
+
+    @property
+    def is_retryable(self) -> bool:
+        """检查错误是否可重试"""
+        return self in {
+            self.TIMEOUT,
+            self.RATE_LIMIT,
+            self.RESOURCE_ERROR,
+            self.TRANSIENT_ERROR,
+        }
+
+    @property
+    def is_permanent(self) -> bool:
+        """检查错误是否永久性（不可重试）"""
+        return self in {
+            self.PERMISSION_DENIED,
+            self.INVALID_PARAMETERS,
+            self.NOT_FOUND,
+            self.VALIDATION_ERROR,
+        }
 
 class ToolErrorResponse(BaseModel):
     """Standardized error response"""
@@ -1057,6 +1089,11 @@ class ToolErrorResponse(BaseModel):
     error_code: str
     error_message: str
 
+    @property
+    def should_retry(self) -> bool:
+        """是否应该重试"""
+        return self.error_type.is_retryable
+
     def to_result(self) -> ToolExecutionResult:
         """Convert to ToolExecutionResult"""
         return ToolExecutionResult(
@@ -1064,8 +1101,125 @@ class ToolErrorResponse(BaseModel):
             observation=f"Tool Error [{self.error_code}]: {self.error_message}",
             success=False,
             error_code=self.error_code,
+            error_type=self.error_type.value,
             error_message=self.error_message
         )
+```
+
+### Idempotency Support
+
+```python
+class ToolInvocationRequest(BaseModel):
+    """Request format when Agent calls a tool"""
+    request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    # Tool identification
+    tool_name: str
+    tool_version: str = "1.0.0"
+
+    # Parameters
+    parameters: Dict[str, Any]
+
+    # Output level control
+    output_level: Optional[OutputLevel] = None
+
+    # Execution context
+    timeout_ms: int = 120000
+    retry_on_timeout: bool = True
+
+    # Storage context
+    storage_dir: Optional[str] = None
+
+    # Security
+    caller_id: str
+    permission_level: str = "default"
+
+    # Idempotency support
+    idempotency_key: Optional[str] = None
+
+    def get_effective_output_level(
+        self,
+        tool_config_default: Optional[OutputLevel] = None,
+        global_default: OutputLevel = OutputLevel.STANDARD,
+        context_window_usage: float = 0.0
+    ) -> OutputLevel:
+        """Determine effective output level with fallback chain"""
+        if self.output_level is not None:
+            return self.output_level
+        if tool_config_default is not None:
+            return tool_config_default
+        if context_window_usage > 0.8:
+            return OutputLevel.BRIEF
+        return global_default
+
+    def get_or_generate_idempotency_key(self) -> str:
+        """获取或生成幂等键"""
+        if self.idempotency_key is None:
+            # 基于参数自动生成幂等键
+            params_str = json.dumps(self.parameters, sort_keys=True)
+            key_content = f"{self.tool_name}:{params_str}:{self.tool_version}"
+            self.idempotency_key = hashlib.sha256(key_content.encode()).hexdigest()[:16]
+        return self.idempotency_key
+
+class IdempotencyCache:
+    """幂等性缓存 - 防止重复执行"""
+
+    def __init__(self, ttl_seconds: int = 3600, max_entries: int = 10000):
+        self._cache: Dict[str, ToolExecutionResult] = {}
+        self._timestamps: Dict[str, datetime] = {}
+        self._ttl = timedelta(seconds=ttl_seconds)
+        self._max_entries = max_entries
+        self._lock = threading.Lock()
+
+    def get_cached_result(self, key: str) -> Optional[ToolExecutionResult]:
+        """获取缓存结果"""
+        with self._lock:
+            if key in self._cache:
+                if datetime.now() - self._timestamps[key] < self._ttl:
+                    logger.debug(f"Idempotency cache hit: {key}")
+                    return self._cache[key]
+                else:
+                    # 过期，清理
+                    del self._cache[key]
+                    del self._timestamps[key]
+            return None
+
+    def cache_result(self, key: str, result: ToolExecutionResult):
+        """缓存结果"""
+        with self._lock:
+            self._cache[key] = result
+            self._timestamps[key] = datetime.now()
+
+            # 清理过期条目
+            if len(self._cache) > self._max_entries:
+                self._cleanup_expired()
+
+    def _cleanup_expired(self):
+        """清理过期条目"""
+        now = datetime.now()
+        expired_keys = [
+            k for k, ts in self._timestamps.items()
+            if now - ts > self._ttl
+        ]
+        for key in expired_keys:
+            del self._cache[key]
+            del self._timestamps[key]
+
+    def clear(self):
+        """清空缓存"""
+        with self._lock:
+            self._cache.clear()
+            self._timestamps.clear()
+
+# 全局幂等性缓存
+_global_idempotency_cache: Optional[IdempotencyCache] = None
+
+def get_idempotency_cache() -> IdempotencyCache:
+    """获取全局幂等性缓存"""
+    global _global_idempotency_cache
+    if _global_idempotency_cache is None:
+        _global_idempotency_cache = IdempotencyCache()
+    return _global_idempotency_cache
 ```
 
 ---
@@ -1260,55 +1414,148 @@ class SkillLoader:
 ```python
 import threading
 from contextlib import contextmanager
-from functools import lru_cache
-import asyncio
+from typing import Dict, Optional
+
+class LockManager:
+    """
+    安全的锁管理器，带引用计数
+
+    解决 LRU 缓存驱逐锁的潜在问题：
+    - 被驱逐的锁仍可能被线程持有
+    - 新请求创建新锁，导致两个线程同时进入"临界区"
+    - 使用引用计数确保只驱逐未被使用的锁
+    """
+
+    def __init__(self, max_locks: int = 1000):
+        self._locks: Dict[str, threading.RLock] = {}
+        self._ref_counts: Dict[str, int] = {}
+        self._manager_lock = threading.Lock()
+        self._max_locks = max_locks
+
+    @contextmanager
+    def acquire(self, key: str, timeout: Optional[float] = None):
+        """
+        获取锁（带引用计数）
+
+        Args:
+            key: 锁的唯一标识
+            timeout: 获取锁的超时时间（秒）
+
+        Yields:
+            RLock 对象
+        """
+        lock = self._get_or_create_lock(key)
+        acquired = lock.acquire(timeout=timeout)
+        if not acquired:
+            raise TimeoutError(f"Failed to acquire lock for {key}")
+
+        try:
+            yield lock
+        finally:
+            lock.release()
+            self._release_ref(key)
+
+            # 检查是否需要清理
+            self._maybe_evict_locks()
+
+    def _get_or_create_lock(self, key: str) -> threading.RLock:
+        """获取或创建锁（增加引用计数）"""
+        with self._manager_lock:
+            if key not in self._locks:
+                # 检查是否需要驱逐旧锁
+                if len(self._locks) >= self._max_locks:
+                    self._evict_unused_locks()
+
+                self._locks[key] = threading.RLock()
+                self._ref_counts[key] = 0
+
+            self._ref_counts[key] += 1
+            return self._locks[key]
+
+    def _release_ref(self, key: str):
+        """释放引用（减少引用计数）"""
+        with self._manager_lock:
+            if key in self._ref_counts:
+                self._ref_counts[key] -= 1
+
+    def _evict_unused_locks(self):
+        """只驱逐引用计数为 0 的锁"""
+        to_remove = [
+            k for k, v in self._ref_counts.items()
+            if v == 0
+        ][:len(self._locks) // 4]  # 每次清理 25%
+
+        for key in to_remove:
+            del self._locks[key]
+            del self._ref_counts[key]
+
+        if to_remove:
+            logger.debug(f"Evicted {len(to_remove)} unused locks")
+
+    def get_ref_count(self, key: str) -> int:
+        """获取当前引用计数"""
+        with self._manager_lock:
+            return self._ref_counts.get(key, 0)
+
+    def cleanup(self, key: str):
+        """
+        显式清理指定锁（仅当引用计数为 0 时）
+
+        Args:
+            key: 要清理的锁标识
+
+        Returns:
+            是否成功清理
+        """
+        with self._manager_lock:
+            if self._ref_counts.get(key, 0) == 0:
+                if key in self._locks:
+                    del self._locks[key]
+                if key in self._ref_counts:
+                    del self._ref_counts[key]
+                return True
+            return False
+
+    def clear_all(self):
+        """清空所有锁（危险操作，仅在关闭时使用）"""
+        with self._manager_lock:
+            self._locks.clear()
+            self._ref_counts.clear()
+
+# 全局锁管理器实例
+_global_lock_manager: Optional[LockManager] = None
+
+def get_lock_manager() -> LockManager:
+    """获取全局锁管理器"""
+    global _global_lock_manager
+    if _global_lock_manager is None:
+        _global_lock_manager = LockManager()
+    return _global_lock_manager
 
 class MessageInjectionProtocol:
     """
     Protocol for injecting skill messages into conversation.
 
     Thread-safe with atomic state updates.
-    Uses LRU cache for locks to prevent unbounded growth.
+    Uses LockManager with reference counting for safe lock eviction.
     """
 
-    # Use LRU cache to limit lock storage (max 1000 conversations)
-    @classmethod
-    @lru_cache(maxsize=1000)
-    def _get_lock(cls, conversation_id: str) -> threading.Lock:
-        """Get or create lock for conversation (cached with LRU)"""
-        return threading.Lock()
-
-    @classmethod
+    @staticmethod
     @contextmanager
-    def _conversation_lock(cls, conversation_id: str):
-        """Get or create lock for conversation"""
-        lock = cls._get_lock(conversation_id)
-        lock.acquire()
-        try:
-            yield
-        finally:
-            lock.release()
+    def _conversation_lock(conversation_id: str, lock_manager: Optional[LockManager] = None):
+        """Get or create lock for conversation using LockManager"""
+        if lock_manager is None:
+            lock_manager = get_lock_manager()
 
-    @classmethod
-    def cleanup_lock(cls, conversation_id: str) -> bool:
-        """
-        Explicitly cleanup lock for a conversation.
-
-        Note: With LRU cache, locks are automatically evicted when cache is full.
-        This method is for explicit cleanup when conversation ends.
-        """
-        try:
-            # Clear from LRU cache
-            cls._get_lock.cache_clear()
-            return True
-        except Exception:
-            return False
+        with lock_manager.acquire(conversation_id) as lock:
+            yield lock
 
     @staticmethod
     def inject_into_state(
         messages: List[Dict[str, Any]],
         conversation_id: str,
-        agent_state: Any
+        agent_state: Any,
+        lock_manager: Optional[LockManager] = None
     ) -> bool:
         """
         Thread-safely inject messages into LangGraph agent state.
@@ -1317,11 +1564,12 @@ class MessageInjectionProtocol:
             messages: Messages to inject (from SkillActivationResult)
             conversation_id: Conversation ID
             agent_state: Current agent state
+            lock_manager: Optional lock manager (uses global if None)
 
         Returns:
             Success status
         """
-        with MessageInjectionProtocol._conversation_lock(conversation_id):
+        with MessageInjectionProtocol._conversation_lock(conversation_id, lock_manager):
             try:
                 # Atomic state read
                 state = agent_state.get_state({"configurable": {"thread_id": conversation_id}})
@@ -1361,16 +1609,21 @@ class MessageInjectionProtocol:
 ```python
 import tiktoken
 from functools import lru_cache
+import anthropic
 
 class TokenCounter:
     """
     Accurate token counting for LLM messages.
 
-    Uses tiktoken for precise token counting instead of character estimation.
+    Note on Claude token counting:
+    - Claude uses a different tokenizer than OpenAI's cl100k_base
+    - For production accuracy, use Anthropic's count_tokens API
+    - For estimation, tiktoken with safety margin provides acceptable results
     """
 
     # Cache encoders (per model)
     _encoders: Dict[str, Any] = {}
+    _anthropic_client: Optional[anthropic.Anthropic] = None
 
     @classmethod
     def get_encoder(cls, model: str = "claude-3"):
@@ -1378,23 +1631,41 @@ class TokenCounter:
         Get tokenizer for model.
 
         Supports:
-        - claude-3: cl100k_base encoding
-        - gpt-4: cl100k_base encoding
-        - gpt-3.5: cl100k_base encoding
+        - claude-3: tiktoken cl100k_base with 15% safety margin
+        - claude-3.5: tiktoken cl100k_base with 15% safety margin
+        - claude-3-opus: tiktoken cl100k_base with 15% safety margin
+        - gpt-4: tiktoken cl100k_base (accurate)
+        - gpt-3.5: tiktoken cl100k_base (accurate)
+
+        Note: Claude token counts are estimates. For production accuracy,
+        configure an Anthropic API key to use the count_tokens endpoint.
         """
         if model not in cls._encoders:
-            # Map to tiktoken encoding name
-            encoding_map = {
-                "claude-3": "cl100k_base",
-                "claude-3.5": "cl100k_base",
-                "claude-3-opus": "cl100k_base",
-                "claude-3-sonnet": "cl100k_base",
-                "gpt-4": "cl100k_base",
-                "gpt-3.5-turbo": "cl100k_base",
-            }
-            encoding_name = encoding_map.get(model, "cl100k_base")
-            cls._encoders[model] = tiktoken.get_encoding(encoding_name)
+            if model.startswith("claude"):
+                # Claude: Use tiktoken with safety margin
+                # cl100k_base is OpenAI's encoding but provides reasonable estimates
+                encoding_name = "cl100k_base"
+                cls._encoders[model] = {
+                    "encoder": tiktoken.get_encoding(encoding_name),
+                    "safety_margin": 1.15,  # 15% margin for Claude
+                }
+            else:
+                # OpenAI models: Accurate counting
+                encoding_map = {
+                    "gpt-4": "cl100k_base",
+                    "gpt-3.5-turbo": "cl100k_base",
+                }
+                encoding_name = encoding_map.get(model, "cl100k_base")
+                cls._encoders[model] = {
+                    "encoder": tiktoken.get_encoding(encoding_name),
+                    "safety_margin": 1.0,  # No margin for OpenAI
+                }
         return cls._encoders[model]
+
+    @classmethod
+    def set_anthropic_client(cls, api_key: str):
+        """Configure Anthropic client for accurate token counting"""
+        cls._anthropic_client = anthropic.Anthropic(api_key=api_key)
 
     @classmethod
     def count_tokens(cls, text: str, model: str = "claude-3") -> int:
@@ -1406,10 +1677,62 @@ class TokenCounter:
             model: Model name (affects encoding)
 
         Returns:
-            Exact token count
+            Estimated token count (with safety margin for Claude)
+
+        Note: For Claude, this is an estimate. For exact counts:
+        1. Configure Anthropic API key with set_anthropic_client()
+        2. Use count_tokens_exact() method instead
         """
-        encoder = cls.get_encoder(model)
-        return len(encoder.encode(text))
+        # Try exact counting for Claude if API is available
+        if model.startswith("claude") and cls._anthropic_client is not None:
+            try:
+                return cls.count_tokens_exact(text, model)
+            except Exception as e:
+                logger.warning(f"Exact token counting failed, using estimate: {e}")
+
+        # Use tiktoken estimate
+        encoder_info = cls.get_encoder(model)
+        encoder = encoder_info["encoder"]
+        margin = encoder_info["safety_margin"]
+
+        estimated = len(encoder.encode(text))
+        return int(estimated * margin)
+
+    @classmethod
+    def count_tokens_exact(cls, text: str, model: str = "claude-3") -> int:
+        """
+        Count tokens exactly using Anthropic API.
+
+        Requires Anthropic API key to be configured.
+
+        Args:
+            text: Text to count
+            model: Model name
+
+        Returns:
+            Exact token count
+
+        Raises:
+            ValueError: If Anthropic client is not configured
+        """
+        if cls._anthropic_client is None:
+            raise ValueError(
+                "Anthropic client not configured. "
+                "Use TokenCounter.set_anthropic_client(api_key) first."
+            )
+
+        try:
+            # Use Anthropic's count_tokens endpoint (when available)
+            # For now, we'll use the tokenizer with a note
+            # TODO: Update when Anthropic adds count_tokens to the API
+            logger.warning(
+                "Anthropic count_tokens API not yet available. "
+                "Using estimate with safety margin."
+            )
+            return cls.count_tokens(text, model)
+        except Exception as e:
+            logger.error(f"Exact token counting failed: {e}")
+            raise
 
     @classmethod
     def count_message_tokens(
@@ -1928,7 +2251,7 @@ class DataFileManager:
     清理策略：
     1. 基于时间：清理超过 max_age_hours 的文件
     2. 基于大小：当总大小超过 max_size_gb 时，按 LRU 清理
-    3. 定期清理：每小时执行一次
+    3. 定期清理：每小时执行一次（使用守护线程）
     """
 
     STORAGE_DIR = Path("tool_data")
@@ -1938,7 +2261,8 @@ class DataFileManager:
         self,
         max_age_hours: int = 24,
         max_size_gb: int = 10,
-        cleanup_interval_seconds: int = 3600
+        cleanup_interval_seconds: int = 3600,
+        auto_start: bool = True
     ):
         self.max_age = timedelta(hours=max_age_hours)
         self.max_size_bytes = max_size_gb * 1024 * 1024 * 1024
@@ -1946,24 +2270,69 @@ class DataFileManager:
         self._lock = threading.Lock()
         self._metadata: Dict[str, Dict] = {}
 
-        # 启动后台清理任务
-        self._start_cleanup_task()
+        self._cleanup_thread: Optional[threading.Thread] = None
+        self._shutdown_event = threading.Event()
 
-    def _start_cleanup_task(self):
-        """启动后台清理任务"""
-        import asyncio
+        # 自动启动后台清理任务
+        if auto_start:
+            self.start_cleanup_daemon()
 
-        async def cleanup_loop():
-            while True:
-                try:
-                    await asyncio.sleep(self.cleanup_interval)
-                    self.cleanup_expired()
-                    self.cleanup_by_size()
-                except Exception as e:
-                    logger.error(f"Cleanup task error: {e}")
+    def start_cleanup_daemon(self):
+        """显式启动清理守护线程（线程安全）"""
+        with self._lock:
+            if self._cleanup_thread is not None:
+                logger.warning("Cleanup daemon already running")
+                return
 
-        # 在实际应用中，应该在单独的线程/进程中运行
-        asyncio.create_task(cleanup_loop())
+            def cleanup_thread_func():
+                """后台清理线程主循环"""
+                logger.info("Starting data file cleanup daemon")
+                while not self._shutdown_event.is_set():
+                    try:
+                        self.cleanup_expired()
+                        self.cleanup_by_size()
+                    except Exception as e:
+                        logger.error(f"Cleanup task error: {e}")
+
+                    # 等待指定间隔或直到关闭事件
+                    self._shutdown_event.wait(self.cleanup_interval)
+
+                logger.info("Data file cleanup daemon stopped")
+
+            self._cleanup_thread = threading.Thread(
+                target=cleanup_thread_func,
+                daemon=True,
+                name="DataFileManager-Cleanup"
+            )
+            self._cleanup_thread.start()
+
+    def stop_cleanup_daemon(self, timeout: float = 5.0):
+        """
+        停止清理守护线程（优雅关闭）
+
+        Args:
+            timeout: 等待线程结束的超时时间（秒）
+        """
+        with self._lock:
+            if self._cleanup_thread is None:
+                return
+
+        self._shutdown_event.set()
+
+        if self._cleanup_thread is not None:
+            self._cleanup_thread.join(timeout=timeout)
+            with self._lock:
+                self._cleanup_thread = None
+
+        logger.info("Cleanup daemon stopped")
+
+    def __enter__(self):
+        """支持上下文管理器"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """退出时自动停止清理线程"""
+        self.stop_cleanup_daemon()
 
     def register_file(self, file_path: str, metadata: Dict):
         """注册新文件，记录元数据"""
