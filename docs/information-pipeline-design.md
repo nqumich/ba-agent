@@ -1,6 +1,6 @@
 # BA-Agent Information Pipeline Design
 
-> **Version**: v1.9.2
+> **Version**: v1.9.3
 > **Status**: Production-Grade
 > **Last Updated**: 2026-02-06
 
@@ -379,6 +379,12 @@ class DataStorage:
 ---
 
 ## 版本历史
+
+### v1.9.3 (2026-02-06) - P1 代码质量改进
+**新增**:
+1. TTLCache 基类 - 泛型缓存抽象
+2. IdempotencyCache / SummaryCache 重构
+3. ThreadSafeMixin - 统一锁管理
 
 ### v1.9.2 (2026-02-06) - P0 冗余消除
 **修复**:

@@ -1,7 +1,7 @@
 # BA-Agent Information Pipeline Design Document
 
 > **Date**: 2026-02-05
-> **Version**: v1.9.2 (Refactored - Consolidated Redundancies)
+> **Version**: v1.9.3 (Refactored - P1 Improvements)
 > **Author**: BA-Agent Development Team
 > **Status**: Design Phase
 
@@ -1161,22 +1161,57 @@ class ToolInvocationRequest(BaseModel):
             self.idempotency_key = hashlib.sha256(key_content.encode()).hexdigest()[:16]
         return self.idempotency_key
 
-class IdempotencyCache:
-    """幂等性缓存 - 防止重复执行"""
+# ========== 通用 TTL 缓存基类 ==========
+from typing import TypeVar, Generic, ABC
+from datetime import datetime, timedelta
+import threading
+import logging
 
-    def __init__(self, ttl_seconds: int = 3600, max_entries: int = 10000):
-        self._cache: Dict[str, ToolExecutionResult] = {}
-        self._timestamps: Dict[str, datetime] = {}
-        self._ttl = timedelta(seconds=ttl_seconds)
+logger = logging.getLogger(__name__)
+
+# 泛型类型变量
+K = TypeVar('K')  # 键类型
+V = TypeVar('V')  # 值类型
+
+class TTLCache(Generic[K, V], ABC):
+    """
+    通用 TTL 缓存基类
+
+    特性：
+    - 泛型键值对支持
+    - 自动过期清理
+    - 线程安全
+    - 最大条目限制
+    """
+
+    def __init__(self, ttl: timedelta, max_entries: int = 1000):
+        """
+        初始化 TTL 缓存
+
+        Args:
+            ttl: 条目过期时间
+            max_entries: 最大条目数
+        """
+        self._cache: Dict[K, V] = {}
+        self._timestamps: Dict[K, datetime] = {}
+        self._ttl = ttl
         self._max_entries = max_entries
         self._lock = threading.Lock()
 
-    def get_cached_result(self, key: str) -> Optional[ToolExecutionResult]:
-        """获取缓存结果"""
+    def get(self, key: K) -> Optional[V]:
+        """
+        获取缓存值
+
+        Args:
+            key: 缓存键
+
+        Returns:
+            缓存值，如果不存在或已过期则返回 None
+        """
         with self._lock:
             if key in self._cache:
                 if datetime.now() - self._timestamps[key] < self._ttl:
-                    logger.debug(f"Idempotency cache hit: {key}")
+                    logger.debug(f"Cache hit: {key}")
                     return self._cache[key]
                 else:
                     # 过期，清理
@@ -1184,10 +1219,16 @@ class IdempotencyCache:
                     del self._timestamps[key]
             return None
 
-    def cache_result(self, key: str, result: ToolExecutionResult):
-        """缓存结果"""
+    def set(self, key: K, value: V):
+        """
+        设置缓存值
+
+        Args:
+            key: 缓存键
+            value: 缓存值
+        """
         with self._lock:
-            self._cache[key] = result
+            self._cache[key] = value
             self._timestamps[key] = datetime.now()
 
             # 清理过期条目
@@ -1205,11 +1246,52 @@ class IdempotencyCache:
             del self._cache[key]
             del self._timestamps[key]
 
+        logger.debug(f"Cleaned up {len(expired_keys)} expired entries")
+
     def clear(self):
         """清空缓存"""
         with self._lock:
             self._cache.clear()
             self._timestamps.clear()
+
+    def size(self) -> int:
+        """获取当前缓存大小"""
+        with self._lock:
+            return len(self._cache)
+
+    def __contains__(self, key: K) -> bool:
+        """检查键是否存在（且未过期）"""
+        return self.get(key) is not None
+
+
+class IdempotencyCache(TTLCache[str, ToolExecutionResult]):
+    """
+    幂等性缓存 - 防止重复执行
+
+    继承 TTLCache 基类，特化用于工具执行结果缓存。
+    """
+
+    def __init__(self, ttl_seconds: int = 3600, max_entries: int = 10000):
+        """
+        初始化幂等性缓存
+
+        Args:
+            ttl_seconds: TTL 秒数（默认 1 小时）
+            max_entries: 最大条目数（默认 10000）
+        """
+        super().__init__(
+            ttl=timedelta(seconds=ttl_seconds),
+            max_entries=max_entries
+        )
+
+    def get_cached_result(self, key: str) -> Optional[ToolExecutionResult]:
+        """获取缓存的结果（语义化方法名）"""
+        return self.get(key)
+
+    def cache_result(self, key: str, result: ToolExecutionResult):
+        """缓存结果（语义化方法名）"""
+        self.set(key, result)
+
 
 # 全局幂等性缓存
 _global_idempotency_cache: Optional[IdempotencyCache] = None
@@ -1531,6 +1613,51 @@ def get_lock_manager() -> LockManager:
     if _global_lock_manager is None:
         _global_lock_manager = LockManager()
     return _global_lock_manager
+
+
+# ========== 线程安全 Mixin ==========
+class ThreadSafeMixin:
+    """
+    线程安全混入类（Mixin）
+
+    为类提供简单的线程安全支持。
+
+    使用示例：
+    ```python
+    class MyClass(ThreadSafeMixin):
+        def __init__(self):
+            super().__init__()  # 初始化 _lock
+            self._data = []
+
+        def add_item(self, item):
+            with self._lock:
+                self._data.append(item)
+    ```
+    """
+
+    def __init__(self):
+        """
+        初始化 Mixin
+
+        注意：子类必须调用 super().__init__()
+        """
+        self._lock = threading.Lock()
+
+    @contextmanager
+    def _with_lock(self):
+        """
+        获取锁的上下文管理器
+
+        Usage:
+            with self._with_lock():
+                # 临界区代码
+        """
+        self._lock.acquire()
+        try:
+            yield
+        finally:
+            self._lock.release()
+
 
 class MessageInjectionProtocol:
     """
@@ -2704,33 +2831,59 @@ class LLMCompressor:
 
         return "\n".join(key_info) if key_info else "[对话摘要不可用]"
 
-class SummaryCache:
-    """摘要缓存 - 避免重复摘要"""
+class SummaryCache(TTLCache[str, Dict[str, Any]]):
+    """
+    摘要缓存 - 避免重复摘要
 
-    def __init__(self, max_entries: int = 1000, ttl_hours: int = 24):
-        self._cache: Dict[str, Dict] = {}
-        self._timestamps: Dict[str, datetime] = {}
-        self._max_entries = max_entries
-        self._ttl = timedelta(hours=ttl_hours)
-        self._lock = threading.Lock()
+    继承 TTLCache 基类，特化用于 LLM 摘要缓存。
+
+    缓存值格式：
+    ```python
+    {
+        "summary": str,           # 摘要内容
+        "timestamp": str,         # ISO 格式时间戳
+        "metadata": Dict          # 可选元数据
+    }
+    ```
+    """
+
+    def __init__(self, ttl_hours: int = 24, max_entries: int = 1000):
+        """
+        初始化摘要缓存
+
+        Args:
+            ttl_hours: TTL 小时数（默认 24 小时）
+            max_entries: 最大条目数（默认 1000）
+        """
+        super().__init__(
+            ttl=timedelta(hours=ttl_hours),
+            max_entries=max_entries
+        )
+
+    def _make_key(self, conversation_id: str, message_hash: str) -> str:
+        """生成缓存键"""
+        return f"{conversation_id}:{message_hash}"
 
     def get_cached_summary(
         self,
         conversation_id: str,
         message_hash: str
     ) -> Optional[str]:
-        """获取缓存的摘要"""
-        with self._lock:
-            key = f"{conversation_id}:{message_hash}"
-            if key in self._cache:
-                if datetime.now() - self._timestamps[key] < self._ttl:
-                    logger.debug(f"Summary cache hit: {key}")
-                    return self._cache[key]["summary"]
-                else:
-                    # 过期清理
-                    del self._cache[key]
-                    del self._timestamps[key]
-            return None
+        """
+        获取缓存的摘要
+
+        Args:
+            conversation_id: 对话 ID
+            message_hash: 消息哈希
+
+        Returns:
+            摘要内容，如果不存在或已过期则返回 None
+        """
+        key = self._make_key(conversation_id, message_hash)
+        cached = self.get(key)
+        if cached:
+            return cached.get("summary")
+        return None
 
     def cache_summary(
         self,
@@ -2739,30 +2892,22 @@ class SummaryCache:
         summary: str,
         metadata: Optional[Dict] = None
     ):
-        """缓存摘要"""
-        with self._lock:
-            key = f"{conversation_id}:{message_hash}"
-            self._cache[key] = {
-                "summary": summary,
-                "timestamp": datetime.now().isoformat(),
-                "metadata": metadata or {}
-            }
-            self._timestamps[key] = datetime.now()
+        """
+        缓存摘要
 
-            # 清理过期条目
-            if len(self._cache) > self._max_entries:
-                self._cleanup_expired()
-
-    def _cleanup_expired(self):
-        """清理过期条目"""
-        now = datetime.now()
-        expired_keys = [
-            k for k, ts in self._timestamps.items()
-            if now - datetime.fromisoformat(ts) > self._ttl
-        ]
-        for key in expired_keys:
-            del self._cache[key]
-            del self._timestamps[key]
+        Args:
+            conversation_id: 对话 ID
+            message_hash: 消息哈希
+            summary: 摘要内容
+            metadata: 可选元数据
+        """
+        key = self._make_key(conversation_id, message_hash)
+        value = {
+            "summary": summary,
+            "timestamp": datetime.now().isoformat(),
+            "metadata": metadata or {}
+        }
+        self.set(key, value)
 
 class ContextCompressionConfig:
     """上下文压缩配置"""
@@ -3998,6 +4143,38 @@ Research sources for this design:
 ---
 
 ## Change History
+
+### v1.9.3 (2026-02-06) - P1 Code Quality Improvements
+
+**提升代码质量，提取通用组件，统一锁管理。**
+
+**新增组件**:
+
+1. **TTLCache 基类** (泛型缓存抽象)
+   - `TTLCache[K, V]`: 通用 TTL 缓存基类
+   - 支持泛型键值对
+   - 自动过期清理
+   - 线程安全
+   - 最大条目限制
+
+2. **IdempotencyCache 重构**
+   - 继承 `TTLCache[str, ToolExecutionResult]`
+   - 保留语义化方法名 (`get_cached_result`, `cache_result`)
+   - 消除重复代码
+
+3. **SummaryCache 重构**
+   - 继承 `TTLCache[str, Dict[str, Any]]`
+   - 简化实现，复用基类逻辑
+
+4. **ThreadSafeMixin**
+   - 为类提供简单的线程安全支持
+   - 统一锁管理模式
+   - 上下文管理器支持 (`with self._with_lock()`)
+
+**代码优化**:
+- 提取 ~80 行重复的 TTL 逻辑
+- 统一锁管理接口
+- 改善代码可维护性
 
 ### v1.9.2 (2026-02-06) - P0 Redundancy Elimination
 
