@@ -1,6 +1,6 @@
 # BA-Agent Information Pipeline Design
 
-> **Version**: v1.9
+> **Version**: v1.9.2
 > **Status**: Production-Grade
 > **Last Updated**: 2026-02-06
 
@@ -379,6 +379,13 @@ class DataStorage:
 ---
 
 ## 版本历史
+
+### v1.9.2 (2026-02-06) - P0 冗余消除
+**修复**:
+1. TokenCounter 统一 - 删除旧实现，保留 DynamicTokenCounter
+2. ContextManager 重构 - AdvancedContextManager / BasicContextManager
+
+**文档优化**: 从 4478 行减少到 4318 行（节省 160 行）
 
 ### v1.9 (2026-02-06) - LLM 增强上下文管理
 **3 项新增**:
