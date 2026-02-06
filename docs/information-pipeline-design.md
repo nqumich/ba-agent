@@ -1,6 +1,6 @@
 # BA-Agent Information Pipeline Design
 
-> **Version**: v1.7
+> **Version**: v1.8
 > **Status**: Production-Grade
 > **Last Updated**: 2026-02-05
 
@@ -380,6 +380,16 @@ class DataStorage:
 
 ## 版本历史
 
+### v1.8 (2026-02-05) - 修复评审问题
+**高优先级修复**:
+1. Token Counter - Claude tokenizer 修正（15% safety margin）
+2. DataFileManager - threading 替代 asyncio
+3. LockManager - 引用计数锁管理
+
+**中优先级新增**:
+4. ToolErrorType - is_retryable 属性
+5. IdempotencyCache - 幂等性支持
+
 ### v1.7 (2026-02-05) - 生产级完整性
 **6 项新增**:
 1. 文件清理策略（时间 + 大小 + LRU）
@@ -460,6 +470,6 @@ FULL:     "[{\"id\": 1, \"name\": \"Alice\"}, ...]"  # 完整 JSON
 
 ---
 
-**文档版本**: v1.7 (Simplified)
-**详细版**: 2924 行 | **简化版**: ~460 行
+**文档版本**: v1.8 (Simplified)
+**详细版**: 3159 行 | **简化版**: ~465 行
 **双文档结构**: 快速参考 + 完整实现
