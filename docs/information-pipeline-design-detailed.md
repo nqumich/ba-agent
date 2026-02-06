@@ -1022,12 +1022,17 @@ class ToolExecutionResult(BaseModel):
     This class consolidates all tool result functionality:
     - ReAct Observation (what LLM sees)
     - Output Level control (BRIEF/STANDARD/FULL)
-    - File-based storage for large data
+    - File-based storage for large data (SECURE: artifact_id, not real paths)
     - Retry tracking
     - Error handling
     - LangChain ToolMessage conversion
 
     v2.0.0: ToolResultMessage has been removed and merged into this class.
+
+    SECURITY NOTE:
+    - data_file: INTERNAL ONLY, real path never exposed to LLM
+    - artifact_id: Safe identifier for LLM to reference stored data
+    - Logs MUST NOT contain data_file paths
     """
     # CRITICAL: This MUST match AIMessage.tool_calls[i]["id"]
     tool_call_id: str
@@ -1039,10 +1044,12 @@ class ToolExecutionResult(BaseModel):
     output_level: OutputLevel = OutputLevel.STANDARD
 
     # Data storage (file-based for large data)
-    data_file: Optional[str] = None
+    # INTERNAL: Real file path - NEVER exposed to LLM or logs
+    _data_file: Optional[str] = None         # Private: actual filesystem path
+    artifact_id: Optional[str] = None         # Public: safe identifier for LLM
     data_size_bytes: int = 0
-    data_hash: Optional[str] = None      # For deduplication
-    data_summary: Optional[str] = None   # Generated summary for FULL level
+    data_hash: Optional[str] = None          # For deduplication
+    data_summary: Optional[str] = None       # Generated summary for FULL level
 
     # Retry tracking
     retry_count: int = 0
@@ -1072,17 +1079,13 @@ class ToolExecutionResult(BaseModel):
 
         Storage strategy:
         - BRIEF/STANDARD: observation only, no file storage
-        - FULL: Store data in file, observation contains summary + reference
+        - FULL: Store data in secure sandbox, observation contains artifact_id
         - Large data (>1MB): Always use file storage
 
-        Args:
-            tool_call_id: From AIMessage.tool_calls[i]["id"]
-            raw_data: Raw result data from tool execution
-            output_level: Desired verbosity level
-            storage_dir: Where to store large data files
-
-        Returns:
-            ToolExecutionResult with formatted observation
+        SECURITY:
+        - Files stored in sandboxed directory (storage_dir/tool_data/)
+        - Real paths never exposed to LLM (use artifact_id instead)
+        - Artifact ID format: artifact_{hash} (non-guessable, non-path-traversal)
         """
         import time
         start_time = time.time()
@@ -1097,24 +1100,28 @@ class ToolExecutionResult(BaseModel):
             data_size > 1024 * 1024  # > 1MB
         )
 
-        data_file = None
+        _data_file = None
+        artifact_id = None
         data_summary = None
 
         if use_file and storage_dir:
+            # Store data in SECURE sandbox directory
             storage_dir = Path(storage_dir) / "tool_data"
             storage_dir.mkdir(parents=True, exist_ok=True)
 
-            file_name = f"{tool_call_id}_{data_hash}.json"
+            # Use artifact_id (NOT filename) as identifier
+            artifact_id = f"artifact_{data_hash}"
+            file_name = f"{data_hash}.json"
             file_path = storage_dir / file_name
 
             with open(file_path, 'w') as f:
                 f.write(data_str)
 
-            data_file = str(file_path)
+            _data_file = str(file_path)  # INTERNAL: real path, never exposed
             data_summary = cls._generate_summary(raw_data)
 
         # Format observation based on output_level
-        observation = cls._format_observation(raw_data, output_level, data_file)
+        observation = cls._format_observation(raw_data, output_level, artifact_id)
 
         duration_ms = (time.time() - start_time) * 1000
 
@@ -1122,7 +1129,8 @@ class ToolExecutionResult(BaseModel):
             tool_call_id=tool_call_id,
             observation=observation,
             output_level=output_level,
-            data_file=data_file,
+            _data_file=_data_file,           # INTERNAL: real path
+            artifact_id=artifact_id,          # PUBLIC: safe identifier
             data_size_bytes=data_size,
             data_hash=data_hash,
             data_summary=data_summary,
@@ -1136,24 +1144,28 @@ class ToolExecutionResult(BaseModel):
     def _format_observation(
         raw_data: Any,
         level: OutputLevel,
-        data_file: Optional[str] = None
+        artifact_id: Optional[str] = None
     ) -> str:
-        """Format observation according to output level"""
+        """
+        Format observation according to output level.
+
+        SECURITY: artifact_id is a safe identifier, NOT a real filesystem path.
+        This prevents path traversal attacks and information leakage.
+        """
         if level == OutputLevel.BRIEF:
             return ToolExecutionResult._format_brief(raw_data)
         elif level == OutputLevel.STANDARD:
             return ToolExecutionResult._format_standard(raw_data)
         else:  # FULL
-            if data_file:
-                # Return file reference for large data
+            if artifact_id:
+                # Return artifact reference (NOT real path)
                 summary = ToolExecutionResult._generate_summary(raw_data)
-                return f"""Data stored in file: {data_file}
+                return f"""Data stored as artifact: {artifact_id}
 
-This file can be accessed in subsequent tool calls by referencing the file path.
+Large dataset available for subsequent tool access.
 
-To access this data, use:
-- file_reader tool with the file path
-- Or reference in tool_call_id for direct access
+To access this data, reference the artifact_id in your next tool call.
+The system will securely retrieve the data for you.
 
 Data summary: {summary}"""
             else:
@@ -1301,6 +1313,92 @@ Tool Call ID: {self.tool_call_id}"""
             ]
         }
 ```
+```
+
+#### Phase 2.4: Security Considerations for File Artifacts
+
+**CRITICAL**: Large data storage MUST follow security best practices.
+
+```python
+class FileArtifactSecurity:
+    """
+    Security guidelines for file-based tool result storage.
+
+    THREAT MODEL:
+    - Path traversal attacks: ../../etc/passwd
+    - Information leakage: Exposing server paths in logs
+    - Sandbox escape: Accessing files outside allowed directories
+    """
+
+    # 1. Artifact ID Format (NOT filesystem paths)
+    ARTIFACT_ID_FORMAT = "artifact_{hash}"  # Non-guessable, no path separators
+
+    # 2. Storage Sandbox (isolate from system files)
+    SANDBOX_DIR = "/var/lib/ba-agent/artifacts"  # Dedicated, isolated directory
+
+    # 3. Allowed Access Patterns
+    ALLOWED_PATTERNS = [
+        "artifact_*",              # Artifact files only
+        "*.json",                  # JSON data files
+        "*.csv",                   # CSV data files
+    ]
+
+    # 4. Logging Security
+    LOG_RULES = """
+    SECURE LOGGING:
+    - NEVER log real file paths (_data_file)
+    - NEVER log artifact storage directory structure
+    - NEVER log absolute paths in error messages
+    - USE artifact_id in all user-facing messages
+
+    Examples:
+    WRONG:  "Stored to /var/lib/ba-agent/artifacts/abc123.json"
+    RIGHT:  "Stored as artifact_abc123"
+
+    WRONG:  logger.error(f"Failed to write {self._data_file}")
+    RIGHT:  logger.error(f"Failed to write artifact {artifact_id}")
+    """
+
+    # 5. File Reader Sandbox
+    FILE_READER_RULES = """
+    SECURE FILE READER:
+    - Only read from SANDBOX_DIR or approved subdirectories
+    - Validate artifact_id format before reading
+    - Reject paths with .. (directory traversal)
+    - Reject absolute paths outside sandbox
+    - Use allowlist of approved file extensions
+
+    Example validation:
+    def validate_artifact_access(artifact_id: str, sandbox_dir: str) -> bool:
+        # 1. Check format
+        if not artifact_id.startswith("artifact_"):
+            return False
+
+        # 2. Check for path traversal
+        if ".." in artifact_id or "/" in artifact_id or "\\" in artifact_id:
+            return False
+
+        # 3. Resolve real path within sandbox
+        real_path = (Path(sandbox_dir) / f"{artifact_id}.json").resolve()
+        sandbox = Path(sandbox_dir).resolve()
+
+        # 4. Verify path is within sandbox
+        try:
+            real_path.relative_to(sandbox)
+            return True
+        except ValueError:
+            # Path traversal detected
+            return False
+    """
+
+    # 6. Cleanup Policy
+    CLEANUP_RULES = """
+    ARTIFACT CLEANUP:
+    - Delete artifacts after TTL (default: 24 hours)
+    - Clean on session end
+    - Clean on low disk space
+    - NEVER expose cleanup paths in logs
+    """
 ```
 
 #### Phase 2.5: Timeout Handling
