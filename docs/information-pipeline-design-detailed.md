@@ -705,8 +705,18 @@ The actual system uses `HumanMessage`, `AIMessage`, and `ToolMessage` from LangC
 
 ```python
 class ToolCallMessage(BaseModel):
-    """Format for tool invocation (from Agent)"""
-    tool_call_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    """
+    Format for tool invocation (Claude Code research format).
+
+    CRITICAL: tool_call_id MUST come from LLM, NOT be generated here.
+
+    WRONG:  tool_call_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    RIGHT:  tool_call_id: str  # Provided by LLM's AIMessage.tool_calls[i]["id"]
+
+    This format exists ONLY for research/debugging. The actual BA-Agent
+    implementation uses LangChain's AIMessage.tool_calls directly.
+    """
+    tool_call_id: str  # MUST come from AIMessage.tool_calls[i]["id"] - DO NOT generate
     tool_name: str
     parameters: Dict[str, Any]
 
