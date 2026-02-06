@@ -57,7 +57,7 @@
   - IdempotencyCache - 跨轮次缓存
   - ToolTimeoutHandler - 超时处理
   - DataStorage - Artifact 存储
-- **Phase 7**: 移除旧模型 - 清理 ResponseFormat/ToolOutput
+  - 移除旧模型 - 清理 ResponseFormat/ToolOutput
 
 ### 待实现 ⏳
 - **Skill 业务逻辑**: 4 个 Skill 的核心分析逻辑
