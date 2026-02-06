@@ -338,6 +338,23 @@
 
 **设计文件**: `docs/information-pipeline-design.md` v1.5
 
+### 信息管道设计 v1.6 (US-INFRA-02, 2026-02-05) - 生产环境增强
+
+基于设计评审反馈的全面改进：
+
+**9 项改进**:
+1. **Output Level 决策机制** - 回退链：参数 → 工具配置 → 全局默认 → 动态调整
+2. **文件数据存储** - 大数据（>1MB）存储到文件，防止内存溢出
+3. **锁管理** - 使用 LRU 缓存（maxsize=1000），防止内存泄漏
+4. **标准化错误格式** - 统一错误 observation 格式
+5. **间接循环检测** - activation_chain 累积完整调用路径
+6. **准确 Token 计数** - 使用 tiktoken 精确计数
+7. **重试策略** - ToolRetryPolicy 指数退避
+8. **超时处理** - ToolTimeoutHandler 异步超时控制
+9. **监控指标** - ToolMetrics, ConversationMetrics, MetricsCollector
+
+**设计文件**: `docs/information-pipeline-design.md` v1.6
+
 ### 信息管道设计 v1.4 (US-INFRA-02, 2026-02-05) - 概念修正
 
 基于 Claude Code 和 Manus AI 的实际实现，修正了之前设计中三个概念混淆的问题：
@@ -390,4 +407,4 @@
 
 ---
 
-**最后更新**: 2026-02-05 信息管道设计 v1.5 (Output Level 澄清)
+**最后更新**: 2026-02-05 信息管道设计 v1.6 (生产环境增强)
