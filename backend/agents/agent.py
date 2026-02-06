@@ -151,64 +151,124 @@ class BAAgent:
             hooks_enabled=True,
         )
 
-    def _init_llm(self) -> ChatAnthropic:
+    def _init_llm(self) -> Any:
         """
-        初始化 Claude LLM
+        初始化 LLM（按配置选择 provider）
 
         Returns:
-            ChatAnthropic 实例
+            ChatAnthropic / ChatOpenAI 实例
         """
-        # 获取 API 密钥
-        api_key = self._get_api_key()
-        if not api_key:
-            raise ValueError(
-                "ANTHROPIC_API_KEY not found. "
-                "Please set ANTHROPIC_API_KEY environment variable or BA_ANTHROPIC_API_KEY."
-            )
+        provider = (self.app_config.llm.provider or "anthropic").strip().lower()
 
-        # 获取自定义 API 端点（可选）
-        # 优先级: 1. 环境变量 ANTHROPIC_BASE_URL 2. 配置文件中的 base_url
-        base_url = os.environ.get("ANTHROPIC_BASE_URL") or self.app_config.llm.base_url
-
-        # 创建 ChatAnthropic 实例
-        llm_kwargs = {
+        # 通用推理参数：不同 provider 对“输出 token 上限”的字段命名不一致，
+        # 且部分 OpenAI 兼容网关会对 max_tokens/max_completion_tokens 组合做严格校验。
+        # 因此这里把 max_tokens 从通用参数里拆出来，按 provider 单独处理。
+        common_llm_kwargs = {
             "model": self.config.model,
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
-            "api_key": api_key,
             "timeout": self.app_config.llm.timeout,
         }
 
-        # 如果有自定义 base_url，添加到参数中
-        if base_url:
-            llm_kwargs["base_url"] = base_url
+        if provider == "anthropic":
+            # ===== Anthropic (Claude) =====
+            api_key = self._get_api_key("anthropic")
+            if not api_key:
+                raise ValueError(
+                    "ANTHROPIC_API_KEY not found. "
+                    "Please set ANTHROPIC_API_KEY environment variable or BA_ANTHROPIC_API_KEY."
+                )
 
-        llm = ChatAnthropic(**llm_kwargs)
+            # 自定义端点（可选）
+            base_url = os.environ.get("ANTHROPIC_BASE_URL") or self.app_config.llm.base_url
 
-        return llm
+            llm_kwargs = {
+                **common_llm_kwargs,
+                "max_tokens": self.config.max_tokens,
+                "api_key": api_key,
+            }
+            if base_url:
+                llm_kwargs["base_url"] = base_url.rstrip("/")
 
-    def _get_api_key(self) -> str:
+            return ChatAnthropic(**llm_kwargs)
+
+        if provider == "openai":
+            # ===== OpenAI / OpenAI-Compatible =====
+            # - API Key: OPENAI_API_KEY 或 BA_OPENAI_API_KEY
+            # - Base URL: OPENAI_BASE_URL（兼容 OPENAI_API_BASE）或 config.settings llm.base_url
+            api_key = self._get_api_key("openai")
+            if not api_key:
+                raise ValueError(
+                    "OpenAI API Key 未配置。请设置环境变量 OPENAI_API_KEY 或 BA_OPENAI_API_KEY。"
+                )
+
+            base_url = (
+                os.environ.get("OPENAI_BASE_URL")
+                or os.environ.get("OPENAI_API_BASE")
+                or self.app_config.llm.base_url
+            )
+            if base_url:
+                base_url = base_url.rstrip("/")
+
+            from langchain_openai import ChatOpenAI
+
+            # 兼容不同版本参数名（api_key/base_url vs openai_api_key/openai_api_base）
+            try:
+                llm_kwargs = {
+                    **common_llm_kwargs,
+                    "api_key": api_key,
+                }
+                # 注意：这里刻意不传 max_tokens，避免某些 OpenAI 兼容网关
+                # 报错 “max_tokens 与 max_completion_tokens 同时设置不支持”。
+                if base_url:
+                    llm_kwargs["base_url"] = base_url
+                return ChatOpenAI(**llm_kwargs)
+            except TypeError:
+                llm_kwargs = {
+                    **common_llm_kwargs,
+                    "openai_api_key": api_key,
+                }
+                # 同上：不传 max_tokens
+                if base_url:
+                    llm_kwargs["openai_api_base"] = base_url
+                return ChatOpenAI(**llm_kwargs)
+
+        raise ValueError(
+            f"暂不支持的 llm.provider: {provider}. 当前支持: anthropic, openai。"
+        )
+
+    def _get_api_key(self, provider: Optional[str] = None) -> str:
         """
-        获取 Anthropic API 密钥
+        获取指定 provider 的 API 密钥
 
         优先级:
-        1. 环境变量 ANTHROPIC_API_KEY
-        2. 环境变量 BA_ANTHROPIC_API_KEY
-        3. 配置文件中的值
+        1. 官方环境变量（如 OPENAI_API_KEY / ANTHROPIC_API_KEY）
+        2. 项目前缀环境变量（如 BA_OPENAI_API_KEY / BA_ANTHROPIC_API_KEY）
+        3. 配置文件中的 llm.api_key（仅当 llm.provider 与 provider 一致）
 
         Returns:
             API 密钥
         """
-        # 首先检查环境变量
-        api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get(
-            "BA_ANTHROPIC_API_KEY"
-        )
-        if api_key:
-            return api_key
+        provider = (provider or self.app_config.llm.provider or "").strip().lower()
+        if not provider:
+            return ""
 
-        # 然后检查配置
-        if self.app_config.llm.provider == "anthropic":
-            return self.app_config.llm.api_key
+        standard_env = {
+            "anthropic": "ANTHROPIC_API_KEY",
+            "openai": "OPENAI_API_KEY",
+        }.get(provider)
+
+        if standard_env:
+            v = os.environ.get(standard_env)
+            if v and v.strip():
+                return v.strip()
+
+        v = os.environ.get(f"BA_{provider.upper()}_API_KEY")
+        if v and v.strip():
+            return v.strip()
+
+        # 然后检查配置（仅当 provider 匹配）
+        if (self.app_config.llm.provider or "").strip().lower() == provider:
+            return (self.app_config.llm.api_key or "").strip()
 
         return ""
 

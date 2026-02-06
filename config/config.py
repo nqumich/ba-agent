@@ -5,6 +5,7 @@
 """
 
 import os
+import sys
 import yaml
 from pathlib import Path
 from typing import Any, Dict, Optional, Type, TypeVar
@@ -12,7 +13,16 @@ from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 
 # 加载 .env 文件
-load_dotenv()
+#
+# 说明：
+# - 运行应用时：默认加载项目根目录 `.env`，便于本地开发（例如 OpenAI 网关配置）。
+# - 运行 pytest 时：默认不加载 `.env`，避免开发者本地 `.env`（如 BA_LLM__PROVIDER=openai）
+#   污染单元测试；单测应通过 monkeypatch 显式设置所需环境变量。
+# - 如需在 pytest 中强制加载，可设置 BA_FORCE_LOAD_DOTENV=true
+_force_load_dotenv = os.environ.get("BA_FORCE_LOAD_DOTENV", "").strip().lower() in ("1", "true", "yes")
+_running_under_pytest = "pytest" in sys.modules
+if _force_load_dotenv or not _running_under_pytest:
+    load_dotenv()
 
 T = TypeVar('T', bound=BaseModel)
 

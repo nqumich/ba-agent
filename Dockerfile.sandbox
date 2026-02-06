@@ -8,9 +8,14 @@ FROM python:3.12-slim
 # 设置工作目录
 WORKDIR /app
 
-# 安装 Python 数据分析库（使用清华镜像源，不需要系统依赖）
-RUN pip install --no-cache-dir --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --no-cache-dir \
+# 安装 Python 数据分析库
+#
+# 说明：
+# - 之前使用清华源（pypi.tuna.tsinghua.edu.cn）在部分网络环境会超时。
+# - 这里改为可配置的镜像源，并增加 timeout / retries，提高构建稳定性。
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+RUN pip install --no-cache-dir --upgrade pip --timeout 120 --retries 10 -i ${PIP_INDEX_URL} && \
+    pip install --no-cache-dir --timeout 120 --retries 10 -i ${PIP_INDEX_URL} \
     pandas \
     numpy \
     scipy \
@@ -20,8 +25,7 @@ RUN pip install --no-cache-dir --upgrade pip -i https://pypi.tuna.tsinghua.edu.c
     xlrd \
     xlsxwriter \
     matplotlib \
-    seaborn \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple
+    seaborn
 
 # 创建非 root 用户
 RUN useradd -m -u 1000 baagent && \
