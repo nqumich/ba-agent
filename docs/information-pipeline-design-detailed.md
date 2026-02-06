@@ -782,6 +782,51 @@ class OutputLevel(str, Enum):
 
 ### Protocol Specification
 
+#### Cache Policy (Must be defined before ToolInvocationRequest)
+
+```python
+class ToolCachePolicy(str, Enum):
+    """
+    Cache policy for tool execution results.
+
+    IMPORTANT: Default is NO_CACHE (safe default).
+    Tools must explicitly declare if they are cacheable.
+
+    Cacheable tools (pure reads):
+    - web_search: Same query → same results (within TTL)
+    - query_database: Same SQL → same results (within TTL)
+    - file_reader: Same file → same content (within TTL)
+    - vector_search: Same query → same results (within TTL)
+
+    Non-cacheable tools (side effects):
+    - file_write: Has side effects (modifies filesystem)
+    - execute_command: Has side effects (modifies system state)
+    - database_write: Has side effects (modifies database)
+    - api_call_mutation: Has side effects (modifies remote state)
+    """
+    NO_CACHE = "no_cache"         # Default: never cache (safe)
+    CACHEABLE = "cacheable"       # Tool declares it's safe to cache
+    TTL_SHORT = "ttl_short"       # Cache for 5 minutes
+    TTL_MEDIUM = "ttl_medium"     # Cache for 1 hour
+    TTL_LONG = "ttl_long"         # Cache for 24 hours
+
+    @property
+    def is_cacheable(self) -> bool:
+        """Check if this policy allows caching"""
+        return self != self.NO_CACHE
+
+    @property
+    def ttl_seconds(self) -> int:
+        """Get TTL in seconds for this cache policy"""
+        return {
+            self.NO_CACHE: 0,
+            self.CACHEABLE: 300,      # 5 minutes default
+            self.TTL_SHORT: 300,      # 5 minutes
+            self.TTL_MEDIUM: 3600,    # 1 hour
+            self.TTL_LONG: 86400,     # 24 hours
+        }[self]
+```
+
 #### Phase 1: Tool Invocation Request
 
 **Direction**: Agent → Tool
@@ -843,14 +888,56 @@ class ToolInvocationRequest(BaseModel):
     # Idempotency (optional)
     idempotency_key: Optional[str] = None
 
+    # Cache policy (determines if result can be cached)
+    cache_policy: ToolCachePolicy = ToolCachePolicy.NO_CACHE
+
     def get_or_generate_idempotency_key(self) -> str:
-        """Get or generate idempotency key for caching tool results"""
+        """
+        Get or generate idempotency key for caching tool results.
+
+        CRITICAL: The key MUST NOT include tool_call_id because:
+        - tool_call_id is generated fresh by LLM for each call
+        - Same query in different rounds/conversations would have different tool_call_ids
+        - Including it would prevent cache hits across rounds/conversations
+
+        Key components (for auto-generated keys):
+        - tool_name: Which tool is being called
+        - parameters: The input data (canonicalized)
+        - tool_version: Tool version (for cache invalidation on tool updates)
+        - caller_id: Who is calling (different agents may have different permissions)
+        - permission_level: Access level (admin vs user may see different results)
+
+        NOTE: Only tools with cacheable policy should use auto-generated keys.
+              Non-cacheable tools (write/execute) should never be cached.
+        """
         if self.idempotency_key:
             return self.idempotency_key
-        # Generate from tool_call_id + parameters hash
+
+        # Only cache if explicitly marked as cacheable
+        if not self.cache_policy.is_cacheable:
+            # Generate a unique non-caching key (UUID-based)
+            # This ensures the result is NOT shared/reused
+            import uuid
+            return f"uncacheable:{uuid.uuid4()}"
+
+        # Generate cache key from semantic components (NOT tool_call_id)
         import hashlib
+        import json
+
+        # Canonicalize parameters for consistent hashing
         params_str = json.dumps(self.parameters, sort_keys=True)
-        return hashlib.md5(f"{self.tool_call_id}:{params_str}".encode()).hexdigest()
+
+        # Build key from semantic components
+        key_parts = [
+            self.tool_name,
+            self.tool_version,
+            params_str,
+            self.caller_id,
+            self.permission_level,
+        ]
+        key_string = ":".join(key_parts)
+
+        return hashlib.md5(key_string.encode()).hexdigest()
 
     def get_effective_output_level(
         self,
