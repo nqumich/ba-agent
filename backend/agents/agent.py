@@ -287,11 +287,12 @@ class BAAgent:
 
     def _get_default_system_prompt(self) -> str:
         """
-        获取默认系统提示词（包含 Skills 部分）
+        获取默认系统提示词（包含 Skills 部分和结构化响应格式）
 
         Returns:
             系统提示词
         """
+        # 基础业务提示词
         base_prompt = """# BA-Agent 系统提示词
 
 你是一个专业的商业分析助手 (BA-Agent)，面向非技术业务人员，专注于电商业务分析。
@@ -305,10 +306,20 @@ class BAAgent:
 
 ## 工作流程
 
-1. 理解用户需求（自然语言查询）
-2. 查询相关数据（使用 query_database 工具）
-3. 进行分析处理（调用相应 Skill）
-4. 生成结果报告（使用 invoke_skill 工具）
+1. 理解用户需求
+2. 判断是否需要调用工具（查询数据、执行代码等）
+3. 如需工具，调用相应工具获取结果
+4. 基于工具结果生成最终报告，**必须使用结构化 JSON 格式**
+
+## 可用工具
+
+- `query_database`: SQL 查询
+- `bac_code_agent`: Python 代码执行（数据分析）
+- `web_search`: 网络搜索
+- `web_reader`: 网页读取
+- `file_reader`: 文件读取
+- `file_write`: 文件写入
+- `execute_command`: 命令行执行
 
 ## 注意事项
 
@@ -334,12 +345,62 @@ class BAAgent:
 你会在此时收到专门的 Flush 指令，请专注于记忆提取工作。
 """
 
+        # 结构化响应格式（仅用于最终响应）
+        response_format_prompt = """
+
+## 最终响应格式要求（重要！）
+
+当调用工具完成后，你**必须**按照以下 JSON 格式返回最终响应：
+
+```json
+{
+    "task_analysis": "思维链：1. 识别意图; 2. 数据处理过程; 3. 关键发现",
+    "execution_plan": "R1: 数据获取; R2: 数据分析; R3: 报告生成(当前)",
+    "current_round": 当前轮次,
+    "action": {
+        "type": "complete",
+        "content": "最终报告内容（可包含 HTML/ECharts 代码）",
+        "recommended_questions": ["推荐问题1", "推荐问题2"],
+        "download_links": ["结果文件.xlsx"]
+    }
+}
+```
+
+### Content 格式说明
+
+**content 可以包含：**
+1. 纯文本分析结果
+2. HTML 代码（ECharts 图表）
+3. Markdown 格式
+
+**带图表的报告示例：**
+```json
+{
+    "action": {
+        "type": "complete",
+        "content": "销售数据分析完成：\\n\\n1. Q1销售额500万，同比增长15%\\n2. Q3增长最快\\n\\n<div class='chart-wrapper'><div id='chart-trend' style='width:100%;height:400px;'></div></div>\\n<script>(function(){const chart = echarts.init(document.getElementById('chart-trend'));chart.setOption({xAxis: {type: 'category', data: ['Q1','Q2','Q3','Q4']}, yAxis: {type: 'value'}, series: [{type: 'line', data: [500, 520, 580, 570]}]});})();</script>",
+        "recommended_questions": ["Q3增长原因？", "地区分布如何？"],
+        "download_links": ["analysis_result.xlsx"]
+    }
+}
+```
+
+### 重要规则
+
+1. **工具调用阶段**：使用 LangChain 原生工具调用机制，返回 tool_calls
+2. **最终响应**：必须返回上述 JSON 格式（包装在代码块中）
+3. **终止条件**：当工具调用完成、分析完成、或可以直接回答时，返回 JSON 响应
+"""
+
+        # 组合提示词
+        full_prompt = base_prompt + "\n" + response_format_prompt
+
         # 添加 Skills 部分（如果有）
         skills_section = self._build_skills_section()
         if skills_section:
-            return base_prompt + "\n\n" + skills_section
+            full_prompt = full_prompt + "\n\n" + skills_section
 
-        return base_prompt
+        return full_prompt
 
     def _init_memory_flush(self) -> Optional[MemoryFlush]:
         """
@@ -935,22 +996,173 @@ class BAAgent:
 
     def _create_agent(self):
         """
-        创建 LangGraph Agent
+        创建 LangGraph Agent（自定义版本，支持结构化响应）
 
-        使用 langchain.agents.create_agent (LangGraph V2.0)
+        使用 LangGraph 的 StateGraph 构建自定义 Agent：
+        1. agent_node: LLM 决策节点（调用工具或返回结构化响应）
+        2. tool_node: 工具执行节点
+        3. 条件边：根据响应类型决定下一步
 
         Returns:
-            Agent 实例
+            Compiled LangGraph Agent
         """
-        # 使用 langchain.agents.create_agent 创建 Agent
-        # 新 API 使用 system_prompt 而不是 prompt
-        agent = langchain_create_agent(
-            self.llm,
-            self.tools,
-            system_prompt=self.system_prompt,
+        from langgraph.graph import END, StateGraph
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+        from langchain_core.tools import ToolInvocation
+        from langgraph.prebuilt import ToolNode
+        import json
+
+        # 创建工具节点
+        tool_node = ToolNode(self.tools)
+
+        # 定义 Agent 状态类型
+        class AgentState(TypedDict):
+            messages: Sequence[BaseMessage]
+            next: str  # "agent" 或 "end"
+
+        def should_continue(state: AgentState) -> str:
+            """
+            决定下一步：继续调用工具还是结束
+
+            基于 LLM 的响应判断：
+            - 如果响应包含工具调用 → 调用工具
+            - 如果响应是结构化 JSON (type=complete) → 结束
+            """
+            messages = state["messages"]
+            last_message = messages[-1] if messages else None
+
+            if not last_message or not isinstance(last_message, AIMessage):
+                return "agent"
+
+            # 检查是否有工具调用（LangChain 原生机制）
+            if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                return "tools"
+
+            # 检查是否是结构化响应（type=complete）
+            content = last_message.content
+            if isinstance(content, str):
+                # 尝试解析 JSON
+                try:
+                    # 提取 JSON 代码块
+                    import re
+                    json_pattern = r'```json\s*\n(.*?)\n```'
+                    matches = re.findall(json_pattern, content, re.DOTALL)
+                    for match in matches:
+                        data = json.loads(match.strip())
+                        if data.get("action", {}).get("type") == "tool_call":
+                            # 需要调用工具 - 转换为 LangChain 工具调用
+                            return "convert_to_tool_call"
+                        elif data.get("action", {}).get("type") == "complete":
+                            # 完成，结束
+                            return "end"
+                except (json.JSONDecodeError, KeyError):
+                    pass
+
+            # 默认继续
+            return "end"
+
+        def convert_to_tool_call(state: AgentState) -> dict:
+            """
+            将结构化 JSON 响应转换为 LangChain 工具调用
+
+            当模型返回 type="tool_call" 的 JSON 时，转换为实际的工具调用
+            """
+            messages = list(state["messages"])
+            last_message = messages[-1]
+
+            if not isinstance(last_message, AIMessage):
+                return {"messages": messages}
+
+            content = last_message.content
+            if not isinstance(content, str):
+                return {"messages": messages}
+
+            try:
+                import re
+                json_pattern = r'```json\s*\n(.*?)\n```'
+                matches = re.findall(json_pattern, content, re.DOTALL)
+
+                for match in matches:
+                    data = json.loads(match.strip())
+                    action = data.get("action", {})
+
+                    if action.get("type") == "tool_call" and isinstance(action.get("content"), list):
+                        # 提取工具调用列表
+                        tool_calls_data = action["content"]
+
+                        # 构建 tool_calls 列表（LangChain 格式）
+                        tool_calls = []
+                        for tc_data in tool_calls_data:
+                            tool_calls.append({
+                                "name": tc_data["tool_name"],
+                                "args": tc_data["arguments"],
+                                "id": tc_data["tool_call_id"]
+                            })
+
+                        # 创建新的 AIMessage，包含工具调用
+                        new_message = AIMessage(
+                            content="",  # 工具调用时 content 为空
+                            tool_calls=tool_calls
+                        )
+
+                        # 替换最后一条消息
+                        messages[-1] = new_message
+                        return {"messages": messages}
+
+            except Exception as e:
+                logger = __import__('logging').getLogger(__name__)
+                logger.error(f"Failed to convert to tool call: {e}")
+
+            return {"messages": messages}
+
+        def call_model(state: AgentState) -> dict:
+            """
+            调用 LLM 进行决策
+
+            输入包含系统提示词和用户消息
+            """
+            messages = list(state["messages"])
+
+            # 确保第一条消息是系统提示词
+            if not messages or not isinstance(messages[0], SystemMessage):
+                messages.insert(0, SystemMessage(content=self.system_prompt))
+
+            # 调用 LLM
+            response = self.llm.invoke(messages)
+            return {"messages": messages + [response]}
+
+        # 构建图
+        workflow = StateGraph(AgentState)
+
+        # 添加节点
+        workflow.add_node("agent", call_model)
+        workflow.add_node("tools", tool_node)
+        workflow.add_node("convert_to_tool_call", convert_to_tool_call)
+
+        # 设置入口点
+        workflow.set_entry_point("agent")
+
+        # 添加条件边
+        workflow.add_conditional_edges(
+            "agent",
+            should_continue,
+            {
+                "tools": "tools",
+                "convert_to_tool_call": "convert_to_tool_call",
+                "end": END
+            }
         )
 
-        return agent
+        # 工具执行后回到 agent
+        workflow.add_edge("tools", "agent")
+
+        # 转换后回到 agent（会触发工具调用）
+        workflow.add_edge("convert_to_tool_call", "agent")
+
+        # 编译图
+        app = workflow.compile()
+
+        return app
 
     def add_tool(self, tool: BaseTool) -> None:
         """
@@ -1114,11 +1326,13 @@ class BAAgent:
         """
         从 Agent 结果中提取响应文本
 
+        支持结构化 JSON 响应格式的解析
+
         Args:
             result: Agent 返回结果
 
         Returns:
-            响应文本
+            响应文本（如果是结构化 JSON，则提取并返回显示内容）
         """
         messages = result.get("messages", [])
         if not messages:
@@ -1129,6 +1343,10 @@ class BAAgent:
             if isinstance(msg, AIMessage):
                 content = msg.content
                 if isinstance(content, str):
+                    # 尝试解析结构化响应
+                    parsed = self._try_parse_structured_response(content)
+                    if parsed:
+                        return parsed
                     return content
                 elif isinstance(content, list):
                     # 处理多模态内容
@@ -1137,9 +1355,103 @@ class BAAgent:
                         for part in content
                         if isinstance(part, dict) and "text" in part
                     ]
-                    return "\n".join(text_parts)
+                    combined = "\n".join(text_parts)
+                    # 尝试解析结构化响应
+                    parsed = self._try_parse_structured_response(combined)
+                    if parsed:
+                        return parsed
+                    return combined
 
         return ""
+
+    def _try_parse_structured_response(self, content: str) -> Optional[str]:
+        """
+        尝试解析结构化响应
+
+        Args:
+            content: 原始响应内容
+
+        Returns:
+            解析后的显示内容，如果不是结构化响应则返回 None
+        """
+        try:
+            from backend.models.response import parse_structured_response
+
+            structured = parse_structured_response(content)
+            if structured and structured.is_complete():
+                # 是结构化的 complete 响应，提取显示内容
+                final_report = structured.get_final_report()
+
+                # 构建显示内容（与 ba_agent.py 中的逻辑一致）
+                display_parts = []
+
+                # 思维链分析（可折叠）
+                if structured.task_analysis:
+                    display_parts.append(f"""
+<div class="task-analysis" style="margin-bottom: 12px; padding: 10px; background: #f0f7ff; border-left: 3px solid #2196F3; border-radius: 4px;">
+    <details>
+        <summary style="cursor: pointer; font-weight: 500; color: #1976D2;">💡 思维链分析</summary>
+        <div style="margin-top: 8px; font-size: 13px; color: #555; white-space: pre-wrap;">{structured.task_analysis}</div>
+    </details>
+</div>
+""")
+
+                # 执行计划
+                if structured.execution_plan:
+                    display_parts.append(f"""
+<div class="execution-plan" style="margin-bottom: 12px; padding: 10px; background: #fff3e0; border-left: 3px solid #FF9800; border-radius: 4px;">
+    <div style="font-weight: 500; color: #E65100; margin-bottom: 4px;">📋 执行计划</div>
+    <div style="font-size: 13px; color: #555;">{structured.execution_plan}</div>
+</div>
+""")
+
+                # 最终报告
+                has_html = '<div' in final_report or '<script' in final_report or 'echarts' in final_report.lower()
+
+                if has_html:
+                    display_parts.append(f'<div class="final-report">{final_report}</div>')
+                else:
+                    display_parts.append(f'<div class="final-report" style="line-height: 1.6;">{final_report.replace("\\n", "<br>")}</div>')
+
+                # 推荐问题
+                if structured.action.recommended_questions:
+                    questions_html = '<br>'.join(
+                        f'<button class="recommended-question" style="display: block; width: 100%; text-align: left; padding: 10px; margin: 6px 0; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; cursor: pointer;">💡 {q}</button>'
+                        for q in structured.action.recommended_questions
+                    )
+                    display_parts.append(f"""
+<div class="recommended-questions" style="margin-top: 16px; padding: 12px; background: #f9f9f9; border-radius: 6px;">
+    <div style="font-weight: 500; color: #333; margin-bottom: 8px;">🤔 推荐问题</div>
+    {questions_html}
+</div>
+""")
+
+                # 下载链接
+                if structured.action.download_links:
+                    links_html = '<br>'.join(
+                        f'<a href="/api/v1/files/download/{filename}" style="display: inline-block; padding: 8px 16px; margin: 4px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px;">📥 {filename}</a>'
+                        for filename in structured.action.download_links
+                    )
+                    display_parts.append(f"""
+<div class="download-links" style="margin-top: 12px; padding: 12px; background: #e8f5e9; border-radius: 6px;">
+    <div style="font-weight: 500; color: #2E7D32; margin-bottom: 8px;">📦 可下载文件</div>
+    {links_html}
+</div>
+""")
+
+                result = "\n".join(display_parts)
+
+                # 添加 HTML 标记
+                if has_html:
+                    result = f"<!-- HAS_HTML -->{result}"
+
+                return result
+
+        except Exception as e:
+            logger = __import__('logging').getLogger(__name__)
+            logger.debug(f"Failed to parse structured response: {e}")
+
+        return None
 
     def stream(
         self,

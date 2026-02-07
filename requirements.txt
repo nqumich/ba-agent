@@ -4,8 +4,10 @@
 # ============ Core dependencies ============
 langchain>=0.3.0
 langchain-core>=1.2.0
+langchain-community>=0.3.0
 langchain-anthropic>=0.2.0
 langchain-openai>=0.2.0
+langchain-google-genai>=1.0.0
 # LangGraph - 用于构建 Agent (LangChain 1.2.x 推荐方式)
 langgraph>=0.2.0
 langgraph-checkpoint-sqlite>=2.0.0

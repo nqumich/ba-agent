@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
 from contextlib import asynccontextmanager
+import os
 
 from backend.api.routes import files, agent, skills, health
 from backend.api.state import set_app_state
@@ -22,9 +23,19 @@ from backend.api.errors import (
     LoggingMiddleware,
     APIException
 )
+from backend.api.logging_config import setup_logging
+from dotenv import load_dotenv
 from backend.filestore import get_file_store
+
+# 加载 .env 文件
+load_dotenv()
 from backend.skills import SkillLoader, SkillRegistry, SkillActivator
 from pathlib import Path
+
+# 设置日志
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FILE = os.getenv("LOG_FILE", "api.log")
+setup_logging(log_level=LOG_LEVEL, log_file=LOG_FILE)
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +59,7 @@ async def lifespan(app: FastAPI):
         ]
         skill_loader = SkillLoader(skills_dirs)
         skill_registry = SkillRegistry(skill_loader)
-        skill_activator = SkillActivator(skill_registry)
+        skill_activator = SkillActivator(skill_loader, skill_registry)
 
         set_app_state("skill_registry", skill_registry)
         set_app_state("skill_activator", skill_activator)
@@ -160,9 +171,23 @@ app.include_router(
 
 # ===== 根路径 =====
 
-@app.get("/")
+from fastapi.responses import HTMLResponse, FileResponse
+from pathlib import Path
+
+frontend_path = Path(__file__).parent.parent.parent / "frontend" / "index.html"
+
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    """根路径"""
+    """前端页面"""
+    if frontend_path.exists():
+        with open(frontend_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return HTMLResponse(content="<h1>前端文件不存在</h1>", status_code=404)
+
+
+@app.get("/api")
+async def api_info():
+    """API 信息"""
     return {
         "name": "BA-Agent API",
         "version": "2.2.0",

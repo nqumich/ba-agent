@@ -21,6 +21,8 @@ router = APIRouter()
 class AgentQueryRequest(BaseModel):
     """Agent 查询请求"""
     message: str = Field(..., description="用户消息", min_length=1, max_length=10000)
+    model: Optional[str] = Field(None, description="使用的模型名称")
+    api_key: Optional[str] = Field(None, description="API 密钥")
     conversation_id: Optional[str] = Field(None, description="对话 ID")
     file_context: Optional[Dict[str, Any]] = Field(None, description="文件上下文")
     session_id: Optional[str] = Field(None, description="会话 ID")
@@ -69,6 +71,8 @@ async def agent_query(request: AgentQueryRequest):
         # 调用 Agent 查询
         result = await service.query(
             message=request.message,
+            model=request.model,
+            api_key=request.api_key,
             conversation_id=request.conversation_id,
             file_context=request.file_context,
             session_id=request.session_id,

@@ -68,6 +68,25 @@ from .base import (
     ToolOutputParser,
 )
 
+
+def get_default_tools():
+    """
+    获取默认工具列表
+
+    返回 BA-Agent 的默认工具集合
+    """
+    return [
+        execute_command_tool,
+        run_python_tool,
+        web_search_tool,
+        web_reader_tool,
+        file_reader_tool,
+        query_database_tool,
+        vector_search_tool,
+        file_write_tool,
+    ]
+
+
 __all__ = [
     "ExecuteCommandInput",
     "execute_command_impl",
@@ -103,4 +122,6 @@ __all__ = [
     "pipeline_tool",
     "tool",
     "ToolOutputParser",
+    # Default tools list
+    "get_default_tools",
 ]

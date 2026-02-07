@@ -11,13 +11,14 @@
 
 ## 🎯 项目状态
 
-**开发进度**: ~85% (24/29 User Stories 完成)
+**开发进度**: ~86% (25/30 User Stories 完成)
 
 **最新进展** (2026-02-07):
 - ✅ 完成核心业务 Skills (US-015/016/017/018) - 90 个测试通过
 - ✅ 完成 API 服务增强 (US-021) - JWT 认证 + 速率限制 + 错误处理
+- ✅ 完成 Web 前端测试控制台 (US-FE-01) - 单页应用 + Agent 对话
 - ✅ 1016 个测试全部通过
-- ✅ FastAPI 服务 v2.2.0 - REST API + JWT 认证
+- ✅ FastAPI 服务 v2.2.0 - REST API + JWT 认证 + Web 前端
 
 **核心功能完成**:
 - ✅ **Phase 1**: Agent 框架 (LangGraph + Claude Sonnet 4.5)
@@ -27,6 +28,7 @@
 - ✅ **FileStore**: 统一文件存储系统
 - ✅ **核心 Skills**: 异动检测、归因分析、报告生成、数据可视化
 - ✅ **API 服务**: REST API + JWT 认证 + 速率限制
+- ✅ **Web 前端**: 单页应用测试控制台
 
 ## 🏗️ 技术架构
 
@@ -34,25 +36,34 @@
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
-| Agent 框架 | LangGraph + Claude Sonnet 4.5 | 可扩展的 Agent 系统 |
+| Agent 框架 | LangGraph + Claude Sonnet 4.5 | 自定义图结构，支持结构化响应 |
 | 工具框架 | LangChain Core | 结构化工具定义 |
-| 输出格式 | Pipeline v2.1 ToolExecutionResult | OutputLevel (BRIEF/STANDARD/FULL) |
+| 输出格式 | Pipeline v2.1 ToolExecutionResult + 结构化响应 | OutputLevel (BRIEF/STANDARD/FULL) |
+| 响应格式 | 结构化 JSON (task_analysis, execution_plan, action) | tool_call/complete 判定 |
 | 数据分析 | pandas, numpy, scipy | Docker 隔离的 Python 执行 |
 | 容器隔离 | Docker | 安全的命令和代码执行 |
 | 记忆管理 | 三层 Markdown | Clawdbot/Manus 模式 |
 | MCP 集成 | Z.ai (智谱) | Web 搜索 + Web 读取 |
 | LingYi AI | Claude/Gemini API | 自定义 API 端点支持 |
+| 前端渲染 | ECharts 5.4 | 图表可视化 |
 
 ### 项目结构
 
 ```
 ba-agent/
 ├── backend/                    # 后端核心
-│   ├── agents/                # Agent 实现 (BAAgent)
+│   ├── agents/                # Agent 实现 (BAAgent + 自定义 LangGraph)
+│   ├── api/                   # FastAPI 服务
+│   │   ├── services/          # BA-Agent 服务封装
+│   │   ├── routes/            # API 路由
+│   │   └── middleware/        # JWT 认证 + 速率限制
 │   ├── docker/                # Docker 沙盒 (DockerSandbox)
 │   ├── hooks/                 # 系统钩子
-│   ├── orchestration/         # 任务编排
-│   └── models/                # Pydantic 数据模型（统一位置）
+│   ├── models/                # Pydantic 数据模型
+│   │   ├── response.py        # 结构化响应格式定义 ⭐ NEW
+│   │   ├── pipeline.py        # Pipeline v2.1
+│   │   └── agent.py           # Agent 状态模型
+│   └── skills/                # Skills 系统
 ├── tools/                     # LangChain 工具
 │   ├── base.py                # 统一工具输出格式包装器
 │   ├── execute_command.py     # 命令行执行
@@ -60,37 +71,23 @@ ba-agent/
 │   ├── web_search.py          # Web 搜索 (MCP)
 │   ├── web_reader.py          # Web Reader (MCP)
 │   ├── file_reader.py         # 文件读取
+│   ├── file_write.py          # 文件写入
 │   ├── database.py            # SQL 查询
-│   ├── vector_search.py       # 向量检索
-│   ├── skill_invoker.py       # Skill 调用
-│   └── skill_manager.py       # Skill 包管理
+│   └── vector_search.py       # 向量检索
 ├── skills/                    # Skills 目录
 │   ├── anomaly_detection/     # 异动检测
 │   ├── attribution/           # 归因分析
 │   ├── report_gen/            # 报告生成
 │   └── visualization/         # 数据可视化
+├── frontend/                  # Web 前端 ⭐ NEW
+│   └── index.html            # 单页应用 (SPA)
 ├── config/                    # 配置文件
 │   ├── config.py              # 配置管理核心
 │   ├── settings.yaml          # 主配置
-│   ├── skills.yaml            # Skills 配置
-│   ├── skills_registry.json   # Skills 注册表
-│   └── tools.yaml             # 工具配置
+│   └── .env                   # 环境变量
 ├── tests/                     # 测试套件
-│   ├── test_agents/           # Agent 测试
-│   ├── test_config/           # 配置测试
-│   ├── test_docker/           # Docker 测试
-│   ├── mcp_server/            # MCP 测试服务器
-│   ├── tools/                 # 工具测试
-│   └── models/                # 模型测试
 ├── memory/                    # 每日对话日志
 ├── docs/                      # 文档
-├── .claude/hooks/             # Claude CLI 钩子 (5个脚本)
-├── AGENTS.md                  # Agent 系统指令
-├── CLAUDE.md                  # 项目级记忆
-├── MEMORY.md                  # 长期知识记忆
-├── USER.md                    # 用户信息
-├── progress.md                # 开发进度
-├── task_plan.md               # 任务计划
 ├── Dockerfile                 # 主服务镜像
 ├── Dockerfile.sandbox         # Python 沙盒镜像
 └── docker-compose.yml         # 开发环境
@@ -176,7 +173,39 @@ uvicorn backend.api.main:app --reload --port 8000
 
 # 访问 API 文档
 open http://localhost:8000/docs
+
+# 访问 Web 前端测试控制台
+open http://localhost:8000
 ```
+
+### Web 前端测试控制台
+
+BA-Agent 提供了完整的单页应用 (SPA) 前端测试控制台：
+
+**功能**:
+- 🔐 JWT 登录/登出
+- 💬 Agent 对话界面
+- 📁 文件管理（拖拽上传/下载/删除）
+- 🎯 Skills 管理（列表/分类查看）
+
+**访问方式**:
+```bash
+# 启动 API 服务器
+uvicorn backend.api.main:app --reload --port 8000
+
+# 浏览器访问前端
+open http://localhost:8000
+
+# 默认登录账号
+用户名: admin
+密码: admin123
+```
+
+**前端技术栈**:
+- 纯 HTML/CSS/JavaScript（无框架依赖）
+- JWT 令牌管理 (localStorage)
+- 响应式设计
+- 拖拽上传支持
 
 ### API 认证
 

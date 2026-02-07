@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BA-Agent 测试控制台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f7;
+            color: #333;
+        }
+
+        /* 登录页面 */
+        #login-page {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .login-card {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .login-card h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #5568d3;
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        /* 主页面 */
+        #main-page {
+            display: none;
+        }
+
+        .header {
+            background: white;
+            padding: 15px 30px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            color: #333;
+        }
+
+        .header .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: #333;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .card h2 {
+            margin-bottom: 15px;
+            font-size: 18px;
+            color: #333;
+        }
+
+        /* 文件列表 */
+        .file-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .file-meta {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .file-actions button {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* 上传区域 */
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 20px;
+            transition: all 0.2s;
+        }
+
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        /* Agent 对话 */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 500px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-content {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: white;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .message.assistant .message-content {
+            background: #667eea;
+            color: white;
+        }
+
+        /* 图表容器样式 */
+        .message-content .chart-container {
+            min-width: 300px;
+            min-height: 200px;
+            background: white;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+
+        .message-content .chart-wrapper {
+            background: white;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 10px 0;
+        }
+
+        .message-content .chart-title {
+            color: #333;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .chat-input {
+            display: flex;
+            gap: 10px;
+            padding: 15px;
+            border-top: 1px solid #ddd;
+        }
+
+        .chat-input input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        /* Skills 列表 */
+        .skills-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
+        }
+
+        .skill-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+            transition: all 0.2s;
+        }
+
+        .skill-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .skill-name {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        .skill-description {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 12px;
+        }
+
+        .skill-meta {
+            display: flex;
+            gap: 10px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .skill-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .skill-actions button {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* 状态指示 */
+        .status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .status.builtin {
+            background: #e7f3ff;
+            color: #0066cc;
+        }
+
+        .status.active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        /* 响应 */
+        @media (max-width: 768px) {
+            .file-item {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .file-actions {
+                width: 100%;
+                justify-content: flex-end;
+            }
+
+            .skills-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* 响应消息 */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert-info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        /* loading */
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-spinner {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 登录页面 -->
+    <div id="login-page">
+        <div class="login-card">
+            <h1>🤖 BA-Agent</h1>
+            <div id="login-error" class="error-message"></div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label>用户名</label>
+                    <input type="text" id="username" placeholder="输入用户名" required>
+                </div>
+                <div class="form-group">
+                    <label>密码</label>
+                    <input type="password" id="password" placeholder="输入密码" required>
+                </div>
+                <button type="submit" class="btn" id="login-btn">登录</button>
+            </form>
+            <p style="margin-top: 20px; text-align: center; color: #666; font-size: 13px;">
+                默认账号: admin / admin123
+            </p>
+        </div>
+    </div>
+
+    <!-- 主页面 -->
+    <div id="main-page">
+        <div class="header">
+            <h1>🤖 BA-Agent 测试控制台</h1>
+            <div class="user-info">
+                <span id="user-display"></span>
+                <button class="btn btn-secondary" onclick="logout()">登出</button>
+            </div>
+        </div>
+
+        <div class="container">
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('agent')">Agent 对话</button>
+                <button class="tab" onclick="switchTab('files')">文件管理</button>
+                <button class="tab" onclick="switchTab('skills')">Skills 管理</button>
+            </div>
+
+            <!-- Agent 对话 Tab -->
+            <div id="agent-tab" class="tab-content active">
+                <div class="card">
+                    <h2>Agent 对话</h2>
+
+                    <!-- 模型配置面板 -->
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <div style="display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap;">
+                            <div style="flex: 1; min-width: 200px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 13px;">选择模型</label>
+                                <select id="model-selector" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;" onchange="onModelChange()">
+                                    <option value="glm-4.7" selected>GLM-4.7 (智谱 AI)</option>
+                                    <option value="glm-4-plus">GLM-4-Plus (智谱 AI)</option>
+                                    <option value="glm-4-flash">GLM-4-Flash (智谱 AI)</option>
+                                    <option value="glm-4-air">GLM-4-Air (智谱 AI)</option>
+                                    <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Anthropic)</option>
+                                    <option value="claude-haiku-4-5-20250929">Claude Haiku 4.5 (Anthropic)</option>
+                                    <option value="gpt-4.1">GPT-4.1 (OpenAI)</option>
+                                    <option value="gpt-4o-mini">GPT-4o Mini (OpenAI)</option>
+                                    <option value="gemini-3-pro-preview">Gemini 3 Pro Preview (Google)</option>
+                                </select>
+                            </div>
+                            <div style="flex: 2; min-width: 300px;">
+                                <label id="api-key-label" style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 13px;">API Key（可选）</label>
+                                <div style="display: flex; gap: 8px;">
+                                    <input type="password" id="api-key-input" placeholder="留空使用后端 .env 配置，或输入自定义 Key" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
+                                    <button class="btn" onclick="saveApiKey()" style="width: auto; padding: 10px 20px; white-space: nowrap;">保存</button>
+                                </div>
+                                <small style="color: #666; font-size: 11px; margin-top: 4px; display: block;">默认使用后端 .env 配置，仅在此处输入可覆盖默认配置</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chat-container">
+                        <div class="chat-messages" id="chat-messages"></div>
+                        <div class="chat-input">
+                            <input type="text" id="agent-query" placeholder="输入您的问题..." onkeypress="if(event.key==='Enter')sendQuery()">
+                            <button class="btn" onclick="sendQuery()" id="send-btn">发送</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 文件管理 Tab -->
+            <div id="files-tab" class="tab-content">
+                <div class="card">
+                    <h2>文件上传</h2>
+                    <div class="upload-area" id="upload-area">
+                        <p>📁 拖拽文件到这里，或点击选择文件</p>
+                        <p style="font-size: 13px; color: #999; margin-top: 8px;">支持 .xlsx, .xls, .csv, .json (最大 50MB)</p>
+                        <input type="file" id="file-input" style="display: none;" accept=".xlsx,.xls,.csv,.json">
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>文件列表</h2>
+                    <div id="file-list" class="file-list">
+                        <p style="text-align: center; color: #999; padding: 20px;">暂无文件</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Skills 管理 Tab -->
+            <div id="skills-tab" class="tab-content">
+                <div class="card">
+                    <h2>Skills 列表</h2>
+                    <div id="skills-list" class="skills-grid">
+                        <p style="text-align: center; color: #999; padding: 20px;">加载中...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ECharts Library -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+
+    <script>
+        // API 配置
+        const API_BASE = 'http://localhost:8000/api/v1';
+
+        // 认证状态
+        let authToken = localStorage.getItem('auth_token');
+        let currentUser = null;
+
+        // 模型配置
+        let selectedModel = localStorage.getItem('selected_model') || 'glm-4.7';
+        let apiKeys = JSON.parse(localStorage.getItem('api_keys') || '{}');
+
+        // 模型配置映射
+        const modelConfig = {
+            'glm-4.7': { name: '智谱 AI', keyLabel: '智谱 AI API Key', envKey: 'ZHIPUAI_API_KEY' },
+            'glm-4-plus': { name: '智谱 AI', keyLabel: '智谱 AI API Key', envKey: 'ZHIPUAI_API_KEY' },
+            'glm-4-flash': { name: '智谱 AI', keyLabel: '智谱 AI API Key', envKey: 'ZHIPUAI_API_KEY' },
+            'glm-4-air': { name: '智谱 AI', keyLabel: '智谱 AI API Key', envKey: 'ZHIPUAI_API_KEY' },
+            'claude-sonnet-4-5-20250929': { name: 'Anthropic', keyLabel: 'Anthropic API Key', envKey: 'ANTHROPIC_API_KEY' },
+            'claude-haiku-4-5-20250929': { name: 'Anthropic', keyLabel: 'Anthropic API Key', envKey: 'ANTHROPIC_API_KEY' },
+            'gpt-4.1': { name: 'OpenAI', keyLabel: 'OpenAI API Key', envKey: 'OPENAI_API_KEY' },
+            'gpt-4o-mini': { name: 'OpenAI', keyLabel: 'OpenAI API Key', envKey: 'OPENAI_API_KEY' },
+            'gemini-3-pro-preview': { name: 'Google', keyLabel: 'Google API Key', envKey: 'GOOGLE_API_KEY' }
+        };
+
+        // 初始化模型配置
+        function initModelConfig() {
+            // 设置选中的模型
+            document.getElementById('model-selector').value = selectedModel;
+
+            // 更新 API Key 标签和输入框
+            updateApiKeyLabel();
+
+            // 如果有保存的 API Key，填充到输入框
+            const savedKey = apiKeys[selectedModel];
+            if (savedKey) {
+                document.getElementById('api-key-input').value = savedKey;
+            }
+        }
+
+        // 模型改变事件
+        function onModelChange() {
+            const selector = document.getElementById('model-selector');
+            selectedModel = selector.value;
+            localStorage.setItem('selected_model', selectedModel);
+
+            // 更新 API Key 标签和输入框
+            updateApiKeyLabel();
+
+            // 填充该模型的 API Key
+            const savedKey = apiKeys[selectedModel];
+            document.getElementById('api-key-input').value = savedKey || '';
+        }
+
+        // 更新 API Key 标签
+        function updateApiKeyLabel() {
+            const config = modelConfig[selectedModel];
+            document.getElementById('api-key-label').textContent = config.keyLabel;
+        }
+
+        // 保存 API Key
+        function saveApiKey() {
+            const apiKey = document.getElementById('api-key-input').value.trim();
+            if (apiKey) {
+                apiKeys[selectedModel] = apiKey;
+                localStorage.setItem('api_keys', JSON.stringify(apiKeys));
+                alert(`API Key 已保存用于 ${modelConfig[selectedModel].name}（将覆盖后端默认配置）`);
+            } else {
+                delete apiKeys[selectedModel];
+                localStorage.setItem('api_keys', JSON.stringify(apiKeys));
+                alert(`API Key 已清除，将使用后端 .env 默认配置`);
+            }
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', () => {
+            // 初始化模型配置
+            initModelConfig();
+            if (authToken) {
+                showMainPage();
+            } else {
+                showLoginPage();
+            }
+
+            // 上传区域事件
+            const uploadArea = document.getElementById('upload-area');
+            const fileInput = document.getElementById('file-input');
+
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length) {
+                    uploadFile(files[0]);
+                }
+            });
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length) {
+                    uploadFile(e.target.files[0]);
+                }
+            });
+        });
+
+        // 登录表单
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            await login(username, password);
+        });
+
+        // API 请求封装
+        async function apiRequest(url, options = {}) {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+
+            const response = await fetch(`${API_BASE}${url}`, {
+                ...options,
+                headers
+            });
+
+            // 处理速率限制
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After');
+                throw new Error(`请求过于频繁，请 ${retryAfter} 秒后重试`);
+            }
+
+            return response;
+        }
+
+        // 登录
+        async function login(username, password) {
+            const btn = document.getElementById('login-btn');
+            btn.disabled = true;
+            btn.textContent = '登录中...';
+
+            const errorDiv = document.getElementById('login-error');
+
+            try {
+                const response = await apiRequest('/auth/login', {
+                    method: 'POST',
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    authToken = data.access_token;
+                    localStorage.setItem('auth_token', authToken);
+                    currentUser = data.user;
+                    showMainPage();
+                } else {
+                    const error = await response.json();
+                    errorDiv.textContent = error.detail || '登录失败';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (error) {
+                errorDiv.textContent = error.message || '网络错误';
+                errorDiv.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '登录';
+            }
+        }
+
+        // 登出
+        async function logout() {
+            try {
+                await apiRequest('/auth/logout', { method: 'POST' });
+            } catch (error) {
+                console.error('登出请求失败:', error);
+            }
+
+            authToken = null;
+            currentUser = null;
+            localStorage.removeItem('auth_token');
+            showLoginPage();
+        }
+
+        // 显示登录页面
+        function showLoginPage() {
+            document.getElementById('login-page').style.display = 'flex';
+            document.getElementById('main-page').style.display = 'none';
+            document.getElementById('login-error').style.display = 'none';
+        }
+
+        // 显示主页面
+        function showMainPage() {
+            document.getElementById('login-page').style.display = 'none';
+            document.getElementById('main-page').style.display = 'block';
+            document.getElementById('user-display').textContent =
+                `${currentUser.username} (${currentUser.role})`;
+            loadFiles();
+            loadSkills();
+            addSystemMessage('欢迎！我可以帮助您进行数据分析、生成报告和可视化。请问您有什么问题？');
+        }
+
+        // 切换 Tab
+        function switchTab(tabName) {
+            // 隐藏所有内容
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+
+            // 显示选中的内容
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // ========== Agent 对话 ==========
+
+        function addMessage(content, isUser = false, isHtml = false) {
+            const messagesDiv = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user' : 'assistant'}`;
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+
+            // 根据参数或自动检测决定是否渲染为 HTML
+            const shouldRenderAsHtml = isHtml || (!isUser && (
+                content.includes('<div') && (content.includes('echarts') || content.includes('chart'))
+            ));
+
+            if (shouldRenderAsHtml && !isUser) {
+                // HTML 内容：使用 innerHTML 渲染
+                contentDiv.innerHTML = content;
+
+                // 初始化 ECharts 图表
+                setTimeout(() => {
+                    // 查找所有包含 echarts 或 chart 的容器
+                    const chartContainers = contentDiv.querySelectorAll('[id*="chart"], [class*="chart"]');
+                    chartContainers.forEach(container => {
+                        if (container && window.echarts && !container.hasAttribute('data-echarts-initialized')) {
+                            try {
+                                // 尝试直接初始化（从内联脚本获取配置）
+                                const chart = echarts.init(container);
+
+                                // 标记已初始化
+                                container.setAttribute('data-echarts-initialized', 'true');
+
+                                // 响应式调整
+                                window.addEventListener('resize', function() {
+                                    chart.resize();
+                                });
+                            } catch (e) {
+                                console.error('ECharts 初始化失败:', e);
+                            }
+                        }
+                    });
+                }, 100);
+            } else {
+                // 纯文本内容
+                contentDiv.textContent = content;
+            }
+
+            messageDiv.appendChild(contentDiv);
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function addSystemMessage(content) {
+            addMessage(content, false);
+        }
+
+        async function sendQuery() {
+            const input = document.getElementById('agent-query');
+            const query = input.value.trim();
+            if (!query) return;
+
+            // 获取 API Key（可选，如果不提供则使用后端 .env 配置）
+            const apiKey = apiKeys[selectedModel] || '';
+
+            input.value = '';
+            addMessage(query, true);
+
+            const sendBtn = document.getElementById('send-btn');
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<span class="loading-spinner"><span class="loading"></span>发送中...</span>';
+
+            try {
+                const requestBody = {
+                    message: query,
+                    model: selectedModel
+                };
+
+                // 只有当用户在前端配置了 API Key 时才发送
+                if (apiKey) {
+                    requestBody.api_key = apiKey;
+                }
+
+                const response = await apiRequest('/agent/query', {
+                    method: 'POST',
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const responseData = data.data;
+                    const responseText = responseData.response || '查询完成';
+
+                    // 检查后端返回的元数据，判断是否为 HTML 内容
+                    const isHtml = responseData.metadata?.contains_html === true ||
+                                   responseData.metadata?.content_type === 'html';
+
+                    addMessage(responseText, false, isHtml);
+                } else {
+                    const error = await response.json();
+                    let errorMsg = error.detail || '查询失败';
+
+                    // 如果有详细的错误信息，显示它
+                    if (error.error) {
+                        const errorInfo = error.error;
+                        if (errorInfo.raw_error) {
+                            errorMsg = `错误: ${errorInfo.raw_error}`;
+                        } else if (errorInfo.error_message) {
+                            errorMsg = `错误: ${errorInfo.error_message}`;
+                        }
+
+                        // 显示建议
+                        if (errorInfo.suggestion) {
+                            errorMsg += `\n\n💡 建议: ${errorInfo.suggestion}`;
+                        }
+                    }
+
+                    addMessage(errorMsg);
+                }
+            } catch (error) {
+                addMessage(`错误: ${error.message}`);
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = '发送';
+            }
+        }
+
+        // ========== 文件管理 ==========
+
+        async function loadFiles() {
+            const listDiv = document.getElementById('file-list');
+            listDiv.innerHTML = '<p style="text-align: center; color: #999;">加载中...</p>';
+
+            try {
+                const response = await apiRequest('/files');
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const files = data.data.files || [];
+
+                    if (files.length === 0) {
+                        listDiv.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">暂无文件</p>';
+                    } else {
+                        listDiv.innerHTML = files.map(file => `
+                            <div class="file-item">
+                                <div class="file-info">
+                                    <div class="file-name">${file.filename}</div>
+                                    <div class="file-meta">
+                                        大小: ${formatFileSize(file.size_bytes)} |
+                                        上传时间: ${formatDate(file.created_at)}
+                                    </div>
+                                </div>
+                                <div class="file-actions">
+                                    <button class="btn" onclick="downloadFile('${file.file_id}')">下载</button>
+                                    <button class="btn btn-danger" onclick="deleteFile('${file.file_id}')">删除</button>
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                } else {
+                    listDiv.innerHTML = `<p style="text-align: center; color: #dc3545; padding: 20px;">加载失败</p>`;
+                }
+            } catch (error) {
+                listDiv.innerHTML = `<p style="text-align: center; color: #dc3545; padding: 20px;">${error.message}</p>`;
+            }
+        }
+
+        async function uploadFile(file) {
+            // 验证文件大小
+            const maxSize = 50 * 1024 * 1024; // 50MB
+            if (file.size > maxSize) {
+                alert(`文件过大，最大支持 ${maxSize / (1024*1024)}MB`);
+                return;
+            }
+
+            // 验证文件类型
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+            const allowedExts = ['.xlsx', '.xls', '.csv', '.json'];
+            if (!allowedExts.includes(ext)) {
+                alert(`不支持的文件格式: ${ext}，支持的格式: ${allowedExts.join(', ')}`);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('session_id', 'web_test_' + Date.now());
+
+            try {
+                const response = await apiRequest('/files/upload', {
+                    method: 'POST',
+                    headers: {}, // 让浏览器设置 Content-Type
+                    body: formData
+                });
+
+                if (response.ok) {
+                    alert('文件上传成功！');
+                    loadFiles();
+                } else {
+                    const error = await response.json();
+                    alert(`上传失败: ${error.detail || '未知错误'}`);
+                }
+            } catch (error) {
+                alert(`上传失败: ${error.message}`);
+            }
+        }
+
+        async function downloadFile(fileId) {
+            try {
+                const response = await apiRequest(`/files/${fileId}/download`);
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `file_${fileId}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                } else {
+                    alert('下载失败');
+                }
+            } catch (error) {
+                alert(`下载失败: ${error.message}`);
+            }
+        }
+
+        async function deleteFile(fileId) {
+            if (!confirm('确定要删除这个文件吗？')) return;
+
+            try {
+                const response = await apiRequest(`/files/${fileId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('文件已删除');
+                    loadFiles();
+                } else {
+                    alert('删除失败');
+                }
+            } catch (error) {
+                alert(`删除失败: ${error.message}`);
+            }
+        }
+
+        // ========== Skills 管理 ==========
+
+        async function loadSkills() {
+            const listDiv = document.getElementById('skills-list');
+            listDiv.innerHTML = '<p style="text-align: center; color: #999;">加载中...</p>';
+
+            try {
+                const response = await apiRequest('/skills');
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const skills = data.data.skills || [];
+
+                    if (skills.length === 0) {
+                        listDiv.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">暂无 Skills</p>';
+                    } else {
+                        listDiv.innerHTML = skills.map(skill => `
+                            <div class="skill-card">
+                                <div class="skill-name">${skill.name}</div>
+                                <div class="skill-description">${skill.description || '无描述'}</div>
+                                <div class="skill-meta">
+                                    <span class="status ${skill.source === 'builtin' ? 'builtin' : ''}">${skill.source === 'builtin' ? '内置' : '外部'}</span>
+                                    ${skill.category ? `<span>分类: ${skill.category}</span>` : ''}
+                                </div>
+                                <div class="skill-actions">
+                                    ${skill.active ? '<span class="status active">已激活</span>' : ''}
+                                </div>
+                            </div>
+                        `).join('');
+                    }
+                } else {
+                    listDiv.innerHTML = '<p style="text-align: center; color: #dc3545; padding: 20px;">加载失败</p>';
+                }
+            } catch (error) {
+                listDiv.innerHTML = `<p style="text-align: center; color: #dc3545; padding: 20px;">${error.message}</p>`;
+            }
+        }
+
+        // 工具函数
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function formatDate(timestamp) {
+            if (!timestamp) return '-';
+            return new Date(timestamp * 1000).toLocaleString('zh-CN');
+        }
+    </script>
+</body>
+</html>

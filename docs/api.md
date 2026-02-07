@@ -185,9 +185,13 @@ curl -X POST http://localhost:8000/api/v1/files/upload \
 
 ```json
 {
-  "query": "string",
+  "message": "string",
+  "model": "string (optional)",
+  "api_key": "string (optional)",
+  "conversation_id": "string (optional)",
+  "file_context": "object (optional)",
   "session_id": "string (optional)",
-  "context": "object (optional)"
+  "user_id": "string (optional)"
 }
 ```
 
@@ -197,12 +201,31 @@ curl -X POST http://localhost:8000/api/v1/files/upload \
 {
   "success": true,
   "data": {
-    "response": "Agent 响应内容",
+    "response": "Agent 响应内容（包含 HTML/图表）",
     "conversation_id": "conv_123",
-    "tools_used": []
+    "duration_ms": 1234,
+    "tool_calls": [],
+    "artifacts": [],
+    "metadata": {
+      "action_type": "tool_call | complete",
+      "current_round": 1,
+      "task_analysis": "思维链分析",
+      "execution_plan": "执行计划",
+      "status": "processing | complete",
+      "contains_html": true,
+      "recommended_questions": ["问题1", "问题2"],
+      "download_links": ["file.xlsx"]
+    }
   }
 }
 ```
+
+**响应格式说明**:
+
+- `action_type`: `tool_call` 表示正在处理，`complete` 表示完成
+- `contains_html`: 响应是否包含 HTML/ECharts 代码
+- `recommended_questions`: 推荐的后续问题（仅 complete 时）
+- `download_links`: 可下载的文件列表（仅 complete 时）
 
 ### POST /api/v1/agent/conversation/start
 
