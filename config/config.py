@@ -49,6 +49,19 @@ class DatabaseConnectionConfig(BaseModel):
     max_overflow: int = Field(default=20, description="最大溢出连接数")
 
 
+class DatabaseCleanupConfig(BaseModel):
+    """数据库清理配置"""
+
+    enabled: bool = Field(default=True, description="是否启用自动清理")
+    max_age_hours: float = Field(default=24.0, description="数据库文件最大保留时间（小时）")
+    max_total_size_mb: float = Field(default=500.0, description="数据库目录最大总大小（MB）")
+    cleanup_on_shutdown: bool = Field(default=True, description="关闭时是否清理")
+    exclude_files: list[str] = Field(
+        default_factory=lambda: ["sqlite.db", "memory.db"],
+        description="清理时排除的文件列表"
+    )
+
+
 class DatabaseConfig(BaseModel):
     """数据库配置
 
@@ -81,6 +94,12 @@ class DatabaseConfig(BaseModel):
     security: DatabaseSecurityConfig = Field(
         default_factory=DatabaseSecurityConfig,
         description="数据库安全配置"
+    )
+
+    # 清理配置
+    cleanup: DatabaseCleanupConfig = Field(
+        default_factory=DatabaseCleanupConfig,
+        description="数据库清理配置"
     )
 
 

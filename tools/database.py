@@ -1,8 +1,13 @@
 """
-数据库查询工具 (v3.0 - SQLite First, PostgreSQL Optional)
+数据库查询工具 (v3.1 - SQLite First, PostgreSQL Optional)
 
 使用 SQLite 作为默认数据库（嵌入式，无需外部服务器）
 可选支持 PostgreSQL 和 ClickHouse（用于企业级部署）
+
+v3.1 变更 (2026-02-08)：
+- ✅ 添加数据库文件自动清理机制
+- ✅ 支持定期删除过期的数据库文件
+- ✅ 可配置清理策略（保留时间、文件大小限制）
 
 v3.0 变更 (2026-02-07)：
 - ✅ 默认使用 SQLite（无需外部服务器）
@@ -487,8 +492,13 @@ query_database_tool = StructuredTool.from_function(
 )
 
 
-def _close_connections():
-    """关闭所有数据库连接"""
+def _close_connections(cleanup: bool = None):
+    """
+    关闭所有数据库连接
+
+    Args:
+        cleanup: 是否清理数据库文件（None 表示使用配置）
+    """
     global _sqlite_connections, _engines
 
     # 关闭 SQLite 连接
@@ -507,3 +517,251 @@ def _close_connections():
             except Exception:
                 pass
         _engines.clear()
+
+    # 清理数据库文件
+    try:
+        config = get_config()
+        cleanup_config = config.database.cleanup if hasattr(config.database, 'cleanup') else None
+
+        # 确定是否清理
+        should_cleanup = cleanup
+        if should_cleanup is None:
+            should_cleanup = cleanup_config.cleanup_on_shutdown if cleanup_config else True
+
+        if should_cleanup and (cleanup_config.enabled if cleanup_config else True):
+            deleted_count = _cleanup_database_files()
+            if deleted_count > 0:
+                logger.info(f"已清理 {deleted_count} 个数据库文件")
+    except Exception as e:
+        logger.warning(f"清理数据库文件时出错: {e}")
+
+
+# 定期清理任务
+_cleanup_task_running = False
+
+
+def start_periodic_cleanup(interval_hours: float = None):
+    """
+    启动定期清理数据库文件的后台任务
+
+    Args:
+        interval_hours: 清理间隔（小时），None 表示使用配置
+    """
+    global _cleanup_task_running
+
+    if _cleanup_task_running:
+        logger.warning("定期清理任务已在运行")
+        return
+
+    _cleanup_task_running = True
+
+    # 从配置获取清理间隔
+    if interval_hours is None:
+        config = get_config()
+        cleanup_config = config.database.cleanup if hasattr(config.database, 'cleanup') else None
+        # 默认每天清理一次
+        interval_hours = cleanup_config.max_age_hours if cleanup_config else 24.0
+
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    async def cleanup_loop():
+        """清理循环"""
+        while _cleanup_task_running:
+            try:
+                # 等待指定时间
+                await asyncio.sleep(interval_hours * 3600)
+
+                # 执行清理
+                result = _cleanup_old_databases()
+                if result["deleted_files"]:
+                    logger.info(f"定期清理: 删除了 {len(result['deleted_files'])} 个文件")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"定期清理任务出错: {e}")
+
+    # 在后台启动清理任务
+    try:
+        loop = asyncio.get_event_loop()
+        asyncio.create_task(cleanup_loop())
+        logger.info(f"已启动定期清理任务，间隔: {interval_hours} 小时")
+    except RuntimeError:
+        # 没有事件循环，使用线程
+        logger.warning("没有事件循环，定期清理任务未启动")
+
+
+def _cleanup_database_files(
+    exclude: List[str] = None,
+    max_age_hours: float = None
+) -> int:
+    """
+    清理数据库文件
+
+    Args:
+        exclude: 要排除的文件名列表（默认排除 sqlite.db, memory.db）
+        max_age_hours: 最大保留时间（小时），超过此时间的文件将被删除
+                      None 表示使用配置文件中的值
+
+    Returns:
+        删除的文件数量
+    """
+    # 从配置获取清理设置
+    config = get_config()
+    cleanup_config = config.database.cleanup if hasattr(config.database, 'cleanup') else None
+
+    if exclude is None:
+        if cleanup_config:
+            exclude = cleanup_config.exclude_files
+        else:
+            exclude = ["sqlite.db", "memory.db"]  # 默认保留主要数据库文件
+
+    if max_age_hours is None:
+        if cleanup_config:
+            max_age_hours = cleanup_config.max_age_hours
+        else:
+            max_age_hours = 24  # 默认保留 24 小时
+
+    deleted_count = 0
+    current_time = time.time()
+
+    try:
+        if not _DATA_DIR.exists():
+            return 0
+
+        for db_file in _DATA_DIR.glob("*.db"):
+            # 跳过排除的文件
+            if db_file.name in exclude:
+                continue
+
+            # 检查文件年龄
+            file_age_seconds = current_time - db_file.stat().st_mtime
+            file_age_hours = file_age_seconds / 3600
+
+            if file_age_hours >= max_age_hours:
+                try:
+                    db_file.unlink()
+                    deleted_count += 1
+                    logger.info(f"已删除过期数据库文件: {db_file.name} (年龄: {file_age_hours:.1f}小时)")
+                except Exception as e:
+                    logger.warning(f"删除数据库文件失败 {db_file.name}: {e}")
+
+    except Exception as e:
+        logger.error(f"清理数据库文件时出错: {e}")
+
+    return deleted_count
+
+
+# 添加 logger
+import logging
+logger = logging.getLogger(__name__)
+
+
+def _cleanup_old_databases(
+    max_age_hours: float = 24,
+    max_total_size_mb: float = 500,
+    dry_run: bool = False
+) -> Dict[str, Any]:
+    """
+    定期清理旧的数据库文件
+
+    清理策略：
+    1. 删除超过 max_age_hours 的临时数据库文件
+    2. 如果总大小超过 max_total_size_mb，删除最旧的文件
+
+    Args:
+        max_age_hours: 最大保留时间（小时）
+        max_total_size_mb: 数据库目录最大总大小（MB）
+        dry_run: 仅模拟运行，不实际删除
+
+    Returns:
+        清理结果统计
+    """
+    result = {
+        "deleted_files": [],
+        "deleted_size_bytes": 0,
+        "total_size_before_mb": 0,
+        "total_size_after_mb": 0,
+        "dry_run": dry_run
+    }
+
+    try:
+        if not _DATA_DIR.exists():
+            return result
+
+        # 获取所有数据库文件及其信息
+        db_files = []
+        total_size = 0
+
+        for db_file in _DATA_DIR.glob("*.db"):
+            # 跳过主要数据库文件
+            if db_file.name in ["sqlite.db", "memory.db"]:
+                continue
+
+            stat = db_file.stat()
+            file_age_hours = (time.time() - stat.st_mtime) / 3600
+            file_size = stat.st_size
+
+            db_files.append({
+                "path": db_file,
+                "name": db_file.name,
+                "age_hours": file_age_hours,
+                "size_bytes": file_size,
+                "mtime": stat.st_mtime
+            })
+
+            total_size += file_size
+
+        result["total_size_before_mb"] = total_size / (1024 * 1024)
+
+        # 按年龄排序（最旧的在前）
+        db_files.sort(key=lambda x: x["mtime"])
+
+        # 1. 删除超过年龄限制的文件
+        for db_info in db_files[:]:
+            if db_info["age_hours"] >= max_age_hours:
+                if not dry_run:
+                    try:
+                        db_info["path"].unlink()
+                        result["deleted_files"].append(db_info["name"])
+                        result["deleted_size_bytes"] += db_info["size_bytes"]
+                        logger.info(f"已删除过期数据库: {db_info['name']} (年龄: {db_info['age_hours']:.1f}h)")
+                    except Exception as e:
+                        logger.warning(f"删除数据库文件失败 {db_info['name']}: {e}")
+                else:
+                    result["deleted_files"].append(f"[DRY RUN] {db_info['name']}")
+                    result["deleted_size_bytes"] += db_info["size_bytes"]
+
+                db_files.remove(db_info)
+
+        # 2. 如果总大小仍然超过限制，继续删除最旧的文件
+        remaining_size = total_size - result["deleted_size_bytes"]
+        max_size_bytes = max_total_size_mb * 1024 * 1024
+
+        while remaining_size > max_size_bytes and db_files:
+            db_info = db_files.pop(0)
+            if not dry_run:
+                try:
+                    db_info["path"].unlink()
+                    result["deleted_files"].append(db_info["name"])
+                    result["deleted_size_bytes"] += db_info["size_bytes"]
+                    remaining_size -= db_info["size_bytes"]
+                    logger.info(f"已删除数据库以释放空间: {db_info['name']} ({db_info['size_bytes']/1024:.1f}KB)")
+                except Exception as e:
+                    logger.warning(f"删除数据库文件失败 {db_info['name']}: {e}")
+            else:
+                result["deleted_files"].append(f"[DRY RUN] {db_info['name']}")
+                result["deleted_size_bytes"] += db_info["size_bytes"]
+                remaining_size -= db_info["size_bytes"]
+
+        result["total_size_after_mb"] = remaining_size / (1024 * 1024)
+
+        if result["deleted_files"]:
+            logger.info(f"数据库清理完成: 删除 {len(result['deleted_files'])} 个文件, "
+                       f"释放 {result['deleted_size_bytes']/1024/1024:.2f}MB")
+
+    except Exception as e:
+        logger.error(f"定期清理数据库时出错: {e}")
+
+    return result

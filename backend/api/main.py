@@ -69,6 +69,14 @@ async def lifespan(app: FastAPI):
         all_metadata = skill_registry.get_all_metadata()
         logger.info(f"Skills 系统初始化完成，已加载 {len(all_metadata)} 个 Skills")
 
+        # 启动数据库定期清理任务
+        try:
+            from tools.database import start_periodic_cleanup
+            start_periodic_cleanup()
+            logger.info("数据库定期清理任务已启动")
+        except Exception as e:
+            logger.warning(f"启动数据库清理任务失败: {e}")
+
         logger.info("BA-Agent API 服务启动完成")
 
         yield
@@ -83,7 +91,7 @@ async def lifespan(app: FastAPI):
         if "file_store" in app_state:
             app_state["file_store"].close()
 
-        # 关闭数据库连接
+        # 关闭数据库连接并清理文件
         try:
             from tools.database import _close_connections
             _close_connections()
