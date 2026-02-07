@@ -27,14 +27,6 @@ class AgentQueryRequest(BaseModel):
     user_id: Optional[str] = Field(None, description="用户 ID")
 
 
-class ToolCallInfo(BaseModel):
-    """工具调用信息"""
-    tool: str = Field(description="工具名称")
-    input: Dict[str, Any] = Field(description="工具输入")
-    output: Optional[str] = Field(None, description="工具输出")
-    duration_ms: Optional[float] = Field(None, description="执行耗时（毫秒）")
-
-
 class AgentQueryResponse(BaseModel):
     """Agent 查询响应"""
     success: bool = True
@@ -47,6 +39,21 @@ class ConversationHistoryResponse(BaseModel):
     data: Optional[Dict[str, Any]] = None
 
 
+# ===== 辅助函数 =====
+
+def _get_agent_service():
+    """获取 BAAgentService 实例"""
+    app_state = get_app_state()
+    service = app_state.get("agent_service")
+    if not service:
+        # 延迟初始化
+        from backend.api.services.ba_agent import BAAgentService
+        service = BAAgentService()
+        app_state["agent_service"] = service
+        logger.info("BAAgentService 初始化完成")
+    return service
+
+
 # ===== 端点 =====
 
 @router.post("/query", response_model=AgentQueryResponse)
@@ -57,55 +64,21 @@ async def agent_query(request: AgentQueryRequest):
     处理用户查询并返回 Agent 响应
     """
     try:
-        # 检查是否有 BAAgent 实例
-        app_state = get_app_state()
-        agent = app_state.get("agent")
+        service = _get_agent_service()
 
-        if not agent:
-            raise HTTPException(
-                status_code=503,
-                detail="Agent 服务未初始化，请稍后重试"
-            )
-
-        # 构建消息
-        messages = []
-        if request.file_context and "file_id" in request.file_context:
-            # 添加文件上下文到消息中
-            file_ref = f"upload:{request.file_context['file_id']}"
-            messages.append({
-                "role": "system",
-                "content": f"用户已上传文件，文件引用: {file_ref}"
-            })
-
-        messages.append({
-            "role": "user",
-            "content": request.message
-        })
-
-        # 调用 Agent
-        logger.info(f"Agent 查询: conversation_id={request.conversation_id}, message={request.message[:100]}...")
-
-        # TODO: 实际调用 BAAgent
-        # result = agent.invoke(
-        #     messages=messages,
-        #     conversation_id=request.conversation_id,
-        #     session_id=request.session_id
-        # )
-
-        # 模拟响应（待 BAAgent 集成后移除）
-        result = {
-            "response": f"这是对 '{request.message}' 的模拟响应。BAAgent 集成后将返回实际分析结果。",
-            "conversation_id": request.conversation_id or "conv_new",
-            "tool_calls": [],
-            "artifacts": []
-        }
+        # 调用 Agent 查询
+        result = await service.query(
+            message=request.message,
+            conversation_id=request.conversation_id,
+            file_context=request.file_context,
+            session_id=request.session_id,
+            user_id=request.user_id
+        )
 
         logger.info(f"Agent 响应: conversation_id={result.get('conversation_id')}")
 
         return AgentQueryResponse(data=result)
 
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Agent 查询失败: {e}", exc_info=True)
         raise HTTPException(
@@ -161,26 +134,13 @@ async def get_conversation_history(
     返回指定对话的消息历史
     """
     try:
-        # TODO: 从 MemoryStore 或数据库获取对话历史
-        # 这里返回模拟数据
-
-        messages = [
-            {
-                "role": "user",
-                "content": "你好",
-                "timestamp": "2026-02-07T10:00:00Z"
-            },
-            {
-                "role": "assistant",
-                "content": "你好！我是商业分析助手，有什么可以帮您的？",
-                "timestamp": "2026-02-07T10:00:01Z"
-            }
-        ]
+        service = _get_agent_service()
+        history = service.get_conversation_history(conversation_id, limit)
 
         result = {
             "conversation_id": conversation_id,
-            "total_messages": len(messages),
-            "messages": messages[:limit]
+            "total_messages": len(history),
+            "messages": history[:limit]
         }
 
         return ConversationHistoryResponse(data=result)
@@ -201,8 +161,14 @@ async def end_conversation(conversation_id: str):
     标记对话为已结束状态
     """
     try:
-        # TODO: 更新对话状态
-        logger.info(f"结束对话: {conversation_id}")
+        service = _get_agent_service()
+        success = service.end_conversation(conversation_id)
+
+        if not success:
+            raise HTTPException(
+                status_code=404,
+                detail=f"对话不存在: {conversation_id}"
+            )
 
         return {
             "success": True,
@@ -210,6 +176,8 @@ async def end_conversation(conversation_id: str):
             "conversation_id": conversation_id
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"结束对话失败: {e}", exc_info=True)
         raise HTTPException(
@@ -228,10 +196,17 @@ async def get_agent_status():
     try:
         app_state = get_app_state()
 
+        # 获取服务状态
+        service = _get_agent_service()
+        service_status = service.get_status()
+
         status = {
-            "agent_initialized": "agent" in app_state,
+            "agent_initialized": service_status["agent_initialized"],
             "filestore_initialized": "file_store" in app_state,
-            "active_conversations": 0,  # TODO: 实际统计
+            "skills_initialized": "skill_registry" in app_state,
+            "active_conversations": service_status["active_conversations"],
+            "total_conversations": service_status["total_conversations"],
+            "model_name": service_status["model_name"],
             "version": "2.1.0"
         }
 

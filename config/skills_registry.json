@@ -2,52 +2,52 @@
   "installed": {
     "skill_0": {
       "source_type": "zip",
-      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-167/test_multiple_skills0/skill_0.zip",
+      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-168/test_multiple_skills0/skill_0.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-07T15:30:27.640590"
+      "installed_at": "2026-02-07T15:43:20.695389"
     },
     "skill_1": {
       "source_type": "zip",
-      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-167/test_multiple_skills0/skill_1.zip",
+      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-168/test_multiple_skills0/skill_1.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-07T15:30:27.643451"
+      "installed_at": "2026-02-07T15:43:20.697708"
     },
     "skill_2": {
       "source_type": "zip",
-      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-167/test_multiple_skills0/skill_2.zip",
+      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-168/test_multiple_skills0/skill_2.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-07T15:30:27.646060"
+      "installed_at": "2026-02-07T15:43:20.700724"
     },
     "nested_skill": {
       "source_type": "zip",
-      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-167/test_zip_with_nested_skill0/nested.zip",
+      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-168/test_zip_with_nested_skill0/nested.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-07T15:30:27.652389"
+      "installed_at": "2026-02-07T15:43:20.706186"
     },
     "test_skill": {
       "source_type": "zip",
-      "location": "/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/tmp4x9flfb0/test_skill.zip",
+      "location": "/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/tmpasf09ax4/test_skill.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-07T15:30:27.630728"
+      "installed_at": "2026-02-07T15:43:20.686461"
     },
     "external_skill": {
       "source_type": "zip",
-      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-167/test_built_in_and_external_ski0/external_skill.zip",
+      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-168/test_built_in_and_external_ski0/external_skill.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-07T15:30:27.760474"
+      "installed_at": "2026-02-07T15:43:20.764814"
     }
   },
-  "last_update": "2026-02-07T15:30:27.760480"
+  "last_update": "2026-02-07T15:43:20.764817"
 }

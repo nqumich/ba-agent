@@ -1,7 +1,7 @@
 """
 BA-Agent FastAPI 服务
 
-提供 REST API 接口用于文件上传、Agent 查询等功能
+提供 REST API 接口用于文件上传、Agent 查询、Skills 管理等功能
 """
 
 from fastapi import FastAPI, Request, Response
@@ -10,9 +10,11 @@ from fastapi.responses import JSONResponse
 import logging
 from contextlib import asynccontextmanager
 
-from backend.api.routes import files, agent, health
+from backend.api.routes import files, agent, skills, health
 from backend.api.state import set_app_state
 from backend.filestore import get_file_store
+from backend.skills import SkillLoader, SkillRegistry, SkillActivator
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +29,25 @@ async def lifespan(app: FastAPI):
         # 初始化 FileStore
         file_store = get_file_store()
         set_app_state("file_store", file_store)
-
         logger.info("FileStore 初始化完成")
+
+        # 初始化 Skills 系统
+        skills_dirs = [
+            Path("skills"),
+            Path(".claude/skills")
+        ]
+        skill_loader = SkillLoader(skills_dirs)
+        skill_registry = SkillRegistry(skill_loader)
+        skill_activator = SkillActivator(skill_registry)
+
+        set_app_state("skill_registry", skill_registry)
+        set_app_state("skill_activator", skill_activator)
+        set_app_state("skill_loader", skill_loader)
+
+        # 预加载 Skills 元数据
+        all_metadata = skill_registry.get_all_metadata()
+        logger.info(f"Skills 系统初始化完成，已加载 {len(all_metadata)} 个 Skills")
+
         logger.info("BA-Agent API 服务启动完成")
 
         yield
@@ -39,6 +58,7 @@ async def lifespan(app: FastAPI):
 
         from backend.api.state import get_app_state
         app_state = get_app_state()
+
         if "file_store" in app_state:
             app_state["file_store"].close()
 
@@ -104,6 +124,12 @@ app.include_router(
     tags=["Agent 交互"]
 )
 
+app.include_router(
+    skills.router,
+    prefix="/api/v1/skills",
+    tags=["Skills 管理"]
+)
+
 
 # 根路径
 @app.get("/")
@@ -113,7 +139,13 @@ async def root():
         "name": "BA-Agent API",
         "version": "2.1.0",
         "status": "running",
-        "docs": "/docs"
+        "docs": "/docs",
+        "endpoints": {
+            "health": "/api/v1/health",
+            "files": "/api/v1/files",
+            "agent": "/api/v1/agent",
+            "skills": "/api/v1/skills"
+        }
     }
 
 
