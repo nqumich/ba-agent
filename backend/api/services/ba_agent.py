@@ -474,7 +474,14 @@ class BAAgentService:
         message: str,
         file_context: Optional[Dict[str, Any]]
     ) -> List[Dict[str, str]]:
-        """构建消息列表，包含结构化响应系统提示"""
+        """
+        构建消息列表，包含结构化响应系统提示
+
+        处理代码引用：
+        - 检测消息中是否包含 code_id 引用（如 code_xxx）
+        - 如果检测到，从 FileStore 读取代码并添加到上下文
+        - 代码引用格式：code_xxx 或 <!-- CODE: code_xxx -->
+        """
         messages = []
 
         # 添加结构化响应系统提示
@@ -482,6 +489,34 @@ class BAAgentService:
             "role": "system",
             "content": STRUCTURED_RESPONSE_SYSTEM_PROMPT
         })
+
+        # 检测并处理代码引用
+        code_refs = self._extract_code_references(message)
+        if code_refs:
+            try:
+                from backend.api.state import get_app_state
+                file_store = get_app_state().get("file_store")
+
+                if file_store:
+                    code_store = file_store.code
+
+                    for code_id in code_refs:
+                        # 尝试从 FileStore 读取代码
+                        if code_store.exists(code_id):
+                            code_content = code_store.retrieve(code_id)
+
+                            # 添加代码上下文消息
+                            messages.append({
+                                "role": "system",
+                                "content": f"以下是代码 {code_id} 的内容：\n\n``{code_content.metadata.get('language', 'python')}\n{code_content.content.decode('utf-8')}```\n\n代码已加载到上下文，可以进行修改或分析。"
+                            })
+
+                            logger.info(f"已加载代码引用: {code_id}")
+                        else:
+                            logger.warning(f"代码引用 {code_id} 不存在")
+
+            except Exception as e:
+                logger.warning(f"处理代码引用失败: {e}")
 
         # 添加文件上下文
         if file_context and "file_id" in file_context:
@@ -498,6 +533,42 @@ class BAAgentService:
         })
 
         return messages
+
+    def _extract_code_references(self, text: str) -> List[str]:
+        """
+        从文本中提取代码引用
+
+        支持的引用格式：
+        - code_xxx
+        - <!-- CODE: code_xxx -->
+        - <!-- CODE_SAVED: code_xxx | ... -->
+
+        Args:
+            text: 输入文本
+
+        Returns:
+            提取的 code_id 列表
+        """
+        import re
+        code_refs = []
+
+        # 匹配 code_xxx 格式
+        pattern1 = r'\b(code_[a-zA-Z0-9_]+)\b'
+        matches1 = re.findall(pattern1, text)
+        code_refs.extend(matches1)
+
+        # 匹配 <!-- CODE: code_xxx --> 格式
+        pattern2 = r'<!--\s*CODE:\s*(code_[a-zA-Z0-9_]+)\s*-->'
+        matches2 = re.findall(pattern2, text)
+        code_refs.extend(matches2)
+
+        # 匹配 <!-- CODE_SAVED: code_xxx | ... --> 格式
+        pattern3 = r'<!--\s*CODE_SAVED:\s*(code_[a-zA-Z0-9_]+)\s*\|'
+        matches3 = re.findall(pattern3, text)
+        code_refs.extend(matches3)
+
+        # 去重并返回
+        return list(set(code_refs))
 
     def _extract_response_content(
         self,
@@ -560,7 +631,7 @@ class BAAgentService:
             # 获取最终报告内容
             final_report = structured_response.get_final_report()
 
-            # 代码管理流程（使用模型提供的代码标识）
+            # 代码管理流程（使用模型提供的代码标识和内容）
             if structured_response.has_code_blocks():
                 try:
                     from backend.api.state import get_app_state
@@ -573,48 +644,37 @@ class BAAgentService:
                         code_store = file_store.code
                         code_blocks_info = structured_response.get_code_blocks()
 
-                        logger.info(f"模型提供了 {len(code_blocks_info)} 个代码块标识")
+                        logger.info(f"模型提供了 {len(code_blocks_info)} 个代码块")
+
+                        # 收集代码保存标记
+                        code_markers = []
 
                         # 处理每个代码块
-                        processed_report = final_report
                         for code_block_info in code_blocks_info:
                             code_id = code_block_info.code_id
                             language = code_block_info.language
                             description = code_block_info.description or ""
+                            code = code_block_info.code  # 直接从 code 字段获取
 
                             # 只处理 Python 代码
                             if language in ("python", "py"):
-                                # 从 final_report 中提取对应的代码块
-                                # 查找代码块（通过 code_id 定位或按顺序）
-                                code_pattern = rf'```{language}\s*\n(.*?)\n```'
-                                import re
-                                matches = list(re.finditer(code_pattern, processed_report, re.DOTALL))
+                                # 保存代码到 FileStore
+                                code_ref = code_store.store(
+                                    content=code.encode('utf-8'),
+                                    code_id=code_id,
+                                    session_id=session_id,
+                                    description=description
+                                )
 
-                                if matches:
-                                    # 使用第一个匹配的代码块（或根据 code_id 定位）
-                                    code_match = matches[0]
-                                    code = code_match.group(1)
+                                logger.info(f"代码已保存: {code_id}, description={description}, file_ref={code_ref.file_id}")
 
-                                    # 保存代码到 FileStore
-                                    code_ref = code_store.store(
-                                        content=code.encode('utf-8'),
-                                        code_id=code_id,
-                                        session_id=session_id,
-                                        description=description
-                                    )
+                                # 创建代码保存标记
+                                marker = CodeStore.create_code_saved_marker(code_id, description)
+                                code_markers.append(marker)
 
-                                    logger.info(f"代码已保存: {code_id}, description={description}, file_ref={code_ref.file_id}")
-
-                                    # 替换代码块为保存标识
-                                    code_block_full = code_match.group(0)  # 完整匹配包括 ``` 标记
-                                    marker = CodeStore.create_code_saved_marker(code_id, description)
-                                    processed_report = processed_report.replace(code_block_full, marker, 1)
-
-                        # 更新结构化响应中的内容
-                        if processed_report != final_report:
-                            structured_response.action.content = processed_report
-                            logger.info("代码块已替换为保存标识")
-                            final_report = processed_report
+                        # 将代码保存标记添加到 final_report
+                        if code_markers:
+                            final_report = final_report + "\n\n" + "\n".join(code_markers)
 
                 except Exception as code_error:
                     # 代码管理流程出错不影响主流程

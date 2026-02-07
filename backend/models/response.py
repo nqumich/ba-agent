@@ -44,6 +44,10 @@ class CodeBlock(BaseModel):
         default=None,
         description="代码描述，用于后续识别和检索"
     )
+    code: str = Field(
+        ...,
+        description="代码内容，不包含 markdown 代码块标记（```）"
+    )
 
 
 class Action(BaseModel):
@@ -362,11 +366,149 @@ def parse_structured_response(response_text: str) -> Optional[StructuredResponse
     )
 
 
+def validate_structured_response(response: StructuredResponse) -> tuple[bool, List[str]]:
+    """
+    校验结构化响应格式
+
+    Args:
+        response: 结构化响应对象
+
+    Returns:
+        (is_valid, error_messages): 是否有效，错误信息列表
+    """
+    errors = []
+
+    # 校验基础字段
+    if not response.task_analysis or len(response.task_analysis.strip()) < 10:
+        errors.append("task_analysis 不能为空且长度应至少 10 个字符")
+
+    if not response.execution_plan or "R1" not in response.execution_plan:
+        errors.append("execution_plan 不能为空且必须包含 R1 轮次说明")
+
+    if response.current_round < 1:
+        errors.append("current_round 必须大于 0")
+
+    # 校验 action 字段
+    action = response.action
+
+    if action.type == "tool_call":
+        if not isinstance(action.content, list):
+            errors.append("type=tool_call 时 content 必须是数组")
+
+        if not action.content:
+            errors.append("type=tool_call 时 content 不能为空")
+
+        if len(action.content) > 6:
+            errors.append("单次最多支持 6 个工具调用")
+
+        # 校验每个工具调用
+        for i, tool_call in enumerate(action.content):
+            if not isinstance(tool_call, dict):
+                errors.append(f"工具调用 {i+1} 必须是对象")
+                continue
+
+            if "tool_name" not in tool_call:
+                errors.append(f"工具调用 {i+1} 缺少 tool_name 字段")
+
+            if "tool_call_id" not in tool_call:
+                errors.append(f"工具调用 {i+1} 缺少 tool_call_id 字段")
+
+            if "arguments" not in tool_call:
+                errors.append(f"工具调用 {i+1} 缺少 arguments 字段")
+
+    elif action.type == "complete":
+        if not isinstance(action.content, str):
+            errors.append("type=complete 时 content 必须是字符串")
+
+        if not action.content:
+            errors.append("type=complete 时 content 不能为空")
+
+        # 校验 code_blocks
+        if action.code_blocks:
+            for i, code_block in enumerate(action.code_blocks):
+                if "code_id" not in code_block:
+                    errors.append(f"代码块 {i+1} 缺少 code_id 字段")
+
+                if "code" not in code_block:
+                    errors.append(f"代码块 {i+1} 缺少 code 字段")
+
+                if not code_block.get("code"):
+                    errors.append(f"代码块 {i+1} 的 code 不能为空")
+
+                # 校验 code_id 格式
+                code_id = code_block.get("code_id", "")
+                if not code_id.startswith("code_"):
+                    errors.append(f"代码块 {i+1} 的 code_id 必须以 'code_' 开头")
+
+    else:
+        errors.append(f"action.type 必须是 'tool_call' 或 'complete'，当前为: {action.type}")
+
+    return len(errors) == 0, errors
+
+
+def generate_retry_prompt(errors: List[str]) -> str:
+    """
+    生成重试提示词
+
+    Args:
+        errors: 错误信息列表
+
+    Returns:
+        重试提示词
+    """
+    errors_text = "\n".join([f"- {e}" for e in errors])
+
+    return f"""你的上一次响应格式不正确，请按照以下要求重新生成：
+
+## 错误信息
+{errors_text}
+
+## 正确格式要求
+
+你必须严格按照以下 JSON 格式返回：
+
+```json
+{{
+    "task_analysis": "思维链：1. 识别意图; 2. 预判数据风险; 3. 设计复合指令",
+    "execution_plan": "R1: [步骤描述]; R2: [步骤描述]",
+    "current_round": 1,
+    "action": {{
+        "type": "tool_call 或 complete",
+        "content": "...",
+        "recommended_questions": ["问题1", "问题2"],  // 仅 type=complete 时可选
+        "download_links": ["文件1.xlsx"],  // 仅 type=complete 时可选
+        "code_blocks": [  // 当需要提供代码时
+            {{
+                "code_id": "code_描述_随机字符",
+                "language": "python",
+                "description": "代码描述",
+                "code": "代码内容（不含标记）"
+            }}
+        ]
+    }}
+}}
+```
+
+## 重要提醒
+
+1. **task_analysis**: 必须有深度，至少 10 个字符
+2. **execution_plan**: 必须包含 R1/R2 等轮次说明
+3. **tool_call**: content 必须是数组，每个工具调用必须有 tool_name, tool_call_id, arguments
+4. **complete with code**:
+   - content 中放文字描述（不要包含代码块）
+   - code_blocks 中放代码，每个必须有 code_id, language, code
+
+请重新生成正确的响应。"""
+
+
 __all__ = [
     "StructuredResponse",
     "Action",
     "ToolCall",
+    "CodeBlock",
     "STRUCTURED_RESPONSE_SYSTEM_PROMPT",
     "parse_structured_response",
+    "validate_structured_response",
+    "generate_retry_prompt",
     "FINAL_REPORT_CONTENT_TYPES",
 ]

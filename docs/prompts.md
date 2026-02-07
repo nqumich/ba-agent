@@ -108,7 +108,10 @@ content: "
 
 ### 3. 带代码块的报告
 
-当报告中包含代码时，需要提供 `code_blocks` 字段：
+当报告中包含代码时，**必须**提供 `code_blocks` 字段，并且：
+
+- **content**: 只放文字描述，不要包含代码块
+- **code_blocks[].code**: 放代码内容（不包含 markdown 标记）
 
 ```json
 {
@@ -117,33 +120,37 @@ content: "
     "current_round": 1,
     "action": {
         "type": "complete",
-        "content": "以下是销售数据分析代码：\n\n```python\nimport pandas as pd\n\ndf = pd.read_csv('sales.csv')\nquarterly_sales = df.groupby('quarter').agg({'amount': 'sum'})\nprint(quarterly_sales)\n```\n\n代码已保存，可用于后续分析。",
+        "content": "以下是销售数据分析代码，已保存为 code_sales_analysis，可用于后续分析。该代码读取 sales.csv 文件并按季度汇总销售额。",
         "code_blocks": [
             {
-                "code_id": "code_sales_analysis",
+                "code_id": "code_sales_analysis_abc123",
                 "language": "python",
-                "description": "销售数据分析代码，按季度汇总销售额"
+                "description": "销售数据分析代码，按季度汇总销售额",
+                "code": "import pandas as pd\n\ndf = pd.read_csv('sales.csv')\nquarterly_sales = df.groupby('quarter').agg({'amount': 'sum'})\nprint(quarterly_sales)"
             }
         ]
     }
 }
 ```
 
-**代码标识命名规则**：
-- 格式: `code_{描述}_{随机字符}`
-- 示例: `code_sales_analysis_abc123`, `code_data_cleaning_xyz789`
-- 描述部分使用英文或拼音，简短明了（不超过20字符）
+**重要规则**：
+1. **content 中只放文字描述**，不要包含 ```python...``` 代码块标记
+2. **code 必须是纯代码**，不包含 markdown 标记和额外说明
+3. **code_id 命名格式**: `code_{描述}_{随机字符}`
+   - 描述部分使用英文或拼音，简短明了
+   - 随机字符至少 3 位，确保唯一性
+   - 示例: `code_sales_analysis_abc123`, `code_data_cleaning_xyz789`
 
 **代码引用方式**：
 后续需要引用代码时，在 content 中使用注释标记：
 ```
-请使用 <!-- CODE: code_sales_analysis --> 中的代码进行进一步分析
+请使用 code_sales_analysis_abc123 中的代码进行进一步分析
 ```
 
 **代码处理流程**：
-1. 模型输出代码时，同时提供 `code_blocks` 字段
-2. 后端提取代码块，保存到 `data/code_{code_id}.py`
-3. 在上下文中将代码块替换为 `<!-- CODE_SAVED: code_id | description -->`
+1. 模型在 code_blocks 中提供代码内容
+2. 后端将代码保存到 `data/code_{code_id}.py`
+3. 在响应中添加代码保存标记：`<!-- CODE_SAVED: code_id | description -->`
 4. 后续可通过 file_reader 或直接引用 code_id 获取代码
 
 ## 工具调用参数规范
