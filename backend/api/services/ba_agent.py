@@ -310,11 +310,8 @@ class BAAgentService:
                 "message_count": self._conversations[conversation_id]["message_count"] + 1
             })
 
-            # 提取响应内容（返回元组：display_content, structured_response）
-            display_content, structured_response = self._extract_response_content(result)
-
-            # 检测 display_content 是否包含 HTML（用于前端渲染判断）
-            has_html_in_display = '<div' in display_content or '<script' in display_content or 'echarts' in display_content.lower()
+            # 提取响应内容（返回元组：final_report_content, structured_response）
+            final_report_content, structured_response = self._extract_response_content(result)
 
             # 构建元数据
             metadata = {
@@ -345,9 +342,7 @@ class BAAgentService:
 
                 elif structured_response.is_complete():
                     # 完成状态
-                    # 检测完整 display_content 是否包含 HTML
-                    metadata["contains_html"] = has_html_in_display
-                    metadata["content_type"] = "html" if has_html_in_display else "text"
+                    metadata["status"] = "complete"
 
                     # 推荐问题和下载链接
                     if structured_response.action.recommended_questions:
@@ -355,10 +350,14 @@ class BAAgentService:
                     if structured_response.action.download_links:
                         metadata["download_links"] = structured_response.action.download_links
 
-                    metadata["status"] = "complete"
+                    # 检测 final_report 是否包含模型生成的 HTML（如 ECharts 图表）
+                    final_report = structured_response.get_final_report()
+                    has_model_html = '<div' in final_report or '<script' in final_report or 'echarts' in final_report.lower()
+                    metadata["contains_html"] = has_model_html
+                    metadata["content_type"] = "html" if has_model_html else "markdown"
 
             return {
-                "response": display_content,
+                "response": final_report_content,
                 "conversation_id": conversation_id,
                 "duration_ms": duration_ms,
                 "tool_calls": self._extract_tool_calls(result),
@@ -505,9 +504,9 @@ class BAAgentService:
         提取响应内容并解析结构化响应
 
         Returns:
-            (display_content, structured_response)
-            - display_content: 用于显示的内容（HTML 或文本）
-            - structured_response: 解析后的结构化响应对象
+            (final_report_content, structured_response)
+            - final_report_content: 最终报告内容（纯文本或模型生成的 HTML）
+            - structured_response: 解析后的结构化响应对象（包含 task_analysis、execution_plan 等）
         """
         try:
             messages = result.get("messages", [])
@@ -543,108 +542,10 @@ class BAAgentService:
                 logger.warning(f"无法解析结构化响应，返回原始内容")
                 return raw_content, None
 
-            # 根据响应类型构建显示内容
-            display_parts = []
-
-            # 添加思维链分析（可折叠）
-            if structured_response.task_analysis:
-                display_parts.append(f"""
-<div class="task-analysis" style="margin-bottom: 12px; padding: 10px; background: #f0f7ff; border-left: 3px solid #2196F3; border-radius: 4px;">
-    <details>
-        <summary style="cursor: pointer; font-weight: 500; color: #1976D2;">💡 思维链分析</summary>
-        <div style="margin-top: 8px; font-size: 13px; color: #555; white-space: pre-wrap;">{structured_response.task_analysis}</div>
-    </details>
-</div>
-""")
-
-            # 添加执行计划
-            if structured_response.execution_plan:
-                display_parts.append(f"""
-<div class="execution-plan" style="margin-bottom: 12px; padding: 10px; background: #fff3e0; border-left: 3px solid #FF9800; border-radius: 4px;">
-    <div style="font-weight: 500; color: #E65100; margin-bottom: 4px;">📋 执行计划</div>
-    <div style="font-size: 13px; color: #555;">{structured_response.execution_plan}</div>
-</div>
-""")
-
-            # 根据动作类型处理内容
-            if structured_response.is_tool_call():
-                # 工具调用状态
-                tool_calls = structured_response.get_tool_calls()
-                tool_names = [tc.tool_name for tc in tool_calls]
-
-                display_parts.append(f"""
-<div class="tool-call-status" style="padding: 12px; background: #e3f2fd; border-radius: 6px; text-align: center;">
-    <div style="display: inline-flex; align-items: center; gap: 8px;">
-        <span class="loading-spinner" style="display: inline-block; width: 16px; height: 16px; border: 2px solid #2196F3; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>
-        <span style="color: #1976D2; font-weight: 500;">正在执行: {', '.join(tool_names)}</span>
-    </div>
-</div>
-<style>
-@keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-</style>
-""")
-
-            elif structured_response.is_complete():
-                # 完成状态，显示最终报告
-                final_report = structured_response.get_final_report()
-
-                # 检测是否包含 HTML
-                has_html = '<div' in final_report or '<script' in final_report
-
-                if has_html:
-                    # 包含 HTML（如图表），直接渲染
-                    display_parts.append(f"""
-<div class="final-report">
-    {final_report}
-</div>
-""")
-                else:
-                    # 纯文本报告，格式化显示
-                    display_parts.append(f"""
-<div class="final-report" style="line-height: 1.6;">
-    {final_report.replace('\\n', '<br>')}
-</div>
-""")
-
-                # 添加推荐问题
-                if structured_response.action.recommended_questions:
-                    questions_html = '<br>'.join(
-                        f'<button class="recommended-question" style="display: block; width: 100%; text-align: left; padding: 10px; margin: 6px 0; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; transition: all 0.2s;" onclick="document.getElementById(\'agent-query\').value=this.textContent;document.getElementById(\'agent-query\').focus();">💡 {q}</button>'
-                        for q in structured_response.action.recommended_questions
-                    )
-                    display_parts.append(f"""
-<div class="recommended-questions" style="margin-top: 16px; padding: 12px; background: #f9f9f9; border-radius: 6px;">
-    <div style="font-weight: 500; color: #333; margin-bottom: 8px;">🤔 推荐问题</div>
-    {questions_html}
-</div>
-""")
-
-                # 添加下载链接
-                if structured_response.action.download_links:
-                    links_html = '<br>'.join(
-                        f'<a href="/api/v1/files/download/{filename}" style="display: inline-block; padding: 8px 16px; margin: 4px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px;">📥 {filename}</a>'
-                        for filename in structured_response.action.download_links
-                    )
-                    display_parts.append(f"""
-<div class="download-links" style="margin-top: 12px; padding: 12px; background: #e8f5e9; border-radius: 6px;">
-    <div style="font-weight: 500; color: #2E7D32; margin-bottom: 8px;">📦 可下载文件</div>
-    {links_html}
-</div>
-""")
-
-            display_content = "\n".join(display_parts)
-
-            # 检测是否包含 HTML 内容
-            has_html = structured_response.is_complete() and (
-                '<div' in display_content or '<script' in display_content or
-                'echarts' in display_content.lower()
-            )
-
-            # 如果包含 HTML，添加标记
-            if has_html:
-                display_content = f"<!-- HAS_HTML -->{display_content}"
-
-            return display_content, structured_response
+            # 返回原始的 final_report 内容（不构建 HTML）
+            # 前端负责根据 metadata 渲染各个组件
+            final_report = structured_response.get_final_report()
+            return final_report, structured_response
 
         except Exception as e:
             logger.error(f"提取响应内容失败: {e}", exc_info=True)

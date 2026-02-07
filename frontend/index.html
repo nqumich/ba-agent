@@ -798,7 +798,7 @@
 
         // ========== Agent 对话 ==========
 
-        function addMessage(content, isUser = false, isHtml = false) {
+        function addMessage(content, isUser = false, metadata = null) {
             const messagesDiv = document.getElementById('chat-messages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${isUser ? 'user' : 'assistant'}`;
@@ -806,32 +806,75 @@
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
 
-            // 根据参数或自动检测决定是否渲染为 HTML
-            const shouldRenderAsHtml = isHtml || (!isUser && (
-                content.includes('<div') && (content.includes('echarts') || content.includes('chart'))
-            ));
+            if (isUser) {
+                // 用户消息：纯文本
+                contentDiv.textContent = content;
+            } else {
+                // AI 响应：根据 metadata 渲染组件
+                if (metadata && metadata.has_structured_response) {
+                    // 渲染结构化响应组件
+                    renderStructuredResponse(contentDiv, content, metadata);
+                } else {
+                    // 无结构化响应，纯文本显示
+                    contentDiv.textContent = content;
+                }
+            }
 
-            if (shouldRenderAsHtml && !isUser) {
-                // HTML 内容：使用 innerHTML 渲染
-                contentDiv.innerHTML = content;
+            messageDiv.appendChild(contentDiv);
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
 
-                // 初始化 ECharts 图表
+        function renderStructuredResponse(container, content, metadata) {
+            // 1. 渲染思维链分析（可折叠）
+            if (metadata.task_analysis) {
+                container.innerHTML += `
+<div class="task-analysis" style="margin-bottom: 12px; padding: 10px; background: #f0f7ff; border-left: 3px solid #2196F3; border-radius: 4px;">
+    <details>
+        <summary style="cursor: pointer; font-weight: 500; color: #1976D2;">💡 思维链分析</summary>
+        <div style="margin-top: 8px; font-size: 13px; color: #555; white-space: pre-wrap;">${escapeHtml(metadata.task_analysis)}</div>
+    </details>
+</div>`;
+            }
+
+            // 2. 渲染执行计划
+            if (metadata.execution_plan) {
+                container.innerHTML += `
+<div class="execution-plan" style="margin-bottom: 12px; padding: 10px; background: #fff3e0; border-left: 3px solid #FF9800; border-radius: 4px;">
+    <div style="font-weight: 500; color: #E65100; margin-bottom: 4px;">📋 执行计划</div>
+    <div style="font-size: 13px; color: #555;">${escapeHtml(metadata.execution_plan)}</div>
+</div>`;
+            }
+
+            // 3. 渲染工具调用状态
+            if (metadata.action_type === 'tool_call' && metadata.tool_calls) {
+                const toolNames = metadata.tool_calls.map(tc => tc.tool_name).join(', ');
+                container.innerHTML += `
+<div class="tool-call-status" style="padding: 12px; background: #e3f2fd; border-radius: 6px; text-align: center; margin-bottom: 12px;">
+    <div style="display: inline-flex; align-items: center; gap: 8px;">
+        <span class="loading-spinner" style="display: inline-block; width: 16px; height: 16px; border: 2px solid #2196F3; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>
+        <span style="color: #1976D2; font-weight: 500;">正在执行: ${escapeHtml(toolNames)}</span>
+    </div>
+</div>`;
+            }
+
+            // 4. 渲染最终报告
+            const reportDiv = document.createElement('div');
+            reportDiv.className = 'final-report';
+            if (metadata.contains_html) {
+                // 模型生成的 HTML（如 ECharts 图表）
+                reportDiv.innerHTML = content;
+                container.appendChild(reportDiv);
+
+                // 初始化 ECharts
                 setTimeout(() => {
-                    // 查找所有包含 echarts 或 chart 的容器
-                    const chartContainers = contentDiv.querySelectorAll('[id*="chart"], [class*="chart"]');
-                    chartContainers.forEach(container => {
-                        if (container && window.echarts && !container.hasAttribute('data-echarts-initialized')) {
+                    const chartContainers = reportDiv.querySelectorAll('[id*="chart"], [class*="chart"]');
+                    chartContainers.forEach(chartContainer => {
+                        if (chartContainer && window.echarts && !chartContainer.hasAttribute('data-echarts-initialized')) {
                             try {
-                                // 尝试直接初始化（从内联脚本获取配置）
-                                const chart = echarts.init(container);
-
-                                // 标记已初始化
-                                container.setAttribute('data-echarts-initialized', 'true');
-
-                                // 响应式调整
-                                window.addEventListener('resize', function() {
-                                    chart.resize();
-                                });
+                                const chart = echarts.init(chartContainer);
+                                chartContainer.setAttribute('data-echarts-initialized', 'true');
+                                window.addEventListener('resize', () => chart.resize());
                             } catch (e) {
                                 console.error('ECharts 初始化失败:', e);
                             }
@@ -839,13 +882,44 @@
                     });
                 }, 100);
             } else {
-                // 纯文本内容
-                contentDiv.textContent = content;
+                // Markdown 格式渲染（简单处理：保留换行）
+                reportDiv.style.lineHeight = '1.6';
+                reportDiv.style.whiteSpace = 'pre-wrap';
+                reportDiv.textContent = content;
+                container.appendChild(reportDiv);
             }
 
-            messageDiv.appendChild(contentDiv);
-            messagesDiv.appendChild(messageDiv);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            // 5. 渲染推荐问题
+            if (metadata.recommended_questions && metadata.recommended_questions.length > 0) {
+                const questionsHtml = metadata.recommended_questions.map(q =>
+                    `<button class="recommended-question" style="display: block; width: 100%; text-align: left; padding: 10px; margin: 6px 0; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; transition: all 0.2s;" onclick="document.getElementById('agent-query').value=this.textContent;document.getElementById('agent-query').focus();">💡 ${escapeHtml(q)}</button>`
+                ).join('<br>');
+
+                container.innerHTML += `
+<div class="recommended-questions" style="margin-top: 16px; padding: 12px; background: #f9f9f9; border-radius: 6px;">
+    <div style="font-weight: 500; color: #333; margin-bottom: 8px;">🤔 推荐问题</div>
+    ${questionsHtml}
+</div>`;
+            }
+
+            // 6. 渲染下载链接
+            if (metadata.download_links && metadata.download_links.length > 0) {
+                const linksHtml = metadata.download_links.map(filename =>
+                    `<a href="/api/v1/files/download/${escapeHtml(filename)}" style="display: inline-block; padding: 8px 16px; margin: 4px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px;">📥 ${escapeHtml(filename)}</a>`
+                ).join('');
+
+                container.innerHTML += `
+<div class="download-links" style="margin-top: 12px; padding: 12px; background: #e8f5e9; border-radius: 6px;">
+    <div style="font-weight: 500; color: #2E7D32; margin-bottom: 8px;">📦 可下载文件</div>
+    ${linksHtml}
+</div>`;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         function addSystemMessage(content) {
@@ -887,12 +961,10 @@
                     const data = await response.json();
                     const responseData = data.data;
                     const responseText = responseData.response || '查询完成';
+                    const responseMetadata = responseData.metadata || null;
 
-                    // 检查后端返回的元数据，判断是否为 HTML 内容
-                    const isHtml = responseData.metadata?.contains_html === true ||
-                                   responseData.metadata?.content_type === 'html';
-
-                    addMessage(responseText, false, isHtml);
+                    // 传递 metadata 给前端组件渲染
+                    addMessage(responseText, false, responseMetadata);
                 } else {
                     const error = await response.json();
                     let errorMsg = error.detail || '查询失败';
