@@ -7,11 +7,11 @@
 
 ## 测试结果
 
-### 最新测试统计 (2026-02-06)
+### 最新测试统计 (2026-02-07)
 
 ```
-总计: 870 个测试
-✅ 通过: 870 (100%)
+总计: 884 个测试
+✅ 通过: 884 (100%)
 ⏭️  跳过: 1 (MCP 相关)
 ❌ 失败: 0
 ```
@@ -25,6 +25,7 @@
 | Phase 3 Skills 系统 | 200+ | ✅ |
 | Pipeline v2.1 | 100+ | ✅ |
 | FileStore 系统 | 100+ | ✅ |
+| 存储配置 | 14 | ✅ |
 
 ---
 
@@ -64,48 +65,24 @@
 - Memory Search 工具集成
 - 记忆系统完整集成 (写入/索引/搜索)
 
+### 跨平台存储配置 (2026-02-07) ✅
+- macOS: ~/Library/Application Support/ba-agent
+- Windows: %APPDATA%/ba-agent
+- Linux: ~/.local/share/ba-agent (遵循 XDG)
+- 环境变量 BA_STORAGE_DIR 支持
+- 14 个存储配置测试通过
+
 ---
 
 ## 最新更新
 
-### 2026-02-06 - SQLAlchemy 警告修复
-- 修复 database.py 模块导入时的警告
-- 警告仅在 mock 模式实际使用时发出
-- 870 个测试全部通过
-
-### 2026-02-06 - FileStore + Memory Search v2 完成
-**Task #110: Placeholder Store 整合**
-- 创建 PlaceholderStore 基类
-- 整合 4 个占位符存储 (cache_store, temp_store, chart_store, report_store)
-- 减少 ~90 行重复代码
-
-**Task #111: Memory Search v2 功能增强**
-- 从旧 memory_search 迁移 entities 和 since_days 过滤功能
-- 添加完整的输入验证和过滤器逻辑
-- 新增 13 个测试用例
-
-**文件存储分析完成**
-- 确认当前文件存储模式合理
-- flush.py 和 memory_write.py 使用直接文件 I/O (特定用例)
-- MemoryStore 用于系统级文件管理 (FileRef 追踪)
-
-### 2026-02-06 17:00 - Agent 工具集成修复
-- 工具导出修复 (P0-1): 添加 file_write_tool 导出
-- 默认工具加载机制 (P0-2): 实现 _load_default_tools()
-- 记忆搜索工具集成: 添加 memory_search_v2_tool
-- 工具初始化逻辑修复
-
-### 2026-02-06 18:00 - LangGraph API 迁移完成
-- 迁移到 langchain.agents.create_agent
-- API 参数更新: prompt → system_prompt
-- 修复命名冲突 (使用别名)
-- 15 个 agent 测试通过
-
-### 2026-02-06 - Pipeline v2.1.0 完成
-- 工具迁移 Phase 3 完成 (6/6)
-- 关键 Bug 修复
-- Phase 7: 移除旧模型完成
-- 746 个测试通过
+### 2026-02-07 - 跨平台存储路径配置系统
+**Task #114: 跨平台存储配置**
+- 创建存储配置管理模块 (backend/storage/config.py)
+- 支持跨平台默认路径选择
+- 环境变量 BA_STORAGE_DIR 支持
+- 初始化脚本 scripts/init_storage.py
+- 清理过时 scripts/ralph/ 目录
 
 ---
 
@@ -120,13 +97,14 @@
 | Skills 调用无桥接 | 实现构建 Python 代码调用 Skill | 2025-02-05 |
 | 旧 Pipeline 模型冲突 | 完成 Pipeline v2.1.0 迁移 | 2026-02-06 |
 | SQLAlchemy 导入警告 | 延迟警告到实际使用时 | 2026-02-06 |
+| 硬编码系统路径 /var/lib/ba-agent | 跨平台存储配置系统 | 2026-02-07 |
 
 ---
 
 ## 性能指标
 
 ### 当前状态
-- 代码覆盖率: >95% (870/870 测试通过)
+- 代码覆盖率: >95% (884/884 测试通过)
 - API 响应时间: < 1s (本地测试)
 - 内存使用: < 512MB (Docker 限制)
 
@@ -134,12 +112,60 @@
 
 ## 下一任务
 
-- [ ] US-015: 示例 Skill - 异动检测
-- [ ] US-016: 示例 Skill - 归因分析
-- [ ] US-017: 示例 Skill - 报告生成
-- [ ] US-018: 示例 Skill - 数据可视化
-- [ ] US-019-US-026: 集成与部署
+### 优先级 P1 (核心功能)
+
+- [ ] **US-015**: 示例 Skill - 异动检测
+  - 实现异动检测算法
+  - 支持多种异动检测方法 (阈值、Z-score、IQR)
+  - 可视化异动结果
+
+- [ ] **US-016**: 示例 Skill - 归因分析
+  - 实现归因树算法
+  - 支持多维度归因
+  - 生成归因报告
+
+- [ ] **US-017**: 示例 Skill - 报告生成
+  - 实现报告模板系统
+  - 支持多种报告格式 (PDF, Word, HTML)
+  - 支持图表嵌入
+
+- [ ] **US-018**: 示例 Skill - 数据可视化
+  - 实现 ECharts 代码生成
+  - 支持多种图表类型
+  - 交互式图表
+
+### 优先级 P2 (集成与部署)
+
+- [ ] **US-019**: Agent System Prompt 与工具集成
+- [ ] **US-020**: 知识库初始化
+- [ ] **US-021**: API 服务实现 (FastAPI)
+- [ ] **US-022**: IM Bot 集成 (企业微信/钉钉)
+- [ ] **US-023**: Excel 插件
+
+### 优先级 P3 (质量保证)
+
+- [ ] **US-024**: 日志与监控系统
+- [ ] **US-025**: 单元测试与覆盖率提升
+- [ ] **US-026**: 文档完善
 
 ---
 
-**最后更新**: 2026-02-06
+## 技术债务
+
+### 可优化的部分
+
+1. **Memory Search 泛化**
+   - 当前实现有较多定制化逻辑
+   - 可考虑抽象为通用搜索框架
+
+2. **FileStore 占位符实现**
+   - report_store, chart_store, cache_store, temp_store 仍为占位符
+   - 需要完整实现
+
+3. **测试覆盖率**
+   - 某些边缘情况测试不足
+   - 需要添加集成测试
+
+---
+
+**最后更新**: 2026-02-07
