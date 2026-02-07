@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 import os
 
 from backend.api.routes import files, agent, skills, health
+from backend.api.routes.monitoring import router as monitoring_router
 from backend.api.state import set_app_state
 from backend.api.auth import auth_router
 from backend.api.middleware.rate_limit import RateLimitMiddleware
@@ -184,6 +185,13 @@ app.include_router(
     tags=["Skills 管理"]
 )
 
+# 监控和调试（需要认证）
+app.include_router(
+    monitoring_router,
+    prefix="/api/v1",
+    tags=["监控和调试"]
+)
+
 
 # ===== 根路径 =====
 
@@ -191,6 +199,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from pathlib import Path
 
 frontend_path = Path(__file__).parent.parent.parent / "frontend" / "index.html"
+monitoring_path = Path(__file__).parent.parent.parent / "frontend" / "monitoring" / "index.html"
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -199,6 +208,14 @@ async def root():
         with open(frontend_path, "r", encoding="utf-8") as f:
             return f.read()
     return HTMLResponse(content="<h1>前端文件不存在</h1>", status_code=404)
+
+@app.get("/monitoring", response_class=HTMLResponse)
+async def monitoring():
+    """监控仪表板页面"""
+    if monitoring_path.exists():
+        with open(monitoring_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return HTMLResponse(content="<h1>监控仪表板文件不存在</h1>", status_code=404)
 
 
 @app.get("/api")

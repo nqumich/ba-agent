@@ -1,6 +1,6 @@
 # BA-Agent 文档导航
 
-> **版本**: v2.3.0
+> **版本**: v2.4.0
 > **最后更新**: 2026-02-08
 
 本文档是 BA-Agent 的产品需求文档和文档导航中心，描述产品愿景、目标用户、核心价值、功能需求。技术架构细节请参阅 [architecture.md](architecture.md)。
@@ -13,15 +13,17 @@
 
 | 文档 | 说明 | 版本 |
 |------|------|------|
-| **[README.md](README.md)** | 产品需求文档（本文档） | v2.3.0 |
+| **[README.md](../README.md)** | 项目 README（快速开始、安装） | v2.4.0 |
+| **[README.md](README.md)** | 产品需求文档（本文档） | v2.4.0 |
 | [architecture.md](architecture.md) | 技术架构设计、组件交互、技术栈 | v2.3.0 |
 | [context-management.md](context-management.md) | 上下文管理详细文档 | v1.5.0 |
 | [response-flow.md](response-flow.md) | 响应格式流转文档 | v2.8.0 |
 | [mcp-setup.md](mcp-setup.md) | MCP 服务器配置指南 | - |
 | [prompts.md](prompts.md) | 系统提示词定义和规范 | - |
 | [skills.md](skills.md) | Skills 系统指南 | - |
-| [api.md](api.md) | REST API 端点、认证、速率限制 | v2.3.0 |
-| [development.md](development.md) | 开发环境、项目结构、测试 | v2.3.0 |
+| [api.md](api.md) | REST API 端点、认证、速率限制 | v2.4.0 |
+| [monitoring.md](monitoring.md) | 监控系统文档（执行追踪、指标） | v2.4.0 ⭐ NEW |
+| [development.md](development.md) | 开发环境、项目结构、测试 | v2.4.0 |
 | [../progress.md](../progress.md) | 开发进度详情、里程碑 | - |
 
 ### 快速查找
@@ -32,6 +34,7 @@
 - **技术架构** → 查看 [architecture.md](architecture.md)
 - **上下文如何管理？** → 查看 [context-management.md](context-management.md)
 - **API 如何调用？** → 查看 [api.md](api.md)
+- **如何监控 Agent 执行？** → 查看 [monitoring.md](monitoring.md) ⭐ NEW
 - **如何开发 Skills？** → 查看 [skills.md](skills.md)
 - **最新开发进度？** → 查看 [progress.md](../progress.md)
 
@@ -39,13 +42,14 @@
 
 | 组件 | 版本 | 更新日期 | 主要变更 |
 |------|------|----------|----------|
-| 主项目 | v2.3.0 | 2026-02-08 | ContextCoordinator 协调层 |
-| PRD.md | v2.3.0 | 2026-02-08 | 产品设计文档重构 |
+| 主项目 | v2.4.0 | 2026-02-08 | 监控系统 (Execution Tracer + Metrics Dashboard) |
+| PRD.md | v2.4.0 | 2026-02-08 | 产品设计文档重构 |
 | architecture.md | v2.3.0 | 2026-02-08 | 更新架构图和开发状态 |
 | context-management.md | v1.5.0 | 2026-02-08 | 添加协调层说明 |
 | response-flow.md | v2.8.0 | 2026-02-08 | 更新消息处理流程 |
-| api.md | v2.3.0 | 2026-02-08 | 添加内部架构章节 |
-| development.md | v2.3.0 | 2026-02-08 | 更新项目结构 |
+| api.md | v2.4.0 | 2026-02-08 | 添加监控 API 端点 |
+| monitoring.md | v2.4.0 | 2026-02-08 | 监控系统完整文档 ⭐ NEW |
+| development.md | v2.4.0 | 2026-02-08 | 更新项目结构和测试 |
 
 ---
 
@@ -403,5 +407,5 @@ BA-Agent: [直接返回分析结果]
 
 ---
 
-**文档版本**: v2.3.0
-**最后更新**: 2026-02-08
+**文档版本**: v2.4.0
+**最后更新**: 2026-02-08 (新增监控系统文档)

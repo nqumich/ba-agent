@@ -51,6 +51,8 @@ class BackendProcessing:
     processing_type: str  # "tool_call", "code_management", "response_parsing", etc.
     details: Dict[str, Any]
     duration_ms: Optional[float] = None
+    span_id: Optional[str] = None  # Link to ExecutionTracer span
+    parent_span_id: Optional[str] = None  # Link to parent span
 
 
 @dataclass
@@ -59,6 +61,8 @@ class RoundLog:
     round: int
     start_time: str
     end_time: Optional[str] = None
+    trace_id: Optional[str] = None
+    root_span_id: Optional[str] = None
     inputs: List[ModelInput] = field(default_factory=list)
     outputs: List[ModelOutput] = field(default_factory=list)
     backend_processing: List[BackendProcessing] = field(default_factory=list)
@@ -214,7 +218,9 @@ class AgentLogger:
         round: int,
         processing_type: str,
         details: Dict[str, Any],
-        duration_ms: Optional[float] = None
+        duration_ms: Optional[float] = None,
+        span_id: Optional[str] = None,
+        parent_span_id: Optional[str] = None
     ):
         """
         记录后端处理
@@ -230,6 +236,8 @@ class AgentLogger:
                 - "context_cleaned": 上下文清理
             details: 处理详情
             duration_ms: 处理耗时（毫秒）
+            span_id: 关联的 ExecutionTracer span ID
+            parent_span_id: 父 span ID
         """
         round_log = self._get_or_create_round(round)
 
@@ -238,9 +246,29 @@ class AgentLogger:
             round=round,
             processing_type=processing_type,
             details=details,
-            duration_ms=duration_ms
+            duration_ms=duration_ms,
+            span_id=span_id,
+            parent_span_id=parent_span_id
         )
         round_log.backend_processing.append(processing_log)
+
+    def set_trace_info(
+        self,
+        round: int,
+        trace_id: Optional[str] = None,
+        root_span_id: Optional[str] = None
+    ) -> None:
+        """
+        设置轮次的追踪信息
+
+        Args:
+            round: 轮次
+            trace_id: ExecutionTracer 的 trace ID
+            root_span_id: Root span ID
+        """
+        round_log = self._get_or_create_round(round)
+        round_log.trace_id = trace_id
+        round_log.root_span_id = root_span_id
 
     def end_round(self, round: int):
         """结束一个轮次"""
@@ -284,7 +312,9 @@ class AgentLogger:
                     "type": "round_metadata",
                     "round": round_log.round,
                     "start_time": round_log.start_time,
-                    "end_time": round_log.end_time
+                    "end_time": round_log.end_time,
+                    "trace_id": round_log.trace_id,
+                    "root_span_id": round_log.root_span_id
                 }
                 f.write(json.dumps(round_metadata, ensure_ascii=False) + '\n')
 

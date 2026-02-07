@@ -1,7 +1,7 @@
 # BA-Agent
 
 > 商业分析助手 Agent - Business Analysis Agent
-> **Version**: v2.3.0
+> **Version**: v2.4.0
 > **Last Updated**: 2026-02-08
 
 面向非技术业务人员的智能数据分析助手，通过自然语言交互提供：
@@ -9,18 +9,20 @@
 - 📊 归因分析
 - 📄 报告自动生成
 - 📈 数据可视化
+- 📊 **全流程监控与追踪** (v2.4.0 新增)
 
 ## 🎯 项目状态
 
-**开发进度**: ~88% (26/30 User Stories 完成)
+**开发进度**: ~90% (27/30 User Stories 完成)
 
 **最新进展** (2026-02-08):
 - ✅ 完成核心业务 Skills (US-015/016/017/018) - 90 个测试通过
 - ✅ 完成 API 服务增强 (US-021) - JWT 认证 + 速率限制 + 错误处理
 - ✅ 完成 Web 前端测试控制台 (US-FE-01) - 单页应用 + Agent 对话
 - ✅ **完成 LangGraph 上下文管理协调** - ContextCoordinator 统一文件清理入口
-- ✅ 1030 个测试全部通过
-- ✅ FastAPI 服务 v2.3.0 - REST API + JWT 认证 + Web 前端
+- ✅ **完成 Agent 全流程监控和追踪系统** (US-MON-01) - Execution Tracer + Metrics Dashboard
+- ✅ 1065 个测试全部通过
+- ✅ FastAPI 服务 v2.4.0 - REST API + JWT 认证 + Web 前端 + 监控仪表板
 
 **核心功能完成**:
 - ✅ **Phase 1**: Agent 框架 (LangGraph + Claude Sonnet 4.5)
@@ -32,6 +34,7 @@
 - ✅ **上下文协调**: ContextCoordinator 统一文件清理和上下文构建
 - ✅ **API 服务**: REST API + JWT 认证 + 速率限制
 - ✅ **Web 前端**: 单页应用测试控制台
+- ✅ **监控仪表板**: 全流程追踪 + 性能指标 + 可视化（v2.4.0 新增）
 
 ## 🏗️ 技术架构
 
@@ -59,16 +62,22 @@ ba-agent/
 │   ├── api/                   # FastAPI 服务
 │   │   ├── services/          # BA-Agent 服务封装
 │   │   ├── routes/            # API 路由
+│   │   │   └── monitoring/    # 监控 API (v2.4.0 新增)
 │   │   └── middleware/        # JWT 认证 + 速率限制
 │   ├── core/                  # 核心组件 ⭐ NEW
 │   │   ├── context_manager.py     # 上下文管理器
 │   │   └── context_coordinator.py  # 上下文协调器 (v2.3.0 新增)
 │   ├── docker/                # Docker 沙盒 (DockerSandbox)
 │   ├── hooks/                 # 系统钩子
+│   ├── logging/               # 日志系统 (AgentLogger)
 │   ├── models/                # Pydantic 数据模型
 │   │   ├── response.py        # 结构化响应格式定义
 │   │   ├── pipeline.py        # Pipeline v2.1
 │   │   └── agent.py           # Agent 状态模型
+│   ├── monitoring/            # 监控系统 (v2.4.0 新增) ⭐
+│   │   ├── execution_tracer.py  # 执行追踪器
+│   │   ├── metrics_collector.py  # 指标收集器
+│   │   └── trace_store.py       # 追踪存储
 │   └── skills/                # Skills 系统
 ├── tools/                     # LangChain 工具
 │   ├── base.py                # 统一工具输出格式包装器
@@ -86,14 +95,20 @@ ba-agent/
 │   ├── report_gen/            # 报告生成
 │   └── visualization/         # 数据可视化
 ├── frontend/                  # Web 前端
-│   └── index.html            # 单页应用 (SPA)
+│   ├── index.html            # 单页应用 (SPA) - Agent 对话
+│   └── monitoring/           # 监控仪表板 (v2.4.0 新增) ⭐
+│       ├── index.html        # 监控仪表板主页面
+│       ├── css/              # 监控仪表板样式
+│       └── js/               # 监控仪表板脚本
 ├── config/                    # 配置文件
 │   ├── config.py              # 配置管理核心
 │   ├── settings.yaml          # 主配置
 │   └── .env                   # 环境变量
 ├── tests/                     # 测试套件
+│   └── monitoring/           # 监控系统测试 (v2.4.0 新增)
 ├── memory/                    # 每日对话日志
 ├── docs/                      # 文档
+│   └── monitoring.md         # 监控系统文档 (v2.4.0 新增)
 ├── Dockerfile                 # 主服务镜像
 ├── Dockerfile.sandbox         # Python 沙盒镜像
 └── docker-compose.yml         # 开发环境
@@ -213,6 +228,60 @@ open http://localhost:8000
 - 响应式设计
 - 拖拽上传支持
 
+### 监控仪表板 (v2.4.0 新增)
+
+BA-Agent 提供了完整的监控仪表板用于追踪和分析 Agent 执行：
+
+**功能**:
+- 📊 执行流程可视化（Mermaid 流程图）
+- 📈 性能指标分析（Token 使用、耗时、成本）
+- 🔍 详细的 Span 追踪（LLM 调用、工具调用）
+- 💾 历史查询和导出（JSON/Mermaid 格式）
+- 🎯 实时状态监控
+
+**访问方式**:
+```bash
+# 启动 API 服务器
+uvicorn backend.api.main:app --reload --port 8000
+
+# 浏览器访问监控仪表板
+open http://localhost:8000/monitoring
+
+# 使用相同的登录账号
+用户名: admin
+密码: admin123
+```
+
+**监控特性**:
+- 自动追踪每次 Agent 执行
+- 记录完整的调用链路（agent_invoke → llm_call → tool_call）
+- 收聚性能指标和 Token 使用
+- 估算 API 成本（支持多模型定价）
+- SQLite 索引支持快速查询
+
+**监控 API 端点**:
+```bash
+# 获取对话列表
+GET /api/v1/monitoring/conversations
+
+# 获取指定对话的追踪
+GET /api/v1/monitoring/traces/{conversation_id}
+
+# 获取 Mermaid 可视化
+GET /api/v1/monitoring/traces/{conversation_id}/visualize
+
+# 获取性能摘要
+GET /api/v1/monitoring/performance/{conversation_id}
+
+# 获取指标数据
+GET /api/v1/monitoring/metrics
+```
+
+**前端技术栈**:
+- Mermaid.js - 流程图渲染
+- ECharts - 指标可视化
+- 纯 HTML/CSS/JavaScript（无框架依赖）
+
 ### API 认证
 
 API 服务 v2.2.0 默认启用 JWT 认证：
@@ -247,9 +316,10 @@ BA_RATE_LIMIT_IP_PER_MINUTE=60
 - [上下文管理](docs/context-management.md) - 上下文管理详细文档（v1.5.0 更新）
 - [系统提示词](docs/prompts.md) - Agent 提示词定义和规范
 - [响应格式流转](docs/response-flow.md) - 大模型返回格式与前端渲染完整流程（v2.8.0 更新）
-- [API 文档](docs/api.md) - REST API 端点（v2.3.0 更新）
+- [API 文档](docs/api.md) - REST API 端点（v2.4.0 更新）
 - [Skills 指南](docs/skills.md) - Skills 开发指南
-- [开发指南](docs/development.md) - 开发环境与测试（v2.3.0 更新）
+- [监控系统](docs/monitoring.md) - 全流程监控与追踪系统（v2.4.0 新增）⭐
+- [开发指南](docs/development.md) - 开发环境与测试（v2.4.0 更新）
 - [开发进度](progress.md) - 详细开发日志
 
 ### 文档目录
@@ -290,8 +360,8 @@ BA_RATE_LIMIT_IP_PER_MINUTE=60
 ## 📊 测试覆盖
 
 ```
-总计: 1030 个测试
-✅ 通过: 1030 (100%)
+总计: 1065 个测试
+✅ 通过: 1065 (100%)
 ⏭️  跳过: 1 (MCP 相关)
 ❌ 失败: 0
 ```
@@ -311,13 +381,45 @@ BA_RATE_LIMIT_IP_PER_MINUTE=60
 | API 服务 | 36 | ✅ |
 | MCP 集成 | 9 | ✅ |
 | FileStore 系统 | 100+ | ✅ |
+| 监控系统 | 35 | ✅ (v2.4.0 新增) ⭐ |
 
 ## 🔜 待实现的功能
 
 - [ ] IM Bot 集成 (钉钉/企业微信)
 - [ ] Excel 插件 (Office.js)
 
-## 🏗️ 最新架构更新 (v2.3.0)
+## 🏗️ 最新架构更新 (v2.4.0)
+
+### Agent 全流程监控和追踪系统
+
+新增完整的 Agent 执行监控和追踪能力，解决执行流程不可见的问题：
+
+**架构改进**:
+```
+Agent Execution → ExecutionTracer → TraceStore (FileStore)
+                      ↓                 ↓
+                 MetricsCollector → MetricsStore
+                      ↓
+                 Monitoring API → Dashboard
+```
+
+**核心功能**:
+- 执行流程追踪（OpenTelemetry 兼容的 Span 结构）
+- 性能指标收集（Token 使用、耗时、成本估算）
+- 可视化仪表板（Mermaid 流程图 + ECharts 图表）
+- 历史查询和导出
+
+**新增组件**:
+- `backend/monitoring/execution_tracer.py` - 执行追踪器
+- `backend/monitoring/metrics_collector.py` - 指标收集器
+- `backend/monitoring/trace_store.py` - 追踪存储（基于 FileStore）
+- `backend/api/routes/monitoring/` - 监控 API 路由
+- `frontend/monitoring/` - 监控仪表板前端
+- 35 个新测试通过
+
+**监控仪表板访问**: `http://localhost:8000/monitoring`
+
+## 🏗️ 上一版架构更新 (v2.3.0)
 
 ### ContextCoordinator 协调层
 
@@ -344,4 +446,4 @@ MIT License
 
 ---
 
-**最后更新**: 2026-02-08
+**最后更新**: 2026-02-08 (v2.4.0 - 监控系统)

@@ -57,6 +57,16 @@ from backend.pipeline import (
 from backend.core.context_coordinator import create_context_coordinator
 from backend.core.context_manager import create_context_manager
 
+# Monitoring integration
+from backend.monitoring import (
+    ExecutionTracer,
+    MetricsCollector,
+    SpanType,
+    SpanStatus,
+    get_trace_store,
+    get_metrics_store,
+)
+
 logger = logging.getLogger(__name__)
 
 # Clawdbot 风格的静默响应标记
@@ -171,6 +181,11 @@ class BAAgent:
         self.compaction_count = 0
         # Memory Flush 状态追踪 (Clawdbot 风格)
         self.memory_flush_compaction_count: Optional[int] = None
+
+        # Monitoring: Execution tracer and metrics collector (lazy initialization)
+        self._tracer: Optional[ExecutionTracer] = None
+        self._metrics_collector: Optional[MetricsCollector] = None
+        self._monitoring_enabled: bool = True  # Can be controlled via config
 
     def _load_default_config(self) -> AgentConfigModel:
         """
@@ -1142,6 +1157,9 @@ class BAAgent:
 
             注意：文件内容清理通过 ContextCoordinator 统一处理
             """
+            import time
+            llm_start = time.time()
+
             messages = list(state["messages"])
 
             # 使用 ContextCoordinator 清理大文件内容
@@ -1155,8 +1173,72 @@ class BAAgent:
             if not messages or not isinstance(messages[0], SystemMessage):
                 messages.insert(0, SystemMessage(content=self.system_prompt))
 
+            # Monitoring: Create LLM span
+            llm_span = None
+            tracer = getattr(self, '_tracer', None)
+            metrics = getattr(self, '_metrics_collector', None)
+
+            if tracer:
+                llm_span = tracer.create_span(
+                    name=f"llm_call:{self.config.model}",
+                    span_type=SpanType.LLM_CALL,
+                    attributes={
+                        "model": self.config.model,
+                        "message_count": len(messages),
+                    }
+                )
+
             # 调用 LLM
-            response = self.llm.invoke(messages)
+            try:
+                response = self.llm.invoke(messages)
+
+                # Calculate duration and tokens
+                llm_duration_ms = (time.time() - llm_start) * 1000
+
+                # Extract token usage from response
+                input_tokens = 0
+                output_tokens = 0
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata or {}
+                    input_tokens = usage.get('input_tokens', 0)
+                    output_tokens = usage.get('output_tokens', 0)
+                elif hasattr(response, 'response_metadata'):
+                    metadata = response.response_metadata or {}
+                    if 'usage' in metadata:
+                        usage = metadata['usage']
+                        input_tokens = usage.get('input_tokens', 0)
+                        output_tokens = usage.get('output_tokens', 0)
+
+                # Record metrics
+                if metrics:
+                    metrics.record_llm_call(
+                        model=self.config.model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        duration_ms=llm_duration_ms
+                    )
+
+                # Add event to span
+                if tracer and llm_span:
+                    tracer.add_event("llm_response", {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "duration_ms": llm_duration_ms,
+                    })
+                    tracer.end_span(llm_span, SpanStatus.SUCCESS)
+
+            except Exception as e:
+                if tracer and llm_span:
+                    tracer.add_event("llm_error", {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    })
+                    tracer.end_span(llm_span, SpanStatus.ERROR)
+
+                if metrics:
+                    metrics.record_error("LLMError", str(e))
+
+                raise
 
             # 只返回新增的 AI 响应，让 LangGraph 追加到状态
             return {"messages": [response]}
@@ -1216,6 +1298,43 @@ class BAAgent:
         # 重新创建 Agent
         self.agent = self._create_agent()
 
+    def _get_tracer(self, conversation_id: str, session_id: Optional[str] = None) -> Optional[ExecutionTracer]:
+        """Get or create execution tracer for this conversation"""
+        if not self._monitoring_enabled:
+            return None
+        if self._tracer is None:
+            self._tracer = ExecutionTracer(conversation_id, session_id)
+        return self._tracer
+
+    def _get_metrics_collector(self, conversation_id: str, session_id: Optional[str] = None) -> Optional[MetricsCollector]:
+        """Get or create metrics collector for this conversation"""
+        if not self._monitoring_enabled:
+            return None
+        if self._metrics_collector is None:
+            self._metrics_collector = MetricsCollector(conversation_id, session_id)
+        return self._metrics_collector
+
+    def _finalize_monitoring(self) -> None:
+        """Finalize and save monitoring data"""
+        if self._tracer:
+            try:
+                trace = self._tracer.get_trace()
+                if trace:
+                    trace.end()
+                    metrics = self._metrics_collector.finalize() if self._metrics_collector else None
+
+                    # Save to store
+                    trace_store = get_trace_store()
+                    trace_store.save_trace(trace, metrics)
+
+                    logger.debug(f"Saved trace for {trace.conversation_id}")
+            except Exception as e:
+                logger.warning(f"Failed to save trace: {e}")
+
+        # Reset for next conversation
+        self._tracer = None
+        self._metrics_collector = None
+
     def invoke(
         self,
         message: str,
@@ -1239,6 +1358,23 @@ class BAAgent:
         Returns:
             Agent 响应结果
         """
+        # Initialize monitoring
+        tracer = None
+        if conversation_id:
+            tracer = self._get_tracer(conversation_id, session_id)
+
+        root_span = None
+        if tracer:
+            root_span = tracer.create_root_span(
+                name="agent_invoke",
+                span_type=SpanType.AGENT_INVOKE,
+                attributes={
+                    "message": message[:200] + "..." if len(message) > 200 else message,
+                    "model": self.config.model,
+                    "user_id": user_id,
+                }
+            )
+
         # 保存 session_id 供 ContextCoordinator 使用
         if session_id is not None:
             self._current_session_id = session_id
@@ -1313,9 +1449,16 @@ class BAAgent:
             # 提取响应
             response = self._extract_response(result)
 
+            # End root span
+            if root_span:
+                tracer.end_span(root_span, SpanStatus.SUCCESS if result.get("success", True) else SpanStatus.ERROR)
+
             # 清理临时状态
             if hasattr(self, '_current_session_id'):
-                delattr(self, '_current_session_id')
+                delattr(self, '_current_session_id)
+
+            # Finalize and save monitoring data
+            self._finalize_monitoring()
 
             return {
                 "conversation_id": conversation_id,
@@ -1325,13 +1468,23 @@ class BAAgent:
                 "timestamp": datetime.now().isoformat(),
                 "tokens_used": tokens_used,
                 "session_tokens": self.session_tokens,
+                "trace_id": tracer.trace_id if tracer else None,  # Include trace_id for debugging
                 # flush_triggered 不再暴露给用户 (Clawdbot 风格: 静默)
             }
 
         except Exception as e:
+            # End root span with error status
+            if root_span:
+                tracer.end_span(root_span, SpanStatus.ERROR)
+                if tracer:
+                    tracer.add_event("error", {"error_type": type(e).__name__, "error_message": str(e)})
+
             # 清理临时状态
             if hasattr(self, '_current_session_id'):
                 delattr(self, '_current_session_id')
+
+            # Finalize monitoring even on error
+            self._finalize_monitoring()
 
             return {
                 "conversation_id": conversation_id,
@@ -1340,6 +1493,7 @@ class BAAgent:
                 "success": False,
                 "error": str(e),
                 "timestamp": datetime.now().isoformat(),
+                "trace_id": tracer.trace_id if tracer else None,
             }
 
     def _extract_skill_activation_result(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
