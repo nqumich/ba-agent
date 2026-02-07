@@ -15,6 +15,7 @@
 | [architecture.md](architecture.md) | 技术架构设计、组件交互、技术栈 | v2.3.0 |
 | [context-management.md](context-management.md) | 上下文管理详细文档 | v1.5.0 |
 | [response-flow.md](response-flow.md) | 响应格式流转文档 | v2.8.0 |
+| [mcp-setup.md](mcp-setup.md) | MCP 服务器配置指南 | - |
 | [prompts.md](prompts.md) | 系统提示词定义和规范 | - |
 | [skills.md](skills.md) | Skills 系统指南 | - |
 | [api.md](api.md) | REST API 端点、认证、速率限制 | v2.3.0 |
