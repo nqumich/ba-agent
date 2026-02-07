@@ -529,7 +529,8 @@ def _close_connections(cleanup: bool = None):
             should_cleanup = cleanup_config.cleanup_on_shutdown if cleanup_config else True
 
         if should_cleanup and (cleanup_config.enabled if cleanup_config else True):
-            deleted_count = _cleanup_database_files()
+            # 关闭时清理所有文件（不受 max_age_hours 限制）
+            deleted_count = _cleanup_database_files(max_age_hours=0)
             if deleted_count > 0:
                 logger.info(f"已清理 {deleted_count} 个数据库文件")
     except Exception as e:

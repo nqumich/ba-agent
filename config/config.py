@@ -53,12 +53,12 @@ class DatabaseCleanupConfig(BaseModel):
     """数据库清理配置"""
 
     enabled: bool = Field(default=True, description="是否启用自动清理")
-    max_age_hours: float = Field(default=24.0, description="数据库文件最大保留时间（小时）")
-    max_total_size_mb: float = Field(default=500.0, description="数据库目录最大总大小（MB）")
-    cleanup_on_shutdown: bool = Field(default=True, description="关闭时是否清理")
+    max_age_hours: float = Field(default=1.0, description="数据库文件最大保留时间（小时）")
+    max_total_size_mb: float = Field(default=100.0, description="数据库目录最大总大小（MB）")
+    cleanup_on_shutdown: bool = Field(default=True, description="关闭时是否清理所有数据库文件")
     exclude_files: list[str] = Field(
-        default_factory=lambda: ["sqlite.db", "memory.db"],
-        description="清理时排除的文件列表"
+        default_factory=lambda: ["memory.db"],
+        description="清理时排除的文件列表（默认保留 memory.db）"
     )
 
 
