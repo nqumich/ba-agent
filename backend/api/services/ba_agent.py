@@ -313,6 +313,9 @@ class BAAgentService:
             # 提取响应内容（返回元组：display_content, structured_response）
             display_content, structured_response = self._extract_response_content(result)
 
+            # 检测 display_content 是否包含 HTML（用于前端渲染判断）
+            has_html_in_display = '<div' in display_content or '<script' in display_content or 'echarts' in display_content.lower()
+
             # 构建元数据
             metadata = {
                 "content_type": "text",
@@ -342,10 +345,9 @@ class BAAgentService:
 
                 elif structured_response.is_complete():
                     # 完成状态
-                    final_report = structured_response.get_final_report()
-                    has_html = '<div' in final_report or '<script' in final_report or 'echarts' in final_report.lower()
-                    metadata["contains_html"] = has_html
-                    metadata["content_type"] = "html" if has_html else "text"
+                    # 检测完整 display_content 是否包含 HTML
+                    metadata["contains_html"] = has_html_in_display
+                    metadata["content_type"] = "html" if has_html_in_display else "text"
 
                     # 推荐问题和下载链接
                     if structured_response.action.recommended_questions:
