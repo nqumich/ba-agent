@@ -21,6 +21,7 @@ Components:
     - Cache: Idempotency cache for tool results
     - Token: Dynamic token counter
     - Context: Advanced context manager
+    - FileStore: Unified file storage management (lazy import to avoid circular dependency)
 """
 
 # Models
@@ -40,6 +41,25 @@ from backend.pipeline.wrapper import PipelineToolWrapper, wrap_tool, wrap_tools
 from backend.pipeline.cache import IdempotencyCache, get_idempotency_cache
 from backend.pipeline.token import DynamicTokenCounter, get_token_counter
 from backend.pipeline.context import AdvancedContextManager, CompressionMode, get_context_manager
+
+# FileStore Integration (lazy import to avoid circular dependency)
+def _get_file_store():
+    """Lazy import FileStore to avoid circular dependency"""
+    from backend.filestore import FileStore
+    return FileStore
+
+
+def _get_file_store_factory():
+    """Lazy import get_file_store to avoid circular dependency"""
+    from backend.filestore.factory import get_file_store
+    return get_file_store
+
+
+def _get_filestore_integration():
+    """Lazy import FileStorePipelineIntegration"""
+    from backend.pipeline.filestore_integration import FileStorePipelineIntegration
+    return FileStorePipelineIntegration
+
 
 __all__ = [
     # Models
@@ -74,4 +94,8 @@ __all__ = [
     "AdvancedContextManager",
     "CompressionMode",
     "get_context_manager",
+
+    # FileStore (lazy - use these properties/functions instead)
+    "FileStore",           # Use: from backend.filestore import FileStore
+    "get_file_store",      # Use: from backend.filestore.factory import get_file_store
 ]

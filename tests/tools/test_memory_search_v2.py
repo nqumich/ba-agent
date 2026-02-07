@@ -284,3 +284,194 @@ class TestEdgeCases:
         # 输入验证允许，但在使用时会被归一化
         assert input_data.vector_weight == 0.8
         assert input_data.text_weight == 0.5
+
+
+class TestMemorySearchV2EnhancedFeatures:
+    """测试 memory_search_v2 增强功能（从旧版迁移）"""
+
+    def test_entities_filter_validation_valid(self):
+        """测试实体过滤验证（有效输入）"""
+        input_data = MemorySearchV2Input(
+            query="test",
+            entities=["@Python", "@架构"]
+        )
+        assert input_data.entities == ["@Python", "@架构"]
+
+    def test_entities_filter_validation_invalid(self):
+        """测试实体过滤验证（无效格式）"""
+        with pytest.raises(ValueError, match="实体必须以 @ 开头"):
+            MemorySearchV2Input(
+                query="test",
+                entities=["Python"]  # 缺少 @
+            )
+
+    def test_since_days_validation_valid(self):
+        """测试时间范围验证（有效输入）"""
+        input_data = MemorySearchV2Input(
+            query="test",
+            since_days=7
+        )
+        assert input_data.since_days == 7
+
+    def test_since_days_validation_invalid(self):
+        """测试时间范围验证（无效值）"""
+        with pytest.raises(ValueError, match="since_days 必须 >= 1"):
+            MemorySearchV2Input(
+                query="test",
+                since_days=0
+            )
+
+    def test_entities_filter_default(self):
+        """测试实体过滤默认为 None"""
+        input_data = MemorySearchV2Input(query="test")
+        assert input_data.entities is None
+
+    def test_since_days_default(self):
+        """测试时间范围默认为 None"""
+        input_data = MemorySearchV2Input(query="test")
+        assert input_data.since_days is None
+
+    def test_apply_filters_with_entities(self):
+        """测试应用实体过滤器"""
+        from backend.memory.tools.memory_search_v2 import _apply_filters
+
+        results = [
+            {
+                "id": "1",
+                "text": "This is about @Python and @Architecture",
+                "context": "Content with @Python decorator"
+            },
+            {
+                "id": "2",
+                "text": "This is about @Java only",
+                "context": "Content with @Java"
+            },
+            {
+                "id": "3",
+                "text": "No entities here",
+                "context": "Plain text"
+            }
+        ]
+
+        # 过滤包含 @Python 的结果
+        filtered = _apply_filters(results, entities=["@Python"])
+        assert len(filtered) == 1
+        assert filtered[0]["id"] == "1"
+
+    def test_apply_filters_with_multiple_entities(self):
+        """测试应用多个实体过滤器（AND 逻辑）"""
+        from backend.memory.tools.memory_search_v2 import _apply_filters
+
+        results = [
+            {
+                "id": "1",
+                "text": "Has @Python and @Architecture",
+                "context": "Content @Python @Architecture"
+            },
+            {
+                "id": "2",
+                "text": "Has @Python only",
+                "context": "Content @Python"
+            },
+            {
+                "id": "3",
+                "text": "Has @Architecture only",
+                "context": "Content @Architecture"
+            }
+        ]
+
+        # 必须同时包含两个实体
+        filtered = _apply_filters(results, entities=["@Python", "@Architecture"])
+        assert len(filtered) == 1
+        assert filtered[0]["id"] == "1"
+
+    def test_apply_filters_with_since_days(self):
+        """测试应用时间范围过滤器"""
+        from backend.memory.tools.memory_search_v2 import _apply_filters, _is_result_recent
+
+        results = [
+            {
+                "id": "1",
+                "path": "memory/2026-02-01.md",
+                "text": "Recent content"
+            },
+            {
+                "id": "2",
+                "path": "memory/2026-01-01.md",
+                "text": "Old content"
+            },
+            {
+                "id": "3",
+                "path": "memory/unknown.md",
+                "text": "Unknown date"
+            }
+        ]
+
+        # 过滤最近 7 天 (假设今天是 2026-02-07，截止日期 2026-01-31)
+        filtered = _apply_filters(results, since_days=7)
+        # 应该只包含 2026-02-01 和 unknown.md 的结果
+        assert len(filtered) >= 1
+        # 确保旧日期被过滤
+        assert not any(r["id"] == "2" for r in filtered)
+
+    def test_is_result_recent_valid_format(self):
+        """测试日期检查 - 有效格式"""
+        from backend.memory.tools.memory_search_v2 import _is_result_recent
+
+        result = {"path": "memory/2026-02-05.md"}
+        assert _is_result_recent(result, "2026-02-01") is True  # 2/5 > 2/1
+        assert _is_result_recent(result, "2026-02-10") is False  # 2/5 < 2/10
+
+    def test_is_result_recent_invalid_format(self):
+        """测试日期检查 - 无效格式"""
+        from backend.memory.tools.memory_search_v2 import _is_result_recent
+
+        result = {"path": "memory/unknown.md"}
+        # 无法解析日期时默认返回 True（保留结果）
+        assert _is_result_recent(result, "2026-02-01") is True
+
+    def test_apply_filters_with_max_results(self):
+        """测试限制结果数量"""
+        from backend.memory.tools.memory_search_v2 import _apply_filters
+
+        results = [{"id": str(i), "text": f"Content {i}"} for i in range(20)]
+
+        # 限制为 5 个结果
+        filtered = _apply_filters(results, max_results=5)
+        assert len(filtered) == 5
+
+    def test_apply_filters_combined(self):
+        """测试组合过滤器"""
+        from backend.memory.tools.memory_search_v2 import _apply_filters
+
+        results = [
+            {
+                "id": "1",
+                "text": "Recent @Python content",
+                "path": "memory/2026-02-05.md",
+                "context": "Has @Python"
+            },
+            {
+                "id": "2",
+                "text": "Recent @Java content",
+                "path": "memory/2026-02-05.md",
+                "context": "Has @Java"
+            },
+            {
+                "id": "3",
+                "text": "Old @Python content",
+                "path": "memory/2026-01-01.md",
+                "context": "Has @Python"
+            }
+        ]
+
+        # 组合：@Python + 最近7天 + 最多1个结果
+        filtered = _apply_filters(
+            results,
+            entities=["@Python"],
+            since_days=30,
+            max_results=1
+        )
+        assert len(filtered) == 1
+        assert filtered[0]["id"] == "1"
+

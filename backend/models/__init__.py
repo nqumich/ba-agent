@@ -90,6 +90,20 @@ from .memory import (
     WorkingMemory
 )
 
+from .filestore import (
+    FileCategory,
+    FileRef,
+    FileContent,
+    FileMetadata,
+    MemoryLayer,
+    MemoryRef,
+    MemoryContent,
+    CheckpointRef,
+    StorageStats,
+    CleanupStats,
+    FileStoreConfig,
+)
+
 # 导出所有模型
 __all__ = [
     # Base
@@ -151,4 +165,16 @@ __all__ = [
     "MemorySearchResult",
     "MemoryWriteRequest",
     "WorkingMemory",
+    # FileStore
+    "FileCategory",
+    "FileRef",
+    "FileContent",
+    "FileMetadata",
+    "MemoryLayer",
+    "MemoryRef",
+    "MemoryContent",
+    "CheckpointRef",
+    "StorageStats",
+    "CleanupStats",
+    "FileStoreConfig",
 ]
