@@ -212,11 +212,11 @@ content: "
 content: "
 以下是数据处理代码：
 
-\`\`\`python
+```python
 import pandas as pd
 df = pd.read_csv('sales.csv')
 result = df.groupby('quarter').sum()
-\`\`\`
+```
 
 计算结果为...
 "
@@ -224,7 +224,91 @@ result = df.groupby('quarter').sum()
 
 ## 工具调用参数规范
 
-### bac_code_agent (Python 代码执行)
+### run_python (Python 代码执行)
+```json
+{{
+    "tool_name": "run_python",
+    "tool_call_id": "call_xxx",
+    "arguments": {{
+        "code": "import pandas as pd\ndf = pd.read_csv('data.csv')\nprint(df.head())",
+        "timeout": 60,
+        "response_format": "standard"
+    }}
+}}
+```
+
+参数说明：
+- `code`（必需）：要执行的 Python 代码
+- `timeout`（可选）：超时时间（秒），默认 60
+- `response_format`（可选）：返回格式，可选 brief/standard/full，默认 standard
+
+### file_reader (文件读取)
+```json
+{{
+    "tool_name": "file_reader",
+    "tool_call_id": "call_xxx",
+    "arguments": {{
+        "path": "upload:file_id_or_filename",
+        "format": "csv",
+        "encoding": "utf-8",
+        "sheet_name": 0,
+        "nrows": 100,
+        "parse_metadata": false,
+        "response_format": "standard"
+    }}
+}}
+```
+
+参数说明：
+- `path`（必需）：文件路径，格式为 `category:filename` 或 `category:file_id`
+- `format`（可选）：文件格式（csv/excel/json/parquet 等），自动检测
+- `encoding`（可选）：文本编码，默认 utf-8
+- `sheet_name`（可选）：Excel 工作表名称或索引，默认 0
+- `nrows`（可选）：最大读取行数
+- `parse_metadata`（可选）：是否解析元数据
+- `response_format`（可选）：返回格式，可选 brief/standard/full，默认 standard
+
+### query_database (数据库查询)
+```json
+{{
+    "tool_name": "query_database",
+    "tool_call_id": "call_xxx",
+    "arguments": {{
+        "query": "SELECT * FROM sales WHERE quarter = 'Q1' LIMIT 100",
+        "connection": "primary",
+        "params": {{}},
+        "max_rows": 1000,
+        "response_format": "standard"
+    }}
+}}
+```
+
+参数说明：
+- `query`（必需）：SQL 查询语句
+- `connection`（可选）：数据库连接名称，默认 primary
+- `params`（可选）：查询参数（防止注入），字典格式
+- `max_rows`（可选）：最大返回行数，范围 1-10000
+- `response_format`（可选）：返回格式，可选 brief/standard/full，默认 standard
+
+### web_search (网络搜索)
+```json
+{{
+    "tool_name": "web_search",
+    "tool_call_id": "call_xxx",
+    "arguments": {{
+        "query": "最新 AI 技术趋势 2026",
+        "num_results": 10,
+        "response_format": "standard"
+    }}
+}}
+```
+
+参数说明：
+- `query`（必需）：搜索关键词
+- `num_results`（可选）：返回结果数量，默认 10
+- `response_format`（可选）：返回格式，可选 brief/standard/full，默认 standard
+
+### bac_code_agent (兼容旧版，建议使用 run_python)
 ```json
 {{
     "tool_name": "bac_code_agent",
@@ -234,28 +318,6 @@ result = df.groupby('quarter').sum()
         "outputFileName": "输出文件名（可选）",
         "fileNameList": ["需要使用的文件列表"],
         "analysisQuery": "对结果的分析要求（可选）"
-    }}
-}}
-```
-
-### query_database (数据库查询)
-```json
-{{
-    "tool_name": "query_database",
-    "tool_call_id": "call_xxx",
-    "arguments": {{
-        "sql": "SELECT * FROM sales WHERE quarter = 'Q1'"
-    }}
-}}
-```
-
-### web_search (网络搜索)
-```json
-{{
-    "tool_name": "web_search",
-    "tool_call_id": "call_xxx",
-    "arguments": {{
-        "query": "搜索关键词"
     }}
 }}
 ```
@@ -281,12 +343,21 @@ result = df.groupby('quarter').sum()
         "type": "tool_call",
         "content": [
             {{
-                "tool_name": "bac_code_agent",
+                "tool_name": "file_reader",
+                "tool_call_id": "call_read_001",
+                "arguments": {{
+                    "path": "upload:sales.csv",
+                    "format": "csv",
+                    "response_format": "standard"
+                }}
+            }},
+            {{
+                "tool_name": "run_python",
                 "tool_call_id": "call_sales_001",
                 "arguments": {{
-                    "query": "1. 读取sales.csv；2. 按季度汇总；3. 计算同比增长率；4. 输出前5行异常数据",
-                    "outputFileName": "sales_analysis_result",
-                    "fileNameList": ["sales.csv"]
+                    "code": "import pandas as pd\nimport numpy as np\n\n# 读取数据\ndf = pd.read_csv('sales.csv')\n\n# 按季度汇总\nquarterly_sales = df.groupby('quarter').agg({{'amount': 'sum'}}).reset_index()\n\n# 计算同比增长率\nquarterly_sales['growth_rate'] = quarterly_sales['amount'].pct_change() * 100\n\n# 输出结果\nprint(quarterly_sales)\nprint('\\\\n异常数据：')\nprint(df[df['amount'] > df['amount'].quantile(0.95)])",
+                    "timeout": 120,
+                    "response_format": "standard"
                 }}
             }}
         ]

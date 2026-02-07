@@ -13,6 +13,7 @@ from .temp_store import TempStore
 from .memory_store import MemoryStore
 from .checkpoint_store import CheckpointStore
 from .placeholder import PlaceholderStore
+from .code_store import CodeStore
 
 __all__ = [
     "ArtifactStore",
@@ -24,4 +25,5 @@ __all__ = [
     "MemoryStore",
     "CheckpointStore",
     "PlaceholderStore",
+    "CodeStore",
 ]

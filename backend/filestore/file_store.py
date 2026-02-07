@@ -25,6 +25,7 @@ from backend.filestore.stores import (
     TempStore,
     MemoryStore,
     CheckpointStore,
+    CodeStore,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ class FileStore:
         self.temp = TempStore(self.base_dir / "temp")
         self.memory = MemoryStore(self.base_dir / "memory")
         self.checkpoints = CheckpointStore(self.base_dir / "temp" / "checkpoints")
+        self.code = CodeStore(self.base_dir / "code")
 
         # 存储映射表
         self._stores = {
@@ -93,6 +95,7 @@ class FileStore:
             FileCategory.CACHE: self.cache,
             FileCategory.TEMP: self.temp,
             FileCategory.MEMORY: self.memory,
+            FileCategory.CODE: self.code,
         }
 
     def store_file(

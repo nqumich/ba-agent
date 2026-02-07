@@ -52,6 +52,7 @@ class FileCategory(str, Enum):
     TEMP = "temp"          # 临时文件
     MEMORY = "memory"      # 记忆文件
     CHECKPOINT = "checkpoint"  # 检查点文件
+    CODE = "code"          # 代码文件
 
 
 class FileRef(BaseModel):
@@ -383,7 +384,8 @@ class FileStoreConfig(BaseModel):
             "cache": 1,
             "temp": 0,
             "memory": 8760,
-            "checkpoint": 24
+            "checkpoint": 24,
+            "code": 168  # 代码文件保存7天
         },
         description="各类别 TTL 配置（小时）"
     )
@@ -394,7 +396,8 @@ class FileStoreConfig(BaseModel):
             "report": 50 * 1024 * 1024,
             "chart": 10 * 1024 * 1024,
             "cache": 10 * 1024 * 1024,
-            "temp": 50 * 1024 * 1024
+            "temp": 50 * 1024 * 1024,
+            "code": 1 * 1024 * 1024         # 代码文件最大 1 MB
         },
         description="各类别最大文件大小（字节）"
     )

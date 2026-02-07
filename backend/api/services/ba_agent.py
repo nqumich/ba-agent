@@ -311,7 +311,10 @@ class BAAgentService:
             })
 
             # 提取响应内容（返回元组：final_report_content, structured_response）
-            final_report_content, structured_response = self._extract_response_content(result)
+            final_report_content, structured_response = self._extract_response_content(
+                result,
+                session_id=session_id
+            )
 
             # 构建元数据
             metadata = {
@@ -498,10 +501,22 @@ class BAAgentService:
 
     def _extract_response_content(
         self,
-        result: Dict[str, Any]
+        result: Dict[str, Any],
+        session_id: Optional[str] = None
     ) -> tuple[str, Optional[StructuredResponse]]:
         """
         提取响应内容并解析结构化响应
+
+        实现代码管理流程：
+        1. 代码检测：当模型返回包含代码块时（```python...```），检测出来
+        2. 代码标识生成：生成唯一且可读的标识，格式 `code_{YYYYMMDD}_{random}`
+        3. 代码保存：将代码保存到 FileStore 中的 `.py` 文件
+        4. 上下文清理：用概述替换原始代码（如 `<!-- CODE_SAVED: code_20250207_abc123 -->`）
+        5. 支持 review：当需要 review 代码时，通过 file_reader 读取，读取后再次清理
+
+        Args:
+            result: Agent 执行结果
+            session_id: 会话 ID（用于代码文件关联）
 
         Returns:
             (final_report_content, structured_response)
@@ -542,9 +557,77 @@ class BAAgentService:
                 logger.warning(f"无法解析结构化响应，返回原始内容")
                 return raw_content, None
 
-            # 返回原始的 final_report 内容（不构建 HTML）
-            # 前端负责根据 metadata 渲染各个组件
+            # 获取最终报告内容
             final_report = structured_response.get_final_report()
+
+            # 代码管理流程
+            try:
+                from backend.api.state import get_app_state
+                from backend.filestore.stores.code_store import CodeStore
+
+                app_state = get_app_state()
+                file_store = app_state.get("file_store")
+
+                if file_store:
+                    code_store = file_store.code
+
+                    # 检测是否有代码保存标识（说明可能需要 review）
+                    code_markers = CodeStore.extract_code_saved_markers(final_report)
+
+                    # 如果检测到代码块，执行保存和清理流程
+                    if CodeStore.has_code_blocks(final_report):
+                        logger.info("检测到代码块，开始代码管理流程")
+
+                        # 提取所有代码块
+                        code_blocks = CodeStore.extract_code_blocks(final_report)
+
+                        # 处理每个代码块
+                        processed_report = final_report
+                        for i, block in enumerate(code_blocks):
+                            code = block["code"]
+                            language = block["language"]
+
+                            # 只处理 Python 代码
+                            if language in ("python", "py"):
+                                # 生成唯一标识
+                                code_id = code_store.generate_code_id()
+
+                                # 生成代码描述（取前50个字符）
+                                description = code[:50].replace('\n', ' ')
+                                if len(code) > 50:
+                                    description += "..."
+
+                                # 保存代码到 FileStore
+                                code_ref = code_store.store(
+                                    content=code.encode('utf-8'),
+                                    code_id=code_id,
+                                    session_id=session_id,
+                                    description=description
+                                )
+
+                                logger.info(f"代码已保存: {code_id}, file_ref={code_ref.file_id}")
+
+                                # 替换代码块为保存标识
+                                # 构建完整的代码块（包括反引号）进行替换
+                                code_block_full = f"```{language}\n{code}\n```"
+                                processed_report = CodeStore.replace_code_with_marker(
+                                    processed_report,
+                                    code_block_full,
+                                    code_id,
+                                    description
+                                )
+
+                        # 更新结构化响应中的内容
+                        if processed_report != final_report:
+                            structured_response.action.content = processed_report
+                            logger.info("代码块已替换为保存标识")
+                            final_report = processed_report
+
+            except Exception as code_error:
+                # 代码管理流程出错不影响主流程
+                logger.warning(f"代码管理流程出错（已跳过）: {code_error}", exc_info=True)
+
+            # 返回处理后的 final_report 内容
             return final_report, structured_response
 
         except Exception as e:
