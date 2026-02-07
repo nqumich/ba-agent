@@ -2,6 +2,8 @@
 记忆索引数据库 Schema 定义
 
 基于 clawdbot 的 memory schema 设计
+
+支持索引轮换：当索引文件超过一定大小时，自动创建新的索引文件
 """
 
 from pathlib import Path
@@ -10,6 +12,25 @@ from typing import Optional
 
 # 数据库文件路径
 DEFAULT_INDEX_PATH = "memory/.index/memory.db"
+
+# 索引轮换相关
+DEFAULT_MAX_INDEX_SIZE_MB = 50.0  # 单个索引文件最大大小（MB）
+
+
+def get_default_index_path() -> Path:
+    """
+    获取默认索引路径（兼容旧代码）
+
+    Returns:
+        Path: 默认索引路径
+    """
+    # 尝试使用索引轮换管理器获取当前索引
+    try:
+        from .index_rotation import get_current_index_path
+        return get_current_index_path()
+    except Exception:
+        # 回退到默认路径
+        return Path(DEFAULT_INDEX_PATH)
 
 
 def ensure_memory_index_schema(

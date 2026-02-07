@@ -213,7 +213,7 @@ class TestMemorySearchV2:
 
         result = memory_search_v2("test query")
         # 当索引不存在时，搜索会返回空结果
-        assert "未找到匹配" in result or "no results" in result.lower()
+        assert "未找到" in result or "no results" in result.lower()
 
     def test_empty_query(self):
         """测试空查询"""

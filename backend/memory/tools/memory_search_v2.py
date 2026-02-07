@@ -153,6 +153,8 @@ def memory_search_v2(
     """
     使用混合搜索引擎搜索用户记忆
 
+    支持多索引文件搜索：当索引文件轮换时，会自动搜索所有索引文件
+
     Args:
         query: 搜索查询（关键词或自然语言问题）
         max_results: 最大返回结果数
@@ -174,77 +176,117 @@ def memory_search_v2(
         >>> memory_search_v2("架构", entities=["@Python"])  # 实体过滤
         >>> memory_search_v2("任务", since_days=7)  # 最近7天
     """
-    # 确保索引存在
-    index_path = get_index_db_path()
+    # 获取所有索引文件路径
+    try:
+        from backend.memory.index_rotation import get_all_index_paths
+        index_paths = get_all_index_paths()
+    except Exception:
+        # 回退到单索引模式
+        index_paths = [get_index_db_path()]
 
-    if not index_path.exists():
+    # 检查索引是否存在
+    if not any(p.exists() for p in index_paths):
         return "❌ 搜索索引尚未创建。请先运行索引建立。"
 
-    try:
-        # 打开索引数据库
-        db = open_index_db(index_path)
+    all_results = []
+    has_vectors = False
+    embedding_dims = 0
+    query_embedding = None
 
-        # 检查是否已创建 schema
-        cursor = db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks'"
-        )
-        if cursor.fetchone() is None:
-            return "❌ 搜索索引尚未建立。请先运行索引建立。"
-
-        # 检查是否有向量表
-        cursor = db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
-        )
-        has_vectors = cursor.fetchone() is not None
-
-        # 创建 embedding provider
+    # 创建 embedding provider（只需一次）
+    if use_hybrid:
         try:
             provider = create_embedding_provider(provider="auto")
-            embedding = provider.encode_batch([query])[0]
-            embedding_dims = len(embedding)
+            query_embedding = provider.encode_batch([query])[0]
+            embedding_dims = len(query_embedding)
         except Exception as e:
             # Embedding 失败，回退到 FTS only
             use_hybrid = False
             embedding_dims = 0
 
-        if use_hybrid and has_vectors and embedding_dims > 0:
-            # 使用混合搜索
-            results = _search_hybrid(
-                db,
-                query,
-                embedding,
-                embedding_dims,
-                max_results,
-                min_score,
-                source,
-                vector_weight,
-                text_weight
+    # 遍历所有索引文件进行搜索
+    for index_path in index_paths:
+        if not index_path.exists():
+            continue
+
+        try:
+            # 打开索引数据库
+            db = open_index_db(index_path)
+
+            # 检查是否已创建 schema
+            cursor = db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks'"
             )
-        else:
-            # 仅使用 FTS 搜索
-            results = _search_fts(
-                db,
-                query,
-                max_results,
-                min_score,
-                source
-            )
+            if cursor.fetchone() is None:
+                db.close()
+                continue
 
-        # 应用后处理过滤器
-        results = _apply_filters(
-            results,
-            entities=entities,
-            since_days=since_days,
-            max_results=max_results
-        )
+            # 检查是否有向量表
+            if not has_vectors:
+                cursor = db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
+                )
+                has_vectors = cursor.fetchone() is not None
 
-        db.close()
+            if use_hybrid and has_vectors and embedding_dims > 0:
+                # 使用混合搜索
+                results = _search_hybrid(
+                    db,
+                    query,
+                    query_embedding,
+                    embedding_dims,
+                    max_results,
+                    min_score,
+                    source,
+                    vector_weight,
+                    text_weight
+                )
+            else:
+                # 仅使用 FTS 搜索
+                results = _search_fts(
+                    db,
+                    query,
+                    max_results,
+                    min_score,
+                    source
+                )
 
-        # 格式化结果
-        return _format_results_v2(results, query, min_score, source, use_hybrid, entities, since_days)
+            # 标记结果来源索引
+            for result in results:
+                result["_index_file"] = index_path.name
 
-    except Exception as e:
-        return f"❌ 搜索失败: {str(e)}"
+            all_results.extend(results)
+            db.close()
+
+        except Exception as e:
+            logger.warning(f"搜索索引 {index_path.name} 失败: {e}")
+            continue
+
+    if not all_results:
+        return "❌ 未找到相关结果。"
+
+    # 按分数排序并去重（按 id）
+    seen_ids = set()
+    unique_results = []
+    for r in sorted(all_results, key=lambda x: x.get("score", 0), reverse=True):
+        chunk_id = r.get("id")
+        if chunk_id and chunk_id not in seen_ids:
+            seen_ids.add(chunk_id)
+            unique_results.append(r)
+
+    # 限制结果数量
+    results = unique_results[:max_results * 2]
+
+    # 应用后处理过滤器
+    results = _apply_filters(
+        results,
+        entities=entities,
+        since_days=since_days,
+        max_results=max_results
+    )
+
+    # 格式化结果
+    return _format_results_v2(results, query, min_score, source, use_hybrid, entities, since_days)
 
 
 def _search_hybrid(

@@ -203,6 +203,15 @@ class MemoryWatcherConfig(BaseModel):
     check_interval_seconds: float = Field(default=5.0, description="检查间隔秒数")
 
 
+class MemoryIndexRotationConfig(BaseModel):
+    """记忆索引轮换配置"""
+
+    enabled: bool = Field(default=True, description="是否启用索引轮换")
+    max_size_mb: float = Field(default=50.0, description="单个索引文件最大大小（MB）")
+    index_prefix: str = Field(default="memory", description="索引文件前缀")
+    index_dir: str = Field(default="memory/.index", description="索引目录")
+
+
 class MemoryConfig(BaseModel):
     """记忆管理配置"""
 
@@ -213,6 +222,10 @@ class MemoryConfig(BaseModel):
     flush: MemoryFlushConfig = Field(default_factory=MemoryFlushConfig, description="Memory Flush 配置")
     search: MemorySearchConfig = Field(default_factory=MemorySearchConfig, description="Memory Search 配置")
     watcher: MemoryWatcherConfig = Field(default_factory=MemoryWatcherConfig, description="Memory Watcher 配置")
+    index_rotation: MemoryIndexRotationConfig = Field(
+        default_factory=MemoryIndexRotationConfig,
+        description="索引轮换配置"
+    )
 
 
 class LoggingConfig(BaseModel):
