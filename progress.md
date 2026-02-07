@@ -10,8 +10,8 @@
 ### 最新测试统计 (2026-02-07)
 
 ```
-总计: 884 个测试
-✅ 通过: 884 (100%)
+总计: 894 个测试
+✅ 通过: 894 (100%)
 ⏭️  跳过: 1 (MCP 相关)
 ❌ 失败: 0
 ```
@@ -26,6 +26,7 @@
 | Pipeline v2.1 | 100+ | ✅ |
 | FileStore 系统 | 100+ | ✅ |
 | 存储配置 | 14 | ✅ |
+| API 路由 | 10 | ✅ |
 
 ---
 
@@ -72,17 +73,38 @@
 - 环境变量 BA_STORAGE_DIR 支持
 - 14 个存储配置测试通过
 
+### API 和 Skills 系统完整集成 (2026-02-07) ✅
+- FastAPI Skills 管理 API (9 个端点)
+- BAAgentService 服务类实现
+- Agent 路由集成真实 Agent 查询
+- 内置/外部 Skills 统一管理
+- 10 个 API 路由测试通过
+
 ---
 
 ## 最新更新
 
-### 2026-02-07 - 跨平台存储路径配置系统
-**Task #114: 跨平台存储配置**
-- 创建存储配置管理模块 (backend/storage/config.py)
-- 支持跨平台默认路径选择
-- 环境变量 BA_STORAGE_DIR 支持
-- 初始化脚本 scripts/init_storage.py
-- 清理过时 scripts/ralph/ 目录
+### 2026-02-07 - API 和 Skills 系统完整集成
+**Task #115: API 和 Skills 系统完整集成**
+
+新增 API 端点:
+- `GET /api/v1/skills` - 获取所有 Skills 列表
+- `GET /api/v1/skills/categories` - 获取 Skill 类别
+- `GET /api/v1/skills/{name}` - 获取 Skill 详情
+- `POST /api/v1/skills/activate` - 激活 Skill
+- `POST /api/v1/skills/install` - 安装外部 Skill
+- `DELETE /api/v1/skills/{name}` - 卸载 Skill
+- `GET /api/v1/skills/status/overview` - Skills 系统状态
+
+**BAAgentService 服务类**:
+- 集成 LangChain Agent 和 Skills
+- 支持对话管理
+- 实现真实 Agent 查询
+
+**Skills 统一管理**:
+- 内置 Skills (skills/ 目录) 自动发现
+- 外部 Skills 通过 skill_package 工具安装后自动发现
+- 按 category 分组展示
 
 ---
 
@@ -97,16 +119,50 @@
 | Skills 调用无桥接 | 实现构建 Python 代码调用 Skill | 2025-02-05 |
 | 旧 Pipeline 模型冲突 | 完成 Pipeline v2.1.0 迁移 | 2026-02-06 |
 | SQLAlchemy 导入警告 | 延迟警告到实际使用时 | 2026-02-06 |
-| 硬编码系统路径 /var/lib/ba-agent | 跨平台存储配置系统 | 2026-02-07 |
+| 硬编码系统路径 /var/lib/ba-agent | 跨平台存储配置系统 | 2026-02-06 |
+| Agent API 模拟响应 | 实现 BAAgentService 真实查询 | 2026-02-07 |
+| Skills 缺少管理 API | 实现 Skills 管理 API 端点 | 2026-02-07 |
 
 ---
 
 ## 性能指标
 
 ### 当前状态
-- 代码覆盖率: >95% (884/884 测试通过)
+- 代码覆盖率: >95% (894/894 测试通过)
 - API 响应时间: < 1s (本地测试)
 - 内存使用: < 512MB (Docker 限制)
+
+---
+
+## API 端点概览
+
+### 健康检查
+- `GET /api/v1/health` - 健康检查
+
+### 文件管理
+- `POST /api/v1/files/upload` - 上传文件
+- `GET /api/v1/files` - 列出文件
+- `GET /api/v1/files/{file_id}/metadata` - 获取文件元数据
+- `GET /api/v1/files/{file_id}/download` - 下载文件
+- `DELETE /api/v1/files/{file_id}` - 删除文件
+
+### Agent 交互
+- `POST /api/v1/agent/query` - Agent 查询
+- `POST /api/v1/agent/conversation/start` - 开始新对话
+- `GET /api/v1/agent/conversation/{id}/history` - 获取对话历史
+- `DELETE /api/v1/agent/conversation/{id}` - 结束对话
+- `GET /api/v1/agent/status` - Agent 服务状态
+
+### Skills 管理
+- `GET /api/v1/skills` - 获取 Skills 列表
+- `GET /api/v1/skills/categories` - 获取 Skill 类别
+- `GET /api/v1/skills/{name}` - 获取 Skill 详情
+- `GET /api/v1/skills/{name}/config` - 获取 Skill 配置
+- `PUT /api/v1/skills/{name}/config` - 更新 Skill 配置
+- `POST /api/v1/skills/activate` - 激活 Skill
+- `POST /api/v1/skills/install` - 安装外部 Skill
+- `DELETE /api/v1/skills/{name}` - 卸载 Skill
+- `GET /api/v1/skills/status/overview` - Skills 系统状态
 
 ---
 
@@ -115,36 +171,38 @@
 ### 优先级 P1 (核心功能)
 
 - [ ] **US-015**: 示例 Skill - 异动检测
-  - 实现异动检测算法
-  - 支持多种异动检测方法 (阈值、Z-score、IQR)
+  - 实现 skills/anomaly_detection/main.py
+  - 支持多种检测方法 (阈值、Z-score、IQR)
   - 可视化异动结果
 
 - [ ] **US-016**: 示例 Skill - 归因分析
-  - 实现归因树算法
+  - 实现 skills/attribution/main.py
   - 支持多维度归因
   - 生成归因报告
 
 - [ ] **US-017**: 示例 Skill - 报告生成
-  - 实现报告模板系统
-  - 支持多种报告格式 (PDF, Word, HTML)
+  - 实现 skills/report_gen/main.py
+  - 支持多种报告格式
   - 支持图表嵌入
 
 - [ ] **US-018**: 示例 Skill - 数据可视化
-  - 实现 ECharts 代码生成
-  - 支持多种图表类型
+  - 实现 skills/visualization/main.py
+  - 生成 ECharts 代码
   - 交互式图表
 
 ### 优先级 P2 (集成与部署)
 
-- [ ] **US-019**: Agent System Prompt 与工具集成
-- [ ] **US-020**: 知识库初始化
-- [ ] **US-021**: API 服务实现 (FastAPI)
-- [ ] **US-022**: IM Bot 集成 (企业微信/钉钉)
-- [ ] **US-023**: Excel 插件
+- [ ] **US-021**: API 服务完善
+  - 添加认证/授权 (JWT)
+  - 添加速率限制
+  - 完善错误处理
+
+- [ ] **US-022**: IM Bot 集成
+  - 企业微信 Webhook
+  - 钉钉 Bot
 
 ### 优先级 P3 (质量保证)
 
-- [ ] **US-024**: 日志与监控系统
 - [ ] **US-025**: 单元测试与覆盖率提升
 - [ ] **US-026**: 文档完善
 
@@ -154,17 +212,18 @@
 
 ### 可优化的部分
 
-1. **Memory Search 泛化**
+1. **Skills 实现待完成**
+   - anomaly_detection/main.py - 只有 SKILL.md，无实现
+   - attribution/main.py - 只有 SKILL.md，无实现
+   - report_gen/main.py - 只有 SKILL.md，无实现
+   - visualization/main.py - 只有 SKILL.md，无实现
+
+2. **Memory Search 泛化**
    - 当前实现有较多定制化逻辑
    - 可考虑抽象为通用搜索框架
 
-2. **FileStore 占位符实现**
+3. **FileStore 占位符实现**
    - report_store, chart_store, cache_store, temp_store 仍为占位符
-   - 需要完整实现
-
-3. **测试覆盖率**
-   - 某些边缘情况测试不足
-   - 需要添加集成测试
 
 ---
 
