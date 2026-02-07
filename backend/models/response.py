@@ -118,9 +118,55 @@ FINAL_REPORT_CONTENT_TYPES = {
     "file_reference": "文件引用"
 }
 
+# ===== 提示词加载 =====
 
-# 系统提示词模板
-STRUCTURED_RESPONSE_SYSTEM_PROMPT = """你必须严格按照以下 JSON 格式返回响应：
+def _load_prompt_from_docs() -> str:
+    """
+    从 docs/prompts.md 加载结构化响应提示词
+
+    如果文档不存在或读取失败，返回内嵌的备用提示词
+    """
+    from pathlib import Path
+    import re
+
+    docs_path = Path(__file__).parent.parent.parent / "docs" / "prompts.md"
+
+    if not docs_path.exists():
+        # 文档不存在，使用备用提示词
+        return _get_fallback_prompt()
+
+    try:
+        content = docs_path.read_text(encoding='utf-8')
+
+        # 提取 STRUCTURED_RESPONSE_SYSTEM_PROMPT 部分
+        # 查找从 ### STRUCTURED_RESPONSE_SYSTEM_PROMPT 到下一个 ### 之间的内容
+        pattern = r'### STRUCTURED_RESPONSE_SYSTEM_PROMPT\s+(.*?)(?=### |\Z)'
+        match = re.search(pattern, content, re.DOTALL)
+
+        if match:
+            prompt_text = match.group(1).strip()
+            # 移除 markdown 代码块标记（如果存在）
+            prompt_text = re.sub(r'^```\w*\n?', '', prompt_text, flags=re.MULTILINE)
+            prompt_text = prompt_text.rstrip('`\n')
+            return prompt_text
+
+        # 如果没有找到，返回备用提示词
+        return _get_fallback_prompt()
+
+    except Exception as e:
+        # 读取失败，使用备用提示词
+        import warnings
+        warnings.warn(f"无法从文档加载提示词: {e}，使用备用提示词")
+        return _get_fallback_prompt()
+
+
+def _get_fallback_prompt() -> str:
+    """
+    获取内嵌的备用提示词
+
+    这是当 docs/prompts.md 不存在或读取失败时使用的版本
+    """
+    return """你必须严格按照以下 JSON 格式返回响应：
 
 ```json
 {{
@@ -139,251 +185,48 @@ STRUCTURED_RESPONSE_SYSTEM_PROMPT = """你必须严格按照以下 JSON 格式�
 ## Action Type 定义
 
 ### type="tool_call" (调用工具)
-content 必须为数组，支持单次并行调用（最多6个）：
-
-```json
-{{
-    "task_analysis": "用户需分析销售数据，识别为数据分析任务",
-    "execution_plan": "R1: 数据查询与计算; R2: 可视化与报告",
-    "current_round": 1,
-    "action": {{
-        "type": "tool_call",
-        "content": [
-            {{
-                "tool_name": "bac_code_agent",
-                "tool_call_id": "call_abc123",
-                "arguments": {{
-                    "query": "读取数据并计算销售额",
-                    "outputFileName": "sales_result"
-                }}
-            }}
-        ]
-    }}
-}}
-```
+content 必须为数组，支持单次并行调用（最多6个）。
 
 ### type="complete" (完成并返回报告)
-content 为字符串，包含最终分析结果或可视化代码：
-
-```json
-{{
-    "task_analysis": "分析完成，已获取所需数据",
-    "execution_plan": "R1: 数据查询; R2: 生成报告(当前)",
-    "current_round": 2,
-    "action": {{
-        "type": "complete",
-        "content": "根据分析结果，Q1销售额同比增长15%，主要来源于..."
-    }}
-}}
-```
-
-## 最终报告 Content 格式
-
-当 type="complete" 时，content 可以是以下格式：
-
-### 1. 纯文本报告
-```
-content: "根据数据分析，Q1销售额达到500万元，同比增长15%..."
-```
-
-### 2. 带 HTML 图表
-```
-content: "
-数据分析显示Q1销售额增长显著：
-
-<div class='chart-wrapper'>
-    <div id='chart-sales' style='width:600px;height:400px;'></div>
-</div>
-<script>
-(function(){
-    const chart = echarts.init(document.getElementById('chart-sales'));
-    chart.setOption({
-        xAxis: {type: 'category', data: ['Q1', 'Q2', 'Q3', 'Q4']},
-        yAxis: {type: 'value'},
-        series: [{type: 'bar', data: [500, 520, 580, 620]}]
-    });
-})();
-</script>
-"
-```
-
-### 3. 带代码块的报告
-```
-content: "
-以下是数据处理代码：
-
-```python
-import pandas as pd
-df = pd.read_csv('sales.csv')
-result = df.groupby('quarter').sum()
-```
-
-计算结果为...
-"
-```
+content 为字符串，包含最终分析结果或可视化代码。
 
 ## 工具调用参数规范
 
 ### run_python (Python 代码执行)
-```json
-{{
-    "tool_name": "run_python",
-    "tool_call_id": "call_xxx",
-    "arguments": {{
-        "code": "import pandas as pd\ndf = pd.read_csv('data.csv')\nprint(df.head())",
-        "timeout": 60,
-        "response_format": "standard"
-    }}
-}}
-```
-
-参数说明：
-- `code`（必需）：要执行的 Python 代码
-- `timeout`（可选）：超时时间（秒），默认 60
-- `response_format`（可选）：返回格式，可选 brief/standard/full，默认 standard
+- code: 要执行的 Python 代码
+- timeout: 执行超时时间（秒），范围 5-300，默认 60
+- response_format: brief/standard/full
 
 ### file_reader (文件读取)
-```json
-{{
-    "tool_name": "file_reader",
-    "tool_call_id": "call_xxx",
-    "arguments": {{
-        "path": "upload:file_id_or_filename",
-        "format": "csv",
-        "encoding": "utf-8",
-        "sheet_name": 0,
-        "nrows": 100,
-        "parse_metadata": false,
-        "response_format": "standard"
-    }}
-}}
-```
-
-参数说明：
-- `path`（必需）：文件路径，格式为 `category:filename` 或 `category:file_id`
-- `format`（可选）：文件格式（csv/excel/json/parquet 等），自动检测
-- `encoding`（可选）：文本编码，默认 utf-8
-- `sheet_name`（可选）：Excel 工作表名称或索引，默认 0
-- `nrows`（可选）：最大读取行数
-- `parse_metadata`（可选）：是否解析元数据
-- `response_format`（可选）：返回格式，可选 brief/standard/full，默认 standard
+- path: 文件路径
+- format: 文件格式（可选，自动检测）
+- encoding: 文本编码，默认 utf-8
+- nrows: 最大读取行数
+- response_format: brief/standard/full
 
 ### query_database (数据库查询)
-```json
-{{
-    "tool_name": "query_database",
-    "tool_call_id": "call_xxx",
-    "arguments": {{
-        "query": "SELECT * FROM sales WHERE quarter = 'Q1' LIMIT 100",
-        "connection": "primary",
-        "params": {{}},
-        "max_rows": 1000,
-        "response_format": "standard"
-    }}
-}}
-```
-
-参数说明：
-- `query`（必需）：SQL 查询语句
-- `connection`（可选）：数据库连接名称，默认 primary
-- `params`（可选）：查询参数（防止注入），字典格式
-- `max_rows`（可选）：最大返回行数，范围 1-10000
-- `response_format`（可选）：返回格式，可选 brief/standard/full，默认 standard
+- query: SQL 查询语句
+- connection: 数据库连接名称，默认 primary
+- max_rows: 最大返回行数，范围 1-10000
+- response_format: brief/standard/full
 
 ### web_search (网络搜索)
-```json
-{{
-    "tool_name": "web_search",
-    "tool_call_id": "call_xxx",
-    "arguments": {{
-        "query": "最新 AI 技术趋势 2026",
-        "num_results": 10,
-        "response_format": "standard"
-    }}
-}}
-```
-
-参数说明：
-- `query`（必需）：搜索关键词
-- `num_results`（可选）：返回结果数量，默认 10
-- `response_format`（可选）：返回格式，可选 brief/standard/full，默认 standard
-
-### bac_code_agent (兼容旧版，建议使用 run_python)
-```json
-{{
-    "tool_name": "bac_code_agent",
-    "tool_call_id": "call_xxx",
-    "arguments": {{
-        "query": "执行的分析任务描述",
-        "outputFileName": "输出文件名（可选）",
-        "fileNameList": ["需要使用的文件列表"],
-        "analysisQuery": "对结果的分析要求（可选）"
-    }}
-}}
-```
+- query: 搜索关键词
+- num_results: 返回结果数量
+- response_format: brief/standard/full
 
 ## 重要规则
 
-1. **必须返回有效 JSON**：所有字符串使用双引号，特殊字符正确转义
-2. **task_analysis 必须有深度**：不仅是重述问题，要展示思维链
-3. **execution_plan 要分轮次**：R1/R2/R3 明确各轮目标
-4. **tool_call_id 唯一性**：使用 call_xxx 格式，xxx 为随机字符串
-5. **推荐问题相关性**：基于当前分析结果提出有价值的后续问题
-6. **多轮对话感知**：current_round 随对话递增，直到 type="complete"
-
-## 完整示例
-
-### 示例1：数据分析任务
-```json
-{{
-    "task_analysis": "用户请求分析销售数据异动。1. 识别为数据分析任务；2. 需要查询历史数据对比；3. 计算增长率并可视化。",
-    "execution_plan": "R1: 查询历史销售数据并计算增长率；R2: 生成可视化图表和结论报告",
-    "current_round": 1,
-    "action": {{
-        "type": "tool_call",
-        "content": [
-            {{
-                "tool_name": "file_reader",
-                "tool_call_id": "call_read_001",
-                "arguments": {{
-                    "path": "upload:sales.csv",
-                    "format": "csv",
-                    "response_format": "standard"
-                }}
-            }},
-            {{
-                "tool_name": "run_python",
-                "tool_call_id": "call_sales_001",
-                "arguments": {{
-                    "code": "import pandas as pd\nimport numpy as np\n\n# 读取数据\ndf = pd.read_csv('sales.csv')\n\n# 按季度汇总\nquarterly_sales = df.groupby('quarter').agg({{'amount': 'sum'}}).reset_index()\n\n# 计算同比增长率\nquarterly_sales['growth_rate'] = quarterly_sales['amount'].pct_change() * 100\n\n# 输出结果\nprint(quarterly_sales)\nprint('\\\\n异常数据：')\nprint(df[df['amount'] > df['amount'].quantile(0.95)])",
-                    "timeout": 120,
-                    "response_format": "standard"
-                }}
-            }}
-        ]
-    }}
-}}
-```
-
-### 示例2：完成报告
-```json
-{{
-    "task_analysis": "数据已处理完成，识别关键趋势和异常点，生成可视化报告。",
-    "execution_plan": "R1: 数据处理；R2: 报告生成(当前)",
-    "current_round": 2,
-    "action": {{
-        "type": "complete",
-        "content": "销售数据分析完成。关键发现：\\n\\n1. Q3销售额增长最快，达到25%\\n2. 华东地区贡献了40%的销售额\\n3. 产品A的销量出现异常下降\\n\\n下图展示了各季度销售趋势：\\n\\n<div class='chart-wrapper'><div id='chart-trend' style='width:100%;height:400px;'></div></div><script>(function(){{const chart = echarts.init(document.getElementById('chart-trend'));chart.setOption({{xAxis: {{type: 'category', data: ['Q1','Q2','Q3','Q4']}}, yAxis: {{type: 'value'}}, series: [{{type: 'line', data: [120, 150, 180, 175]}}]}});}})();</script>",
-        "recommended_questions": [
-            "Q3销售额快速增长的原因是什么？",
-            "产品A销量下降的具体原因分析",
-            "各地区的销售占比变化趋势"
-        ],
-        "download_links": ["sales_analysis_result.xlsx"]
-    }}
-}}
-```
+1. 必须返回有效 JSON，所有字符串使用双引号
+2. task_analysis 必须有深度，展示思维链
+3. execution_plan 要分轮次，R1/R2/R3 明确各轮目标
+4. tool_call_id 唯一性，使用 call_xxx 格式
+5. current_round 随对话递增，直到 type="complete"
 """
+
+
+# 系统提示词（从文档加载，失败时使用备用提示词）
+STRUCTURED_RESPONSE_SYSTEM_PROMPT = _load_prompt_from_docs()
 
 
 def parse_structured_response(response_text: str) -> Optional[StructuredResponse]:

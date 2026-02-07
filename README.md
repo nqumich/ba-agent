@@ -237,6 +237,7 @@ BA_RATE_LIMIT_IP_PER_MINUTE=60
 
 - [产品 PRD](docs/PRD.md) - 产品需求文档
 - [项目架构](docs/architecture.md) - 架构设计
+- [系统提示词](docs/prompts.md) - Agent 提示词定义和规范
 - [响应格式流转](docs/response-flow.md) - 大模型返回格式与前端渲染完整流程
 - [API 文档](docs/api.md) - REST API 端点
 - [Skills 指南](docs/skills.md) - Skills 开发指南
