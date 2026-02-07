@@ -29,6 +29,23 @@ class ToolCall(BaseModel):
     )
 
 
+class CodeBlock(BaseModel):
+    """代码块定义"""
+
+    code_id: str = Field(
+        ...,
+        description="代码唯一标识，格式: code_{描述}_{随机字符}，如 code_sales_analysis_abc123"
+    )
+    language: str = Field(
+        default="python",
+        description="代码语言，如 python, sql, javascript 等"
+    )
+    description: Optional[str] = Field(
+        default=None,
+        description="代码描述，用于后续识别和检索"
+    )
+
+
 class Action(BaseModel):
     """动作定义"""
 
@@ -50,6 +67,11 @@ class Action(BaseModel):
     download_links: Optional[List[str]] = Field(
         default=None,
         description="推荐用户下载的文件名列表，仅当 type=complete 时存在"
+    )
+
+    code_blocks: Optional[List[CodeBlock]] = Field(
+        default=None,
+        description="代码块列表，当 content 包含代码时提供。用于代码管理和后续引用"
     )
 
 
@@ -106,6 +128,16 @@ class StructuredResponse(BaseModel):
         if self.is_complete() and isinstance(self.action.content, str):
             return self.action.content
         return ""
+
+    def get_code_blocks(self) -> List[CodeBlock]:
+        """获取代码块列表"""
+        if self.action.code_blocks:
+            return self.action.code_blocks
+        return []
+
+    def has_code_blocks(self) -> bool:
+        """判断是否包含代码块"""
+        return bool(self.action.code_blocks)
 
 
 # 最终报告的内容类型定义
@@ -177,7 +209,14 @@ def _get_fallback_prompt() -> str:
         "type": "tool_call 或 complete",
         "content": "...",
         "recommended_questions": ["问题1", "问题2"],  // 仅 type=complete 时可选
-        "download_links": ["文件1.xlsx"]  // 仅 type=complete 时可选
+        "download_links": ["文件1.xlsx"],  // 仅 type=complete 时可选
+        "code_blocks": [  // 当 content 包含代码时提供
+            {{
+                "code_id": "code_描述_随机字符",
+                "language": "python",
+                "description": "代码描述"
+            }}
+        ]
     }}
 }}
 ```
@@ -189,6 +228,36 @@ content 必须为数组，支持单次并行调用（最多6个）。
 
 ### type="complete" (完成并返回报告)
 content 为字符串，包含最终分析结果或可视化代码。
+
+## 代码块处理 (code_blocks)
+
+当 content 中包含代码时，必须提供 code_blocks 字段：
+
+```json
+{{
+    "action": {{
+        "type": "complete",
+        "content": "```python\\nimport pandas as pd\\ndf = pd.read_csv('data.csv')\\n```",
+        "code_blocks": [
+            {{
+                "code_id": "code_data_analysis_abc123",
+                "language": "python",
+                "description": "数据分析代码"
+            }}
+        ]
+    }}
+}}
+```
+
+**代码标识命名规则**:
+- 格式: code_{描述}_{随机字符}
+- 描述使用英文或拼音，简短明了
+- 示例: code_sales_analysis, code_cleaning_xyz
+
+**后续引用代码**:
+```
+请使用 <!-- CODE: code_sales_analysis --> 进行分析
+```
 
 ## 工具调用参数规范
 
@@ -222,6 +291,7 @@ content 为字符串，包含最终分析结果或可视化代码。
 3. execution_plan 要分轮次，R1/R2/R3 明确各轮目标
 4. tool_call_id 唯一性，使用 call_xxx 格式
 5. current_round 随对话递增，直到 type="complete"
+6. content 包含代码块时，必须提供 code_blocks 字段
 """
 
 

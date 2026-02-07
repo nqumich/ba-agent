@@ -560,62 +560,55 @@ class BAAgentService:
             # 获取最终报告内容
             final_report = structured_response.get_final_report()
 
-            # 代码管理流程
-            try:
-                from backend.api.state import get_app_state
-                from backend.filestore.stores.code_store import CodeStore
+            # 代码管理流程（使用模型提供的代码标识）
+            if structured_response.has_code_blocks():
+                try:
+                    from backend.api.state import get_app_state
+                    from backend.filestore.stores.code_store import CodeStore
 
-                app_state = get_app_state()
-                file_store = app_state.get("file_store")
+                    app_state = get_app_state()
+                    file_store = app_state.get("file_store")
 
-                if file_store:
-                    code_store = file_store.code
+                    if file_store:
+                        code_store = file_store.code
+                        code_blocks_info = structured_response.get_code_blocks()
 
-                    # 检测是否有代码保存标识（说明可能需要 review）
-                    code_markers = CodeStore.extract_code_saved_markers(final_report)
-
-                    # 如果检测到代码块，执行保存和清理流程
-                    if CodeStore.has_code_blocks(final_report):
-                        logger.info("检测到代码块，开始代码管理流程")
-
-                        # 提取所有代码块
-                        code_blocks = CodeStore.extract_code_blocks(final_report)
+                        logger.info(f"模型提供了 {len(code_blocks_info)} 个代码块标识")
 
                         # 处理每个代码块
                         processed_report = final_report
-                        for i, block in enumerate(code_blocks):
-                            code = block["code"]
-                            language = block["language"]
+                        for code_block_info in code_blocks_info:
+                            code_id = code_block_info.code_id
+                            language = code_block_info.language
+                            description = code_block_info.description or ""
 
                             # 只处理 Python 代码
                             if language in ("python", "py"):
-                                # 生成唯一标识
-                                code_id = code_store.generate_code_id()
+                                # 从 final_report 中提取对应的代码块
+                                # 查找代码块（通过 code_id 定位或按顺序）
+                                code_pattern = rf'```{language}\s*\n(.*?)\n```'
+                                import re
+                                matches = list(re.finditer(code_pattern, processed_report, re.DOTALL))
 
-                                # 生成代码描述（取前50个字符）
-                                description = code[:50].replace('\n', ' ')
-                                if len(code) > 50:
-                                    description += "..."
+                                if matches:
+                                    # 使用第一个匹配的代码块（或根据 code_id 定位）
+                                    code_match = matches[0]
+                                    code = code_match.group(1)
 
-                                # 保存代码到 FileStore
-                                code_ref = code_store.store(
-                                    content=code.encode('utf-8'),
-                                    code_id=code_id,
-                                    session_id=session_id,
-                                    description=description
-                                )
+                                    # 保存代码到 FileStore
+                                    code_ref = code_store.store(
+                                        content=code.encode('utf-8'),
+                                        code_id=code_id,
+                                        session_id=session_id,
+                                        description=description
+                                    )
 
-                                logger.info(f"代码已保存: {code_id}, file_ref={code_ref.file_id}")
+                                    logger.info(f"代码已保存: {code_id}, description={description}, file_ref={code_ref.file_id}")
 
-                                # 替换代码块为保存标识
-                                # 构建完整的代码块（包括反引号）进行替换
-                                code_block_full = f"```{language}\n{code}\n```"
-                                processed_report = CodeStore.replace_code_with_marker(
-                                    processed_report,
-                                    code_block_full,
-                                    code_id,
-                                    description
-                                )
+                                    # 替换代码块为保存标识
+                                    code_block_full = code_match.group(0)  # 完整匹配包括 ``` 标记
+                                    marker = CodeStore.create_code_saved_marker(code_id, description)
+                                    processed_report = processed_report.replace(code_block_full, marker, 1)
 
                         # 更新结构化响应中的内容
                         if processed_report != final_report:
@@ -623,9 +616,9 @@ class BAAgentService:
                             logger.info("代码块已替换为保存标识")
                             final_report = processed_report
 
-            except Exception as code_error:
-                # 代码管理流程出错不影响主流程
-                logger.warning(f"代码管理流程出错（已跳过）: {code_error}", exc_info=True)
+                except Exception as code_error:
+                    # 代码管理流程出错不影响主流程
+                    logger.warning(f"代码管理流程出错（已跳过）: {code_error}", exc_info=True)
 
             # 返回处理后的 final_report 内容
             return final_report, structured_response

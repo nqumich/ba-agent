@@ -107,24 +107,44 @@ content: "
 ```
 
 ### 3. 带代码块的报告
-```
-content: "
-以下是数据处理代码：
 
-```python
-import pandas as pd
-df = pd.read_csv('sales.csv')
-result = df.groupby('quarter').sum()
+当报告中包含代码时，需要提供 `code_blocks` 字段：
+
+```json
+{
+    "task_analysis": "需要编写 Python 代码进行数据分析",
+    "execution_plan": "R1: 编写数据分析代码(当前)",
+    "current_round": 1,
+    "action": {
+        "type": "complete",
+        "content": "以下是销售数据分析代码：\n\n```python\nimport pandas as pd\n\ndf = pd.read_csv('sales.csv')\nquarterly_sales = df.groupby('quarter').agg({'amount': 'sum'})\nprint(quarterly_sales)\n```\n\n代码已保存，可用于后续分析。",
+        "code_blocks": [
+            {
+                "code_id": "code_sales_analysis",
+                "language": "python",
+                "description": "销售数据分析代码，按季度汇总销售额"
+            }
+        ]
+    }
+}
 ```
 
-计算结果为...
-"
+**代码标识命名规则**：
+- 格式: `code_{描述}_{随机字符}`
+- 示例: `code_sales_analysis_abc123`, `code_data_cleaning_xyz789`
+- 描述部分使用英文或拼音，简短明了（不超过20字符）
+
+**代码引用方式**：
+后续需要引用代码时，在 content 中使用注释标记：
+```
+请使用 <!-- CODE: code_sales_analysis --> 中的代码进行进一步分析
 ```
 
-**注意**: 当代码块被保存到文件系统后，将自动替换为：
-```
-<!-- CODE_SAVED: code_20250207_abc123 | import pandas as pd... -->
-```
+**代码处理流程**：
+1. 模型输出代码时，同时提供 `code_blocks` 字段
+2. 后端提取代码块，保存到 `data/code_{code_id}.py`
+3. 在上下文中将代码块替换为 `<!-- CODE_SAVED: code_id | description -->`
+4. 后续可通过 file_reader 或直接引用 code_id 获取代码
 
 ## 工具调用参数规范
 
