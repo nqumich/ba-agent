@@ -14,6 +14,7 @@ from backend.models.response import (
     parse_structured_response,
     STRUCTURED_RESPONSE_SYSTEM_PROMPT,
 )
+from backend.core.context_manager import create_context_manager
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,9 @@ class BAAgentService:
 
         # Agent 实例（延迟初始化）
         self._agent = None
+
+        # 上下文管理器（延迟初始化）
+        self._context_manager = None
 
         logger.info(f"BAAgentService 初始化: model={model_name}, memory={enable_memory}, skills={enable_skills}")
 
@@ -144,6 +148,15 @@ class BAAgentService:
         if self._agent is None:
             self.initialize()
         return self._agent
+
+    @property
+    def context_manager(self):
+        """获取上下文管理器（延迟初始化）"""
+        if self._context_manager is None:
+            from backend.api.state import get_app_state
+            file_store = get_app_state().get("file_store")
+            self._context_manager = create_context_manager(file_store)
+        return self._context_manager
 
     def _create_model_for_request(self, model_name: str, api_key: str = None):
         """
@@ -283,8 +296,19 @@ class BAAgentService:
             if not conversation_id:
                 conversation_id = self._create_conversation(user_id, session_id)
 
-            # 构建消息
-            messages = self._build_messages(message, file_context)
+            # 使用 ContextManager 构建上下文
+            # 包括：代码注入、文件上下文、历史消息清理、可用代码列表等
+            messages = self.context_manager.build_context(
+                message=message,
+                file_context=file_context,
+                conversation_id=conversation_id,
+                session_id=session_id
+            )
+
+            # 如果上下文过长，进行总结
+            if self.context_manager.should_clean_context(messages):
+                logger.info("上下文过长，进行清理和总结")
+                messages = self.context_manager.summarize_context(messages)
 
             # 构建配置
             config = {
@@ -468,107 +492,6 @@ class BAAgentService:
 
         logger.info(f"创建新对话: {conversation_id}")
         return conversation_id
-
-    def _build_messages(
-        self,
-        message: str,
-        file_context: Optional[Dict[str, Any]]
-    ) -> List[Dict[str, str]]:
-        """
-        构建消息列表，包含结构化响应系统提示
-
-        处理代码引用：
-        - 检测消息中是否包含 code_id 引用（如 code_xxx）
-        - 如果检测到，从 FileStore 读取代码并添加到上下文
-        - 代码引用格式：code_xxx 或 <!-- CODE: code_xxx -->
-        """
-        messages = []
-
-        # 添加结构化响应系统提示
-        messages.append({
-            "role": "system",
-            "content": STRUCTURED_RESPONSE_SYSTEM_PROMPT
-        })
-
-        # 检测并处理代码引用
-        code_refs = self._extract_code_references(message)
-        if code_refs:
-            try:
-                from backend.api.state import get_app_state
-                file_store = get_app_state().get("file_store")
-
-                if file_store:
-                    code_store = file_store.code
-
-                    for code_id in code_refs:
-                        # 尝试从 FileStore 读取代码
-                        if code_store.exists(code_id):
-                            code_content = code_store.retrieve(code_id)
-
-                            # 添加代码上下文消息
-                            messages.append({
-                                "role": "system",
-                                "content": f"以下是代码 {code_id} 的内容：\n\n``{code_content.metadata.get('language', 'python')}\n{code_content.content.decode('utf-8')}```\n\n代码已加载到上下文，可以进行修改或分析。"
-                            })
-
-                            logger.info(f"已加载代码引用: {code_id}")
-                        else:
-                            logger.warning(f"代码引用 {code_id} 不存在")
-
-            except Exception as e:
-                logger.warning(f"处理代码引用失败: {e}")
-
-        # 添加文件上下文
-        if file_context and "file_id" in file_context:
-            file_ref = f"upload:{file_context['file_id']}"
-            messages.append({
-                "role": "system",
-                "content": f"用户已上传文件，文件引用: {file_ref}"
-            })
-
-        # 添加用户消息
-        messages.append({
-            "role": "user",
-            "content": message
-        })
-
-        return messages
-
-    def _extract_code_references(self, text: str) -> List[str]:
-        """
-        从文本中提取代码引用
-
-        支持的引用格式：
-        - code_xxx
-        - <!-- CODE: code_xxx -->
-        - <!-- CODE_SAVED: code_xxx | ... -->
-
-        Args:
-            text: 输入文本
-
-        Returns:
-            提取的 code_id 列表
-        """
-        import re
-        code_refs = []
-
-        # 匹配 code_xxx 格式
-        pattern1 = r'\b(code_[a-zA-Z0-9_]+)\b'
-        matches1 = re.findall(pattern1, text)
-        code_refs.extend(matches1)
-
-        # 匹配 <!-- CODE: code_xxx --> 格式
-        pattern2 = r'<!--\s*CODE:\s*(code_[a-zA-Z0-9_]+)\s*-->'
-        matches2 = re.findall(pattern2, text)
-        code_refs.extend(matches2)
-
-        # 匹配 <!-- CODE_SAVED: code_xxx | ... --> 格式
-        pattern3 = r'<!--\s*CODE_SAVED:\s*(code_[a-zA-Z0-9_]+)\s*\|'
-        matches3 = re.findall(pattern3, text)
-        code_refs.extend(matches3)
-
-        # 去重并返回
-        return list(set(code_refs))
 
     def _extract_response_content(
         self,

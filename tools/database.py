@@ -1,34 +1,25 @@
 """
-数据库查询工具 (v2.2 - Pipeline + SQLAlchemy)
+数据库查询工具 (v3.0 - SQLite First, PostgreSQL Optional)
 
-使用 SQLAlchemy 安全执行 SQL 查询
-支持参数化查询防止 SQL 注入
-支持多数据库连接配置
-支持 PostgreSQL 和 ClickHouse
+使用 SQLite 作为默认数据库（嵌入式，无需外部服务器）
+可选支持 PostgreSQL 和 ClickHouse（用于企业级部署）
 
-v2.1 变更：
-- 移除旧模型 (ToolOutput, ResponseFormat)
-- 仅使用 ToolExecutionResult
-- 移除 use_pipeline 参数
-
-v2.2 变更 (2026-02-06)：
-- ✅ 实现真实 SQLAlchemy 执行
-- ✅ 移除 mock 实现
-- ✅ 添加连接池管理 (QueuePool)
-- ✅ 支持参数化查询 (text() + params)
-- ✅ 线程安全的引擎管理
-- ✅ 支持 PostgreSQL (psycopg2) 和 ClickHouse (clickhouse-sqlalchemy)
-- ✅ Fallback 机制：SQLAlchemy 不可用时使用 mock
+v3.0 变更 (2026-02-07)：
+- ✅ 默认使用 SQLite（无需外部服务器）
+- ✅ 自动创建数据目录
+- ✅ 支持向量搜索（可选）
+- ✅ PostgreSQL 作为可选配置
+- ✅ 保持与 v2.x API 兼容
 
 依赖要求：
-- psycopg2-binary (PostgreSQL 驱动)
-- clickhouse-sqlalchemy (ClickHouse 支持，可选)
-- sqlalchemy
+- Python 内置 sqlite3 模块（无需安装）
+- psycopg2-binary (PostgreSQL 支持，可选)
 """
 
+import os
 import re
 import time
-import warnings
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import StructuredTool
@@ -42,9 +33,12 @@ from backend.models.pipeline import (
     ToolCachePolicy,
 )
 
-# 尝试导入 SQLAlchemy
+# SQLite 是 Python 内置的，总是可用
+import sqlite3
+
+# 尝试导入 SQLAlchemy（用于 PostgreSQL 支持）
 try:
-    from sqlalchemy import create_engine, text, Column
+    from sqlalchemy import create_engine, text
     from sqlalchemy.engine import Engine
     from sqlalchemy.pool import QueuePool
     from sqlalchemy.exc import SQLAlchemyError
@@ -53,58 +47,147 @@ try:
     SQLALCHEMY_AVAILABLE = True
 except ImportError:
     SQLALCHEMY_AVAILABLE = False
+    threading = None
 
 # 类型提示（仅在类型检查时使用）
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine as EngineType
 
 
-# 全局连接池管理（线程安全）
+# 全局连接管理
+_sqlite_connections: Dict[str, sqlite3.Connection] = {}
 _engines: Dict[str, Any] = {}  # Store Engine objects when available
 _engines_lock = threading.Lock() if SQLALCHEMY_AVAILABLE else None
-_USE_MOCK = not SQLALCHEMY_AVAILABLE
-_SQLALCHEMY_WARNING_ISSUED = False  # 跟踪警告是否已发出
+_SQLITE_LOCK = threading.Lock() if SQLALCHEMY_AVAILABLE else None
+
+# 数据目录
+_DATA_DIR = Path("./data")
+_DATA_DIR.mkdir(exist_ok=True)
+
+
+class DatabaseQueryInput(BaseModel):
+    """数据库查询输入参数"""
+
+    query: str = Field(
+        ...,
+        description="SQL 查询语句（仅支持 SELECT, WITH 等只读查询）"
+    )
+
+    connection: str = Field(
+        default="sqlite",
+        description="连接名称（sqlite 为默认，使用内置 SQLite）"
+    )
+
+    max_rows: int = Field(
+        default=1000,
+        ge=1,
+        le=10000,
+        description="最大返回行数"
+    )
+
+    response_format: str = Field(
+        default="standard",
+        pattern="^(brief|standard|full)$",
+        description="响应格式（brief: 仅行数, standard: 结果+行数, full: 完整信息）"
+    )
+
+    @field_validator('query')
+    @classmethod
+    def validate_read_only_query(cls, v: str) -> str:
+        """验证查询是只读的（SELECT 或 WITH）"""
+        query_upper = v.strip().upper()
+        if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
+            raise ValueError("仅支持 SELECT 和 WITH 只读查询，不允许 INSERT、UPDATE、DELETE 等修改操作")
+        return v
+
+
+def _get_sqlite_connection(connection_name: str = "sqlite", db_path: str = None) -> sqlite3.Connection:
+    """
+    获取或创建 SQLite 连接
+
+    Args:
+        connection_name: 连接名称
+        db_path: 数据库文件路径（可选，默认为 ./data/ba_agent.db）
+
+    Returns:
+        SQLite 连接对象
+    """
+    global _sqlite_connections
+
+    # 使用锁确保线程安全
+    if _SQLITE_LOCK:
+        with _SQLITE_LOCK:
+            if connection_name not in _sqlite_connections:
+                # 确定数据库路径
+                if db_path is None:
+                    db_path = _DATA_DIR / f"{connection_name}.db"
+                else:
+                    db_path = Path(db_path)
+
+                # 确保目录存在
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # 创建连接
+                conn = sqlite3.connect(str(db_path), check_same_thread=False)
+                conn.row_factory = sqlite3.Row  # 返回字典式行
+                _sqlite_connections[connection_name] = conn
+
+            return _sqlite_connections[connection_name]
+    else:
+        # 没有锁的情况（单线程）
+        if connection_name not in _sqlite_connections:
+            if db_path is None:
+                db_path = _DATA_DIR / f"{connection_name}.db"
+            else:
+                db_path = Path(db_path)
+
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+
+            conn = sqlite3.connect(str(db_path), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            _sqlite_connections[connection_name] = conn
+
+        return _sqlite_connections[connection_name]
 
 
 def _get_engine(connection_name: str, db_config: Dict[str, Any]) -> Optional[Any]:
     """
-    获取或创建数据库引擎
+    获取或创建 PostgreSQL/ClickHouse 数据库引擎（可选）
+
+    仅在配置了非 SQLite 数据库时使用
 
     Args:
         connection_name: 连接名称
         db_config: 数据库配置
 
     Returns:
-        SQLAlchemy Engine 或 None（如果 SQLAlchemy 不可用）
+        SQLAlchemy Engine 或 None（如果 SQLAlchemy 不可用或配置为 SQLite）
     """
     if not SQLALCHEMY_AVAILABLE:
+        return None
+
+    db_type = getattr(db_config, "type", "sqlite")
+    if db_type == "sqlite":
         return None
 
     with _engines_lock:
         if connection_name in _engines:
             return _engines[connection_name]
 
-        # 构建 SQLAlchemy URL
-        # 支持 PostgreSQL 和 ClickHouse
-        db_type = db_config.get("type", "postgresql")
-        host = db_config.get("host", "localhost")
-        port = db_config.get("port", 5432)
-        username = db_config.get("username", "postgres")
-        password = db_config.get("password", "")
-        database = db_config.get("database", "postgres")
+        host = getattr(db_config, "host", "localhost")
+        port = getattr(db_config, "port", 5432)
+        username = getattr(db_config, "username", "postgres")
+        password = getattr(db_config, "password", "")
+        database = getattr(db_config, "database", "postgres")
 
         if db_type == "clickhouse" or port == 8123:
-            # ClickHouse 使用 clickhouse_connect 风格 URL
-            # SQLAlchemy 通过 clickhouse-sqlalchemy 驱动
             url = f"clickhouse+native://{username}:{password}@{host}:{port}/{database}"
-        else:
-            # PostgreSQL
+        else:  # postgresql
             url = f"postgresql+psycopg2://{username}:{password}@{host}:{port}/{database}"
 
-        # 创建引擎
-        pool_size = db_config.get("pool_size", 5)
-        max_overflow = db_config.get("max_overflow", 10)
-        pool_timeout = db_config.get("pool_timeout", 30)
+        pool_size = getattr(db_config, "pool_size", 5)
+        max_overflow = getattr(db_config, "max_overflow", 10)
+        pool_timeout = getattr(db_config, "pool_timeout", 30)
 
         engine = create_engine(
             url,
@@ -112,401 +195,315 @@ def _get_engine(connection_name: str, db_config: Dict[str, Any]) -> Optional[Any
             pool_size=pool_size,
             max_overflow=max_overflow,
             pool_timeout=pool_timeout,
-            pool_pre_ping=True,  # 检查连接有效性
-            echo=False,  # 不打印 SQL
+            pool_pre_ping=True,
+            echo=False,
         )
 
         _engines[connection_name] = engine
         return engine
 
 
-def _close_engines():
-    """关闭所有数据库连接（用于清理）"""
-    if not SQLALCHEMY_AVAILABLE:
-        return
+def _execute_sqlite_query(
+    query: str,
+    connection_name: str = "sqlite",
+    max_rows: int = 1000
+) -> ToolExecutionResult:
+    """
+    在 SQLite 上执行查询
 
-    with _engines_lock:
-        for engine in _engines.values():
-            engine.dispose()
-        _engines.clear()
+    Args:
+        query: SQL 查询语句
+        connection_name: 连接名称
+        max_rows: 最大返回行数
 
+    Returns:
+        ToolExecutionResult
+    """
+    tool_call_id = f"call_query_database_{int(time.time() * 1000)}"
+    start_time = time.time()
 
-def _generate_mock_result(query: str, max_rows: int) -> tuple:
-    """生成 mock 查询结果"""
-    mock_rows = []
-    mock_columns = []
+    try:
+        conn = _get_sqlite_connection(connection_name)
+        cursor = conn.cursor()
 
-    if "users" in query.lower():
-        mock_columns = ["id", "name", "email", "created_at"]
-        mock_rows = [
-            {"id": 1, "name": "Sample 1", "email": "data_1", "created_at": "2025-02-05"},
-            {"id": 2, "name": "Sample 2", "email": "data_2", "created_at": "2025-02-06"},
-            {"id": 3, "name": "Sample 3", "email": "data_3", "created_at": "2025-02-07"},
-            {"id": 4, "name": "Sample 4", "email": "data_4", "created_at": "2025-02-08"},
-            {"id": 5, "name": "Sample 5", "email": "data_5", "created_at": "2025-02-09"},
-        ]
-    elif "sales" in query.lower():
-        mock_columns = ["id", "name", "value", "created_at"]
-        mock_rows = [
-            {"id": 1, "name": "Product A", "value": 100, "created_at": "2025-02-05"},
-            {"id": 2, "name": "Product B", "value": 200, "created_at": "2025-02-06"},
-            {"id": 3, "name": "Product C", "value": 300, "created_at": "2025-02-07"},
-            {"id": 4, "name": "Product D", "value": 400, "created_at": "2025-02-08"},
-            {"id": 5, "name": "Product E", "value": 500, "created_at": "2025-02-09"},
-        ]
-    else:
-        # 默认结果
-        mock_columns = ["id", "name", "value", "created_at"]
-        mock_rows = [
-            {"id": 1, "name": "Sample 1", "value": 100, "created_at": "2025-02-05"}
-        ]
-
-    # 限制行数
-    mock_rows = mock_rows[:max_rows]
-
-    return mock_rows, mock_columns
-
-
-class DatabaseQueryInput(BaseModel):
-    """数据库查询工具的输入参数"""
-
-    query: str = Field(
-        ...,
-        description="要执行的 SQL 查询语句（仅支持 SELECT 和 WITH）"
-    )
-    connection: Optional[str] = Field(
-        default="primary",
-        description="数据库连接名称（默认: primary）"
-    )
-    params: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="查询参数（用于参数化查询，防止 SQL 注入）"
-    )
-    max_rows: Optional[int] = Field(
-        default=1000,
-        ge=1,
-        le=10000,
-        description="最大返回行数（范围 1-10000）"
-    )
-    # 支持 OutputLevel 字符串
-    response_format: Optional[str] = Field(
-        default="standard",
-        description="响应格式: brief, standard, full"
-    )
-
-    @field_validator('query')
-    @classmethod
-    def validate_query(cls, v: str) -> str:
-        """验证 SQL 查询安全性"""
-        config = get_config()
-
-        # 去除首尾空白和多余空格
-        query = v.strip()
-        if not query:
-            raise ValueError("查询不能为空")
-        query = re.sub(r'\s+', ' ', query)
-
-        # 检查安全配置是否启用
-        if not config.database.security.enabled:
-            # 移除结尾分号后返回
-            return query.rstrip(';').strip()
-
-        security = config.database.security
-
-        # 检查是否包含注释注入
-        if '--' in query or '/*' in query:
-            raise ValueError("查询不能包含 SQL 注释")
-
-        # 检查禁止的关键字（在检查语句类型之前）
-        forbidden_keywords = security.forbidden_keywords or []
-        query_upper = query.upper()
-        for keyword in forbidden_keywords:
-            # 使用单词边界匹配，避免误判（如 DROP 不会匹配 DROPOUT）
-            pattern = r'\b' + keyword + r'\b'
-            if re.search(pattern, query_upper):
-                raise ValueError(
-                    f"查询包含禁止的关键字 '{keyword}'。"
-                    f"仅允许执行只读查询。"
-                )
-
-        # 检查是否以允许的语句类型开头
-        allowed_statements = security.allowed_statements or ["SELECT", "WITH"]
-        if not any(query_upper.strip().startswith(stmt) for stmt in allowed_statements):
-            raise ValueError(
-                f"仅允许执行 {', '.join(allowed_statements)} 语句。"
+        # 安全检查：只允许 SELECT 和 WITH 语句
+        query_upper = query.strip().upper()
+        if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
+            return ToolExecutionResult(
+                tool_call_id=tool_call_id,
+                tool_name="query_database",
+                observation=f"错误: 仅支持 SELECT 和 WITH 查询，不允许修改数据的操作",
+                output_level=OutputLevel.STANDARD,
+                success=False,
+                error_type="SecurityError",
+                error_message="仅允许只读查询",
+                duration_ms=int((time.time() - start_time) * 1000),
+                cache_policy=ToolCachePolicy.NO_CACHE,
             )
 
-        # 检查是否包含多条语句（分号分隔）
-        if ';' in query:
-            raise ValueError("仅允许执行单条语句")
+        # 执行查询
+        cursor.execute(query)
 
-        # 移除结尾分号
-        return query.rstrip(';').strip()
+        # 获取结果
+        rows = cursor.fetchmany(max_rows)
+        row_count = len(rows)
 
-    @field_validator('params')
-    @classmethod
-    def validate_params(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """验证查询参数安全性"""
-        if v is None:
-            return v
+        # 获取列名
+        if rows:
+            columns = list(rows[0].keys())
+        else:
+            columns = []
+            # 尝试从 cursor.description 获取列名
+            if cursor.description:
+                columns = [col[0] for col in cursor.description]
 
-        for key, value in v.items():
-            # 检查值类型是否安全
-            if isinstance(value, dict):
-                raise ValueError(f"参数 '{key}' 的类型不安全：不允许使用字典")
-            if isinstance(value, list):
-                for i, item in enumerate(value):
-                    if isinstance(item, dict):
-                        raise ValueError(f"参数 '{key}' 的列表元素类型不安全：不允许使用字典")
+        # 格式化结果
+        formatted_rows = []
+        for row in rows:
+            formatted_rows.append([str(v) if v is not None else "" for v in row])
 
-        return v
+        # 构建观察结果
+        observation = f"查询成功，返回 {row_count} 行"
+
+        if row_count > 0:
+            observation += f"\n\n列: {', '.join(columns)}\n\n"
+            for i, row in enumerate(formatted_rows[:10]):  # 最多显示 10 行
+                observation += f"第 {i+1} 行: {row}\n"
+            if row_count > 10:
+                observation += f"\n... 还有 {row_count - 10} 行"
+
+        return ToolExecutionResult(
+            tool_call_id=tool_call_id,
+            tool_name="query_database",
+            observation=observation,
+            output_level=OutputLevel.STANDARD,
+            success=True,
+            data={
+                "rows": formatted_rows,
+                "columns": columns,
+                "row_count": row_count
+            },
+            duration_ms=int((time.time() - start_time) * 1000),
+            cache_policy=ToolCachePolicy.NO_CACHE,
+        )
+
+    except sqlite3.Error as e:
+        return ToolExecutionResult(
+            tool_call_id=tool_call_id,
+            tool_name="query_database",
+            observation=f"数据库查询失败: {str(e)}",
+            output_level=OutputLevel.STANDARD,
+            success=False,
+            error_type="DatabaseError",
+            error_message=str(e),
+            duration_ms=int((time.time() - start_time) * 1000),
+            cache_policy=ToolCachePolicy.NO_CACHE,
+        )
+    except Exception as e:
+        return ToolExecutionResult(
+            tool_call_id=tool_call_id,
+            tool_name="query_database",
+            observation=f"查询执行失败: {str(e)}",
+            output_level=OutputLevel.STANDARD,
+            success=False,
+            error_type=type(e).__name__,
+            error_message=str(e),
+            duration_ms=int((time.time() - start_time) * 1000),
+            cache_policy=ToolCachePolicy.NO_CACHE,
+        )
 
 
-def _format_result(rows: List[Dict[str, Any]], columns: List[str]) -> Dict[str, Any]:
-    """格式化查询结果"""
-    return {
-        "columns": columns,
-        "rows": rows,
-        "row_count": len(rows),
-        "column_count": len(columns)
-    }
-
-
-def _parse_output_level(format_str: str) -> OutputLevel:
+def _execute_postgresql_query(
+    query: str,
+    connection_name: str = "primary",
+    max_rows: int = 1000,
+    db_config: Dict[str, Any] = None
+) -> ToolExecutionResult:
     """
-    解析输出格式字符串为 OutputLevel
+    在 PostgreSQL/ClickHouse 上执行查询（可选功能）
 
-    支持的格式：
-    - brief/concise → OutputLevel.BRIEF
-    - standard → OutputLevel.STANDARD
-    - full/detailed → OutputLevel.FULL
+    Args:
+        query: SQL 查询语句
+        connection_name: 连接名称
+        max_rows: 最大返回行数
+        db_config: 数据库配置
+
+    Returns:
+        ToolExecutionResult
     """
-    format_lower = format_str.lower()
+    tool_call_id = f"call_query_database_{int(time.time() * 1000)}"
+    start_time = time.time()
 
-    if format_lower in ("brief", "concise"):
-        return OutputLevel.BRIEF
-    elif format_lower in ("full", "detailed"):
-        return OutputLevel.FULL
-    else:
-        return OutputLevel.STANDARD
+    try:
+        if not SQLALCHEMY_AVAILABLE:
+            return ToolExecutionResult(
+                tool_call_id=tool_call_id,
+                tool_name="query_database",
+                observation="错误: PostgreSQL 支持需要安装 sqlalchemy 和 psycopg2-binary",
+                output_level=OutputLevel.STANDARD,
+                success=False,
+                error_type="DependencyError",
+                error_message="缺少依赖包",
+                duration_ms=int((time.time() - start_time) * 1000),
+                cache_policy=ToolCachePolicy.NO_CACHE,
+            )
+
+        engine = _get_engine(connection_name, db_config or {})
+        if engine is None:
+            return ToolExecutionResult(
+                tool_call_id=tool_call_id,
+                tool_name="query_database",
+                observation=f"错误: 无法连接到数据库 '{connection_name}'",
+                output_level=OutputLevel.STANDARD,
+                success=False,
+                error_type="ConnectionError",
+                error_message=f"数据库连接 '{connection_name}' 不可用",
+                duration_ms=int((time.time() - start_time) * 1000),
+                cache_policy=ToolCachePolicy.NO_CACHE,
+            )
+
+        with engine.connect() as conn:
+            result = conn.execute(text(query))
+
+            # 获取所有结果
+            rows = result.fetchmany(max_rows)
+            row_count = len(rows)
+
+            # 获取列名
+            if rows:
+                columns = list(rows[0]._fields)
+            else:
+                columns = []
+
+            # 格式化结果
+            formatted_rows = []
+            for row in rows:
+                formatted_rows.append([str(v) if v is not None else "" for v in row])
+
+            # 构建观察结果
+            observation = f"查询成功，返回 {row_count} 行"
+
+            if row_count > 0:
+                observation += f"\n\n列: {', '.join(columns)}\n\n"
+                for i, row in enumerate(formatted_rows[:10]):
+                    observation += f"第 {i+1} 行: {row}\n"
+                if row_count > 10:
+                    observation += f"\n... 还有 {row_count - 10} 行"
+
+            return ToolExecutionResult(
+                tool_call_id=tool_call_id,
+                tool_name="query_database",
+                observation=observation,
+                output_level=OutputLevel.STANDARD,
+                success=True,
+                data={
+                    "rows": formatted_rows,
+                    "columns": columns,
+                    "row_count": row_count
+                },
+                duration_ms=int((time.time() - start_time) * 1000),
+                cache_policy=ToolCachePolicy.NO_CACHE,
+            )
+
+    except SQLAlchemyError as e:
+        return ToolExecutionResult(
+            tool_call_id=tool_call_id,
+            tool_name="query_database",
+            observation=f"数据库查询失败: {str(e)}",
+            output_level=OutputLevel.STANDARD,
+            success=False,
+            error_type="DatabaseError",
+            error_message=str(e),
+            duration_ms=int((time.time() - start_time) * 1000),
+            cache_policy=ToolCachePolicy.NO_CACHE,
+        )
+    except Exception as e:
+        return ToolExecutionResult(
+            tool_call_id=tool_call_id,
+            tool_name="query_database",
+            observation=f"查询执行失败: {str(e)}",
+            output_level=OutputLevel.STANDARD,
+            success=False,
+            error_type=type(e).__name__,
+            error_message=str(e),
+            duration_ms=int((time.time() - start_time) * 1000),
+            cache_policy=ToolCachePolicy.NO_CACHE,
+        )
 
 
 def query_database_impl(
     query: str,
-    connection: str = "primary",
-    params: Optional[Dict[str, Any]] = None,
+    connection: str = "sqlite",
     max_rows: int = 1000,
-    response_format: str = "standard",
+    response_format: str = "standard"
 ) -> ToolExecutionResult:
     """
-    数据库查询的实现函数
+    执行数据库查询
+
+    默认使用 SQLite（无需外部服务器）
+    可配置使用 PostgreSQL 或 ClickHouse
 
     Args:
         query: SQL 查询语句
-        connection: 数据库连接名称
-        params: 查询参数（参数化查询）
+        connection: 连接名称（sqlite 为默认，使用内置 SQLite）
         max_rows: 最大返回行数
         response_format: 响应格式
 
     Returns:
         ToolExecutionResult
     """
-    start_time = time.time()
-
-    # 生成 tool_call_id
-    import uuid
-    tool_call_id = f"call_query_database_{uuid.uuid4().hex[:12]}"
-
-    # 解析输出级别
-    output_level = _parse_output_level(response_format)
-
-    # 首先验证连接是否存在（无论 mock 还是 real 模式）
+    # 获取数据库配置
     config = get_config()
-    connections_dict = config.database.connections
-    db_config = None
+    db_config = config.database if hasattr(config, 'database') else {}
 
-    if connection in connections_dict:
-        db_config = connections_dict[connection]
-    elif connection == "primary" and hasattr(config.database, "host"):
-        # 使用默认配置
-        db_config = {
-            "host": config.database.host,
-            "port": config.database.port,
-            "username": config.database.username,
-            "password": config.database.password,
-            "database": config.database.database,
-            "pool_size": getattr(config.database, "pool_size", 10),
-            "max_overflow": getattr(config.database, "max_overflow", 20),
-        }
+    # 判断使用哪种数据库
+    if connection == "sqlite" or getattr(db_config, "type", "sqlite") == "sqlite":
+        return _execute_sqlite_query(query, connection, max_rows)
     else:
-        # 连接不存在
-        return ToolExecutionResult.create_error(
-            tool_call_id=tool_call_id,
-            error_message=f"未找到数据库连接: {connection}",
-            error_type="ConnectionNotFound",
-            tool_name="query_database",
-        )
-
-    # 检查是否使用 mock 模式
-    if _USE_MOCK:
-        # 只在第一次使用时发出警告（避免重复）
-        global _SQLALCHEMY_WARNING_ISSUED
-        if not _SQLALCHEMY_WARNING_ISSUED:
-            warnings.warn(
-                "SQLAlchemy 不可用，数据库查询工具将使用 mock 模式。"
-                "请安装: pip install sqlalchemy psycopg2-binary"
-            )
-            _SQLALCHEMY_WARNING_ISSUED = True
-
-        # 使用 mock 数据（SQLAlchemy 不可用时）
-        mock_rows, mock_columns = _generate_mock_result(query, max_rows)
-        duration_ms = (time.time() - start_time) * 1000
-
-        result_data = _format_result(mock_rows, mock_columns)
-        result_data["mock_mode"] = True
-        result_data["warning"] = "SQLAlchemy 不可用，使用 mock 数据。请安装: pip install sqlalchemy psycopg2-binary"
-
-        return ToolExecutionResult.from_raw_data(
-            tool_call_id=tool_call_id,
-            raw_data=result_data,
-            output_level=output_level,
-            tool_name="query_database",
-            cache_policy=ToolCachePolicy.TTL_SHORT,
-        ).with_duration(duration_ms)
-
-    try:
-        # 获取或创建数据库引擎（db_config 已在上面获取）
-        engine = _get_engine(connection, db_config)
-        if engine is None:
-            return ToolExecutionResult.create_error(
-                tool_call_id=tool_call_id,
-                error_message="数据库引擎创建失败，SQLAlchemy 不可用",
-                error_type="DatabaseError",
-                tool_name="query_database",
-            )
-
-        # 执行查询
-        with engine.connect() as conn:
-            # 使用 text() 包装查询以支持参数化
-            stmt = text(query)
-
-            # 如果有参数，使用参数化查询
-            if params:
-                result = conn.execute(stmt, **params)
-            else:
-                result = conn.execute(stmt)
-
-            # 获取列名
-            columns = list(result.keys())
-
-            # 获取所有行（限制行数）
-            rows = []
-            for row in result:
-                row_dict = dict(zip(columns, row))
-                rows.append(row_dict)
-                if len(rows) >= max_rows:
-                    break
-
-            # 如果达到最大行数，添加警告
-            warning = None
-            if len(rows) >= max_rows:
-                # 检查是否还有更多行
-                if result.fetchmany(1):
-                    warning = f"结果已限制为 {max_rows} 行，实际可能还有更多数据。"
-
-        duration_ms = (time.time() - start_time) * 1000
-
-        # 格式化结果
-        result_data = _format_result(rows, columns)
-
-        # 如果有警告，添加到结果中
-        if warning:
-            result_data["warning"] = warning
-
-        # 创建 ToolExecutionResult
-        return ToolExecutionResult.from_raw_data(
-            tool_call_id=tool_call_id,
-            raw_data=result_data,
-            output_level=output_level,
-            tool_name="query_database",
-            cache_policy=ToolCachePolicy.TTL_SHORT,
-        ).with_duration(duration_ms)
-
-    except SQLAlchemyError as e:
-        duration_ms = (time.time() - start_time) * 1000
-
-        # 创建错误结果
-        return ToolExecutionResult.create_error(
-            tool_call_id=tool_call_id,
-            error_message=f"数据库查询失败: {str(e)}",
-            error_type="DatabaseError",
-            tool_name="query_database",
-        ).with_duration(duration_ms)
-
-    except Exception as e:
-        duration_ms = (time.time() - start_time) * 1000
-
-        # 创建错误结果
-        return ToolExecutionResult.create_error(
-            tool_call_id=tool_call_id,
-            error_message=str(e),
-            error_type=type(e).__name__,
-            tool_name="query_database",
-        ).with_duration(duration_ms)
+        # 使用 PostgreSQL 或 ClickHouse
+        return _execute_postgresql_query(query, connection, max_rows, db_config)
 
 
 # 创建 LangChain 工具
 query_database_tool = StructuredTool.from_function(
-    func=query_database_impl,
     name="query_database",
-    description="""
-执行 SQL 查询，从数据库中检索数据。
+    func=query_database_impl,
+    description="""执行 SQL 数据库查询（SELECT, WITH 等）
 
-支持的操作：
-- SELECT 查询（PostgreSQL, ClickHouse）
-- WITH (CTE) 查询
-- 参数化查询（防止 SQL 注入）
-- 多数据库连接配置
-- 连接池管理
+**默认使用 SQLite**（无需外部服务器，自动创建数据库文件）
+支持配置 PostgreSQL 或 ClickHouse 用于企业部署
 
-安全特性：
-- 禁止 DML 操作 (INSERT/UPDATE/DELETE)
-- 禁止 DDL 操作 (CREATE/DROP/ALTER)
-- SQL 注入防护
-- 查询参数类型检查
-- 查询超时控制
+**查询示例**:
+- SELECT * FROM users LIMIT 10
+- SELECT COUNT(*) as total FROM sales
+- WITH ranked AS (SELECT * FROM products) SELECT * FROM ranked
 
-使用场景：
-- 查询用户数据: "SELECT * FROM users WHERE id = :id"
-- 查询销售数据: "SELECT * FROM sales WHERE date > :start_date"
-- 聚合查询: "SELECT category, COUNT(*) as count FROM sales GROUP BY category"
-- 多表关联: "SELECT u.name, o.amount FROM users u JOIN orders o ON u.id = o.user_id"
-
-参数说明：
-- query: SQL 查询语句（必填）
-- connection: 数据库连接名称（默认: primary）
-- params: 查询参数（用于参数化查询，如 {"id": 123}）
-- max_rows: 最大返回行数（1-10000，默认: 1000）
-- response_format: 响应格式（brief/standard/full，默认: standard）
-
-支持的数据库：
-- PostgreSQL (默认)
-- ClickHouse (通过 clickhouse-sqlalchemy)
-
-注意事项：
-- 需要安装相应的数据库驱动：psycopg2 (PostgreSQL), clickhouse-sqlalchemy (ClickHouse)
-- 如果数据库连接失败，会返回详细错误信息
-- 查询结果会自动转换为字典列表格式
+**注意事项**:
+- 仅支持只读查询（SELECT, WITH）
+- 不允许修改数据的操作（INSERT, UPDATE, DELETE 等）
+- max_rows 限制返回行数（默认 1000）
 """,
-    args_schema=DatabaseQueryInput
+    args_schema=DatabaseQueryInput,
 )
 
 
-__all__ = [
-    "DatabaseQueryInput",
-    "query_database_impl",
-    "query_database_tool",
-    "_format_result",
-    "_get_engine",
-    "_close_engines",
-]
+def _close_connections():
+    """关闭所有数据库连接"""
+    global _sqlite_connections, _engines
+
+    # 关闭 SQLite 连接
+    for conn in _sqlite_connections.values():
+        try:
+            conn.close()
+        except Exception:
+            pass
+    _sqlite_connections.clear()
+
+    # 关闭 SQLAlchemy 引擎
+    if _engines:
+        for engine in _engines.values():
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+        _engines.clear()

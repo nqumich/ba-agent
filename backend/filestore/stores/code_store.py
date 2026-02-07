@@ -7,7 +7,6 @@ Code Store - 代码文件存储
 import uuid
 import hashlib
 import re
-import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -20,13 +19,7 @@ from backend.models.filestore import (
 from backend.filestore.base import IndexableStore, WriteableStore
 
 
-# 代码块检测正则表达式
-CODE_BLOCK_PATTERN = re.compile(
-    r'```(?:python|py)?\n(.*?)```',
-    re.DOTALL
-)
-
-# 代码保存标识格式
+# 代码保存标识格式（用于前端显示和用户通知）
 CODE_SAVED_PATTERN = re.compile(
     r'<!--\s*CODE_SAVED:\s*([^\s]+)\s*-->'
 )
@@ -41,9 +34,40 @@ class CodeStore(IndexableStore, WriteableStore):
     - 生成可读的唯一标识
     - 支持代码检索和清理
     - SQLite 索引
+    - 支持多种语言格式
     """
 
     CODE_PREFIX = "code_"
+
+    # 语言到文件扩展名的映射
+    LANGUAGE_EXTENSIONS = {
+        'python': 'py',
+        'py': 'py',
+        'javascript': 'js',
+        'js': 'js',
+        'typescript': 'ts',
+        'ts': 'ts',
+        'html': 'html',
+        'htm': 'html',
+        'css': 'css',
+        'sql': 'sql',
+        'json': 'json',
+        'yaml': 'yaml',
+        'yml': 'yml',
+        'xml': 'xml',
+        'markdown': 'md',
+        'md': 'md',
+        'shell': 'sh',
+        'bash': 'sh',
+        'r': 'r',
+        'java': 'java',
+        'cpp': 'cpp',
+        'c': 'c',
+        'go': 'go',
+        'rust': 'rs',
+        'php': 'php',
+        'ruby': 'rb',
+    }
 
     def __init__(self, storage_dir: Path):
         """
@@ -82,8 +106,16 @@ class CodeStore(IndexableStore, WriteableStore):
         content_hash = hashlib.md5(content).hexdigest()
         content_str = content.decode('utf-8', errors='ignore')
 
-        # 保存为 .py 文件
-        filename = f"{code_id}.py"
+        # 验证并规范化 language
+        language = metadata.get('language', 'python').lower()
+        if language not in self.LANGUAGE_EXTENSIONS:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"不支持的语言类型 '{language}'，使用默认的 'python'")
+            language = 'python'
+
+        extension = self._get_file_extension(language)
+        filename = f"{code_id}.{extension}"
         file_path = self.code_dir / filename
         self._write_file(file_path, content)
 
@@ -214,55 +246,6 @@ class CodeStore(IndexableStore, WriteableStore):
         return results
 
     @staticmethod
-    def generate_code_id() -> str:
-        """
-        生成唯一的代码标识
-
-        Returns:
-            代码标识，格式: code_YYYYMMDD_random
-        """
-        date_str = datetime.now().strftime("%Y%m%d")
-        random_str = uuid.uuid4().hex[:8]
-        return f"{CodeStore.CODE_PREFIX}{date_str}_{random_str}"
-
-    @staticmethod
-    def extract_code_blocks(text: str) -> List[Dict[str, Any]]:
-        """
-        从文本中提取所有代码块
-
-        Args:
-            text: 文本内容
-
-        Returns:
-            代码块列表，每个元素包含 code, language, start, end
-        """
-        blocks = []
-
-        for match in CODE_BLOCK_PATTERN.finditer(text):
-            code = match.group(1).strip()
-            blocks.append({
-                "code": code,
-                "language": "python",
-                "start": match.start(),
-                "end": match.end()
-            })
-
-        return blocks
-
-    @staticmethod
-    def has_code_blocks(text: str) -> bool:
-        """
-        检测文本是否包含代码块
-
-        Args:
-            text: 文本内容
-
-        Returns:
-            是否包含代码块
-        """
-        return CODE_BLOCK_PATTERN.search(text) is not None
-
-    @staticmethod
     def create_code_saved_marker(code_id: str, description: Optional[str] = None) -> str:
         """
         创建代码保存标识
@@ -291,36 +274,6 @@ class CodeStore(IndexableStore, WriteableStore):
         """
         return CODE_SAVED_PATTERN.findall(text)
 
-    @staticmethod
-    def replace_code_with_marker(
-        text: str,
-        code_block: str,
-        code_id: str,
-        description: Optional[str] = None
-    ) -> str:
-        """
-        将代码块替换为保存标识
-
-        Args:
-            text: 原始文本
-            code_block: 要替换的代码块（不包含反引号）
-            code_id: 代码标识
-            description: 代码描述
-
-        Returns:
-            替换后的文本
-        """
-        marker = CodeStore.create_code_saved_marker(code_id, description)
-        # 使用更精确的替换，匹配 ```python 或 ```py 开头的代码块
-        escaped_code = re.escape(code_block)
-        pattern = r'```(?:python|py)?\s*' + escaped_code + r'\s*```'
-        return re.sub(
-            pattern,
-            marker,
-            text,
-            flags=re.DOTALL
-        )
-
     def get_code_by_id(self, code_id: str) -> Optional[str]:
         """
         根据代码标识获取代码内容
@@ -339,6 +292,49 @@ class CodeStore(IndexableStore, WriteableStore):
         if content:
             return content.decode('utf-8')
         return None
+
+    def list_session_codes(
+        self,
+        session_id: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        列出会话的所有代码文件（用于统一文件列表）
+
+        Args:
+            session_id: 会话 ID
+            limit: 返回数量限制
+
+        Returns:
+            文件信息列表，格式: [{"file_id": "...", "filename": "...", "file_type": "...", "size_bytes": ..., "description": "...", "language": "..."}, ...]
+        """
+        files = self.list_files(session_id=session_id, limit=limit)
+
+        return [
+            {
+                "file_id": f.file_ref.file_id,
+                "filename": f.filename,
+                "file_type": self._get_file_extension(f.file_ref.metadata.get("language", "python")),
+                "size_bytes": f.file_ref.size_bytes,
+                "description": f.file_ref.metadata.get("description", ""),
+                "language": f.file_ref.metadata.get("language", "python"),
+            }
+            for f in files
+        ]
+
+    @classmethod
+    def _get_file_extension(cls, language: str) -> str:
+        """
+        根据语言获取文件扩展名
+
+        Args:
+            language: 语言名称
+
+        Returns:
+            文件扩展名（不含点）
+        """
+        language_lower = language.lower()
+        return cls.LANGUAGE_EXTENSIONS.get(language_lower, 'txt')
 
 
 __all__ = [

@@ -83,6 +83,14 @@ async def lifespan(app: FastAPI):
         if "file_store" in app_state:
             app_state["file_store"].close()
 
+        # 关闭数据库连接
+        try:
+            from tools.database import _close_connections
+            _close_connections()
+            logger.info("数据库连接已关闭")
+        except Exception as e:
+            logger.warning(f"关闭数据库连接时出错: {e}")
+
         logger.info("BA-Agent API 服务已关闭")
 
 

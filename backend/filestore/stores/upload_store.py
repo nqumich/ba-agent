@@ -234,6 +234,47 @@ class UploadStore(IndexableStore, WriteableStore):
         """
         return self._index_get(file_id)
 
+    def list_session_files(
+        self,
+        session_id: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        列出会话的上传文件（用于统一文件列表）
+
+        Args:
+            session_id: 会话 ID
+            limit: 返回数量限制
+
+        Returns:
+            文件信息列表，格式: [{"file_id": "...", "filename": "...", "file_type": "...", "size_bytes": ..., "description": "..."}, ...]
+        """
+        files = self.list_files(session_id=session_id, limit=limit)
+
+        return [
+            {
+                "file_id": f.file_ref.file_id,
+                "filename": f.filename,
+                "file_type": self._get_file_extension(f.filename),
+                "size_bytes": f.file_ref.size_bytes,
+                "description": f.file_ref.metadata.get("description", f.filename),
+            }
+            for f in files
+        ]
+
+    @staticmethod
+    def _get_file_extension(filename: str) -> str:
+        """
+        从文件名获取扩展名
+
+        Args:
+            filename: 文件名
+
+        Returns:
+            文件扩展名（不含点）
+        """
+        return Path(filename).suffix.lower().lstrip('.')
+
     def _detect_mime_type(self, filename: str) -> str:
         """
         检测 MIME 类型

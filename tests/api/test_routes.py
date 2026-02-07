@@ -122,9 +122,9 @@ class TestRootEndpoint:
 
     def test_root(self, client):
         """测试根路径"""
-        response = client.get("/")
+        response = client.get("/api")
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "BA-Agent API"
         assert "docs" in data
-        assert "endpoints" in data
+        assert "features" in data

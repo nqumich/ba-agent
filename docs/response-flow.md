@@ -1,9 +1,21 @@
 # BA-Agent 响应格式流转文档
 
-> **Version**: v2.3.0
+> **Version**: v2.7.0
 > **Last Updated**: 2026-02-07
 
 本文档详细描述 BA-Agent 从大模型返回到前端渲染的完整数据流转过程。
+
+---
+
+## ⚠️ 文档同步提醒
+
+**重要**：本文档与 `docs/prompts.md` 中的工具参数定义必须保持一致。
+
+- 修改本页面的「工具调用参数规范」时，请同步更新 `prompts.md` 的「工具使用指南」
+- 修改 `prompts.md` 的工具定义时，请同步更新本页面的「工具调用参数规范」
+- 系统已配置 `.claude/hooks/check-tool-params-update.sh` 自动提醒文档同步
+
+---
 
 ---
 
@@ -12,655 +24,346 @@
 1. [大模型返回格式](#一大模型返回格式)
 2. [后端处理逻辑](#二后端处理逻辑)
 3. [代码管理流程](#三代码管理流程)
-4. [后端日志系统](#四后端日志系统)
-5. [API 响应格式](#五api-响应格式)
-6. [前端渲染逻辑](#六前端渲染逻辑)
-7. [完整示例](#七完整示例)
+4. [代码引用解析](#四代码引用解析)
+5. [后端日志系统](#五后端日志系统)
+6. [API 响应格式](#六api-响应格式)
+7. [前端渲染逻辑](#七前端渲染逻辑)
+8. [完整流程示例](#八完整流程示例)
 
 ---
 
 ## 一、大模型返回格式
 
-大模型必须严格按照结构化 JSON 格式返回响应，由 `STRUCTURED_RESPONSE_SYSTEM_PROMPT` 定义。
+大模型必须严格按照结构化 JSON 格式返回响应，由系统提示词定义。
 
-### 1.1 提示词来源
+### 提示词来源
 
-`STRUCTURED_RESPONSE_SYSTEM_PROMPT` 现在从 `docs/prompts.md` 加载：
+系统提示词从 `docs/prompts.md` 文件加载。如果文件不存在，使用内嵌的备用提示词。
 
-```python
-# backend/models/response.py
+### type="tool_call"（调用工具）
 
-def _load_system_prompt():
-    """从 docs/prompts.md 加载系统提示词"""
-    prompt_path = Path(__file__).parent.parent.parent / "docs" / "prompts.md"
-
-    if prompt_path.exists():
-        content = prompt_path.read_text(encoding="utf-8")
-        # 提取 STRUCTURED_RESPONSE_SYSTEM_PROMPT 部分
-        for line in content.split('\n'):
-            if line.startswith('```text'):
-                continue
-            # ... 解析逻辑
-        return extracted_prompt
-    else:
-        # 备用提示词
-        return get_fallback_prompt()
-```
-
-**文件不存在时的备用提示词**：
-
-```python
-FALLBACK_PROMPT = """
-你必须严格按照以下 JSON 格式返回响应：
-
-{
-    "task_analysis": "思维链：1. 识别意图; 2. 预判数据风险; 3. 设计复合指令",
-    "execution_plan": "R1: [步骤描述]; R2: [步骤描述]",
-    "current_round": 1,
-    "action": {
-        "type": "tool_call 或 complete",
-        "content": "...",
-        "recommended_questions": ["问题1", "问题2"],
-        "download_links": ["文件1.xlsx"]
-    }
-}
-"""
-```
-
-### 1.2 type="tool_call"（调用工具）
-
-当模型需要调用工具时返回此格式：
-
-```json
-{
-    "task_analysis": "用户需分析销售数据，识别为数据分析任务。1. 需要查询数据库获取销售记录；2. 计算各项指标；3. 生成可视化图表。",
-    "execution_plan": "R1: 数据查询与计算; R2: 可视化与报告",
-    "current_round": 1,
-    "action": {
-        "type": "tool_call",
-        "content": [
-            {
-                "tool_name": "run_python",
-                "tool_call_id": "call_abc123",
-                "arguments": {
-                    "code": "import pandas as pd\ndf = pd.read_csv('sales.csv')\nprint(df.groupby('quarter').sum())",
-                    "timeout": 60,
-                    "response_format": "standard"
-                }
-            },
-            {
-                "tool_name": "file_reader",
-                "tool_call_id": "call_def456",
-                "arguments": {
-                    "path": "data/sales.csv",
-                    "format": "csv",
-                    "nrows": 100,
-                    "response_format": "standard"
-                }
-            }
-        ]
-    }
-}
-```
-
-**字段说明：**
+当模型需要调用工具时返回此格式。核心字段说明：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `task_analysis` | string | 思维链：分析用户意图、预判风险、设计操作流程 |
-| `execution_plan` | string | 执行计划：R1: xxx; R2: xxx; 格式描述各轮次目标 |
-| `current_round` | int | 当前轮次，从 1 开始递增 |
-| `action.type` | "tool_call" | 动作类型为工具调用 |
-| `action.content` | array | 工具调用数组，支持并行调用（最多6个） |
+| task_analysis | string | 思维链：分析用户意图、预判风险、设计操作流程 |
+| execution_plan | string | 执行计划：R1: xxx; R2: xxx; 格式描述各轮次目标 |
+| current_round | int | 当前轮次，从 1 开始递增 |
+| action.type | "tool_call" | 动作类型为工具调用 |
+| action.content | array | 工具调用数组，支持并行调用（最多6个） |
 
-### 1.3 type="complete"（完成并返回报告）
+每个工具调用包含：tool_name（工具名称）、tool_call_id（唯一标识）、arguments（参数）。
 
-当模型完成分析并返回最终报告时返回此格式：
+### type="complete"（完成并返回报告）
 
-```json
-{
-    "task_analysis": "分析完成。已获取销售数据，计算了同比增长率，准备好最终报告。",
-    "execution_plan": "R1: 数据查询; R2: 数据分析; R3: 生成报告(当前)",
-    "current_round": 3,
-    "action": {
-        "type": "complete",
-        "content": "根据数据分析结果：\n\n- Q1 销售额：500万元，同比增长15%\n- Q2 销售额：520万元，同比增长18%\n- Q3 销售额：580万元，同比增长22%\n\n主要增长来源于电子产品线，贡献了60%的增量。",
-        "recommended_questions": [
-            "各产品线的销售占比如何？",
-            "可以按地区分解销售数据吗？"
-        ],
-        "download_links": ["sales_report.xlsx", "analysis_chart.png"]
-    }
-}
-```
-
-**字段说明：**
+当模型完成分析并返回最终报告时返回此格式。核心字段说明：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `action.type` | "complete" | 动作类型为完成 |
-| `action.content` | string | 最终报告内容（纯文本或 HTML） |
-| `action.recommended_questions` | array (可选) | 推荐用户后续询问的问题列表 |
-| `action.download_links` | array (可选) | 推荐用户下载的文件名列表 |
+| action.type | "complete" | 动作类型为完成 |
+| action.content | string | 最终报告内容（纯文本或包含 code_ref 标签） |
+| action.recommended_questions | array (可选) | 推荐用户后续询问的问题列表 |
+| action.download_links | array (可选) | 推荐用户下载的文件名列表 |
+| action.code_blocks | array (可选) | 需要保存的代码块列表 |
 
-### 1.4 特殊情况：带 ECharts 图表的 complete
+### 特殊情况：包含代码引用的报告
 
-当模型需要返回可视化图表时，`content` 包含 HTML/JavaScript：
-
-```json
-{
-    "task_analysis": "数据可视化分析完成",
-    "execution_plan": "R1: 数据查询; R2: 生成可视化图表(当前)",
-    "current_round": 2,
-    "action": {
-        "type": "complete",
-        "content": "<div class='chart-wrapper'><div id='chart-sales' style='width:600px;height:400px;'></div></div><script>(function(){const chart = echarts.init(document.getElementById('chart-sales'));chart.setOption({xAxis:{type:'category',data:['Q1','Q2','Q3','Q4']},yAxis:{type:'value'},series:[{type:'bar',data:[500,520,580,620]}]});})();</script>"
-    }
-}
-```
-
-**content 格式规则：**
-
-1. **纯文本报告**：普通文本，可包含换行符 `\n`
-2. **带 HTML 图表**：包含 `<div>`, `<script>`, `echarts` 等关键词
-3. **带代码块**：包含 markdown 代码块格式（将被自动保存和管理）
+当模型需要在最终报告中展示已创建的代码时，使用 `<code_ref>code_id</code_ref>` 标签引用，而不是输出完整代码。
 
 ---
 
 ## 二、后端处理逻辑
 
-### 2.1 处理流程
+### 处理流程
 
 ```
 大模型返回 JSON
     ↓
-_parse_structured_response() 解析为 StructuredResponse 对象
+解析为 StructuredResponse 对象
     ↓
-_extract_response_content() 提取内容
+提取内容
     ↓
-代码块检测和保存（如果存在）
+代码引用解析（如果包含 code_ref）
+    ↓
+代码块保存（如果包含 code_blocks）
     ↓
 上下文清理（减少 token 使用）
     ↓
-query() 方法构建 API 响应
+构建 API 响应
     ↓
 记录后端日志
     ↓
 返回给前端
 ```
 
-### 2.2 各个 Key 的处理方式
+### 各个 Key 的处理方式
 
 | 模型返回的 Key | 后端处理 | 放入 API 响应的哪个字段 |
 |--------------|---------|---------------------|
-| `task_analysis` | 直接复制 | `metadata.task_analysis` |
-| `execution_plan` | 直接复制 | `metadata.execution_plan` |
-| `current_round` | 直接复制 | `metadata.current_round` |
-| `action.type` | 直接复制 | `metadata.action_type` |
-| `action.content` (tool_call) | 提取工具信息数组 | `metadata.tool_calls[]` |
-| `action.content` (complete) | 代码块处理 + 直接复制 | `response` (主响应体) |
-| `action.recommended_questions` | 直接复制 | `metadata.recommended_questions` |
-| `action.download_links` | 直接复制 | `metadata.download_links` |
+| task_analysis | 直接复制 | metadata.task_analysis |
+| execution_plan | 直接复制 | metadata.execution_plan |
+| current_round | 直接复制 | metadata.current_round |
+| action.type | 直接复制 | metadata.action_type |
+| action.content (tool_call) | 提取工具信息数组 | metadata.tool_calls[] |
+| action.content (complete) | 解析 code_ref + 直接复制 | response (主响应体) |
+| action.recommended_questions | 直接复制 | metadata.recommended_questions |
+| action.download_links | 直接复制 | metadata.download_links |
+| action.code_blocks | 验证语言并保存 | metadata.saved_codes[] |
 
-### 2.3 tool_call 时的特殊处理
+### tool_call 时的特殊处理
 
-**代码位置**: `backend/api/services/ba_agent.py:330-341`
+提取工具调用信息数组，每个包含工具名称、调用 ID 和参数，状态设置为 processing。
 
-```python
-if structured_response.is_tool_call():
-    tool_calls = structured_response.get_tool_calls()
-    metadata["tool_calls"] = [
-        {
-            "tool_name": tc.tool_name,
-            "tool_call_id": tc.tool_call_id,
-            "arguments": tc.arguments
-        }
-        for tc in tool_calls
-    ]
-    metadata["status"] = "processing"
-```
+### complete 时的特殊处理
 
-**生成的 metadata**:
-
-```json
-{
-    "action_type": "tool_call",
-    "current_round": 1,
-    "task_analysis": "...",
-    "execution_plan": "...",
-    "tool_calls": [
-        {"tool_name": "run_python", "tool_call_id": "call_abc123", "arguments": {...}},
-        {"tool_name": "file_reader", "tool_call_id": "call_def456", "arguments": {...}}
-    ],
-    "status": "processing"
-}
-```
-
-### 2.4 complete 时的特殊处理
-
-**代码位置**: `backend/api/services/ba_agent.py:343-357`
-
-```python
-elif structured_response.is_complete():
-    metadata["status"] = "complete"
-
-    # 推荐问题和下载链接
-    if structured_response.action.recommended_questions:
-        metadata["recommended_questions"] = structured_response.action.recommended_questions
-    if structured_response.action.download_links:
-        metadata["download_links"] = structured_response.action.download_links
-
-    # 检测 final_report 是否包含模型生成的 HTML（如 ECharts 图表）
-    final_report = structured_response.get_final_report()
-    has_model_html = '<div' in final_report or '<script' in final_report or 'echarts' in final_report.lower()
-    metadata["contains_html"] = has_model_html
-    metadata["content_type"] = "html" if has_model_html else "markdown"
-```
-
-**生成的 metadata**:
-
-```json
-{
-    "action_type": "complete",
-    "current_round": 3,
-    "task_analysis": "...",
-    "execution_plan": "...",
-    "status": "complete",
-    "contains_html": false,
-    "content_type": "markdown",
-    "recommended_questions": ["问题1", "问题2"],
-    "download_links": ["file1.xlsx"]
-}
-```
+设置状态为 complete，提取推荐问题和下载链接，检测内容是否包含 HTML（如 ECharts 图表）。
 
 ---
 
 ## 三、代码管理流程
 
-### 3.1 代码块检测和保存
+### 代码块检测和保存
 
-当模型响应中包含 Python 代码块时，后端会自动处理：
+当模型响应中包含代码块时，后端会自动处理。
 
-**检测规则**：
+#### 多语言支持
 
-```python
-# 正则表达式匹配 Python 代码块
-PYTHON_CODE_BLOCK = re.compile(r'```python\n(.*?)\n```', re.DOTALL)
+系统支持保存多种语言格式的代码文件：
+
+| 语言类型 | 文件扩展名 | 主要用途 |
+|---------|-----------|----------|
+| Python | .py | 数据分析、计算、可视化 |
+| JavaScript | .js | 前端交互 |
+| HTML | .html | 网页结构 |
+| CSS | .css | 样式设计 |
+| SQL | .sql | 数据库查询 |
+| Markdown | .md | 文档 |
+
+其他支持语言：TypeScript, JSON, YAML, XML, Shell, R, Java, C/C++, Go, Rust, PHP, Ruby
+
+#### 语言验证机制
+
+当模型创建代码时，系统会：
+
+1. 检查模型指定的 language 是否在支持列表中
+2. 如果不支持，自动降级为 python 并记录警告
+3. 根据语言类型选择正确的文件扩展名
+4. 将代码保存到对应的文件格式
+
+#### 处理流程
+
 ```
-
-**处理流程**：
-
-```
-检测到 ```python...``` 代码块
+模型输出包含 code_blocks
     ↓
-生成唯一代码标识: code_YYYYMMDD_random
+对于每个代码块：
+    ├─ 验证 language 类型
+    ├─ 选择对应的文件扩展名
+    ├─ 生成唯一代码标识 (code_id)
+    ├─ 保存到 data/code_id.{扩展名}
+    └─ 记录元数据 (language, description, 等)
     ↓
-保存到 FileStore: data/code_*.py
-    ↓
-用 <!-- CODE_SAVED: code_id | description --> 替换原始代码
-    ↓
-减少后续上下文 token 使用
+代码可用于后续引用
 ```
 
-**代码示例**：
+#### 代码元数据
 
-```python
-# backend/api/services/ba_agent.py
+每个保存的代码文件包含以下元数据：
 
-def _save_code_blocks(content: str) -> tuple[str, list[dict]]:
-    """检测并保存 Python 代码块"""
-    code_blocks = PYTHON_CODE_BLOCK.findall(content)
-    saved_codes = []
-
-    for i, code in enumerate(code_blocks):
-        # 生成唯一 ID
-        code_id = f"code_{datetime.now().strftime('%Y%m%d')}_{secrets.token_hex(4)}"
-
-        # 保存到文件
-        file_path = f"data/{code_id}.py"
-        FileStore.save_file(file_path, code, "python")
-
-        # 生成描述
-        description = code.split('\n')[0][:50] if code else "代码片段"
-
-        # 替换为占位符
-        placeholder = f"<!-- CODE_SAVED: {code_id} | {description} -->"
-        content = PYTHON_CODE_BLOCK.sub(placeholder, content, count=1)
-
-        saved_codes.append({
-            "code_id": code_id,
-            "file_path": file_path,
-            "description": description,
-            "original_length": len(code)
-        })
-
-    return content, saved_codes
-```
-
-**替换示例**：
-
-原始内容：
-```markdown
-以下是数据处理代码：
-
-```python
-import pandas as pd
-df = pd.read_csv('sales.csv')
-result = df.groupby('quarter').sum()
-print(result)
-```
-
-计算结果为...
-```
-
-替换后：
-```markdown
-以下是数据处理代码：
-
-<!-- CODE_SAVED: code_20250207_a1b2c3d4 | import pandas as pd -->
-
-计算结果为...
-```
-
-### 3.2 代码检索和 Review
-
-用户可以通过 `file_reader` 工具检索已保存的代码：
-
-**检索请求**：
-
-```json
-{
-    "tool_name": "file_reader",
-    "tool_call_id": "call_retrieve_code",
-    "arguments": {
-        "path": "data/code_20250207_a1b2c3d4.py",
-        "response_format": "standard"
-    }
-}
-```
-
-**读取后处理**：
-
-```python
-def _post_process_code_retrieval(code_content: str) -> str:
-    """代码读取后的后续处理"""
-    # 再次清理上下文
-    # 保留概述性描述
-    lines = code_content.split('\n')
-    if len(lines) > 50:
-        # 截断长代码，保留开头和结尾
-        head = '\n'.join(lines[:20])
-        tail = '\n'.join(lines[-10:])
-        return f"{head}\n\n... (省略 {len(lines) - 30} 行) ...\n\n{tail}"
-    return code_content
-```
+| 字段 | 说明 | 来源 |
+|------|------|------|
+| code_id | 代码唯一标识 | 模型生成 |
+| language | 代码语言类型 | 模型指定（验证后） |
+| description | 代码描述 | 模型提供 |
+| line_count | 代码行数 | 自动计算 |
+| char_count | 字符数量 | 自动计算 |
 
 ---
 
-## 四、后端日志系统
+## 四、引用解析机制
 
-### 4.1 日志记录内容
+### 代码引用解析 (code_ref)
 
-后端会详细记录整个处理过程中的关键信息：
+当模型在最终报告中需要展示代码时，使用 `<code_ref>code_id</code_ref>` 标签引用，而不是输出完整代码。
 
-#### 4.1.1 ModelInput（模型输入）
+#### 标签格式
 
-```json
-{
-    "type": "ModelInput",
-    "role": "user",
-    "content": "分析销售数据...",
-    "token_count": 150,
-    "timestamp": "2026-02-07T10:30:00Z"
-}
+```
+<code_ref>code_sales_analysis</code_ref>
 ```
 
-#### 4.1.2 ModelOutput（模型输出）
+#### 解析流程
 
-```json
-{
-    "type": "ModelOutput",
-    "raw_content": "{\"task_analysis\": \"...\", \"action\": {...}}",
-    "structured_response": {
-        "task_analysis": "...",
-        "execution_plan": "...",
-        "current_round": 1,
-        "action": {
-            "type": "tool_call",
-            "content": [...]
-        }
-    },
-    "token_count": 500,
-    "timestamp": "2026-02-07T10:30:01Z"
-}
+```
+后端收到包含 code_ref 的响应
+    ↓
+提取所有 code_ref 标签
+    ↓
+对于每个 code_id：
+    ├─ 从 CodeStore 查询代码信息
+    ├─ 验证代码是否存在
+    ├─ 获取代码的 language 和 description
+    └─ 记录到代码信息列表
+    ↓
+生成处理后的内容：
+    ├─ 将 code_ref 替换为占位符 {{CODE:N}}
+    └─ 返回代码信息列表
+    ↓
+传递给前端渲染
 ```
 
-#### 4.1.3 BackendProcessing（后端处理）
+#### 前端渲染
 
-**工具调用**：
+前端根据后端返回的代码信息列表，按照占位符的顺序渲染代码块。
 
-```json
-{
-    "type": "BackendProcessing",
-    "event": "tool_call",
-    "tool_name": "run_python",
-    "tool_call_id": "call_abc123",
-    "arguments": {
-        "code": "...",
-        "timeout": 60
-    },
-    "timestamp": "2026-02-07T10:30:02Z"
-}
+### 文件引用解析 (file_ref)
+
+当模型在最终报告中需要引用用户上传的文件时，使用 `<file_ref>file_id</file_ref>` 标签引用。
+
+#### 标签格式
+
+```
+<file_ref>upload_001</file_ref>
 ```
 
-**代码保存**：
+#### 解析流程
 
-```json
-{
-    "type": "BackendProcessing",
-    "event": "code_saved",
-    "code_id": "code_20250207_a1b2c3d4",
-    "file_path": "data/code_20250207_a1b2c3d4.py",
-    "original_length": 1250,
-    "description": "import pandas as pd...",
-    "timestamp": "2026-02-07T10:30:03Z"
-}
+```
+后端收到包含 file_ref 的响应
+    ↓
+提取所有 file_ref 标签
+    ↓
+对于每个 file_id：
+    ├─ 从 UploadStore 查询文件信息
+    ├─ 验证文件是否存在
+    ├─ 获取文件的 filename、file_type、size 等
+    └─ 记录到文件信息列表
+    ↓
+生成处理后的内容：
+    ├─ 将 file_ref 替换为占位符 {{FILE:N}}
+    └─ 返回文件信息列表
+    ↓
+传递给前端渲染
 ```
 
-**代码检索**：
+#### 前端渲染
 
-```json
-{
-    "type": "BackendProcessing",
-    "event": "code_retrieved",
-    "code_id": "code_20250207_a1b2c3d4",
-    "content_length": 1250,
-    "truncated": true,
-    "timestamp": "2026-02-07T10:30:04Z"
-}
+前端根据后端返回的文件信息列表，按照占位符的顺序渲染文件引用组件。
+
+### 统一文件列表
+
+#### 列表构建
+
+每次对话开始时，系统会构建统一文件列表（markdown 格式），包含代码文件和上传文件：
+
+1. 从 CodeStore 查询会话中的所有代码文件
+2. 从 UploadStore 查询会话中的所有上传文件
+3. 生成 markdown 格式的文件列表
+4. 作为系统消息添加到上下文中
+
+#### 列表格式
+
+```
+可用文件列表：
+
+**代码文件：**
+- [code_sales_analysis] sales_analysis.py (python) - 销售数据分析 | 2.5 KB
+- [code_visualization] chart.js (javascript) - 趋势图表 | 1.2 KB
+
+**上传文件：**
+- [upload_001] sales_data.csv (csv) - 2024年销售数据 | 15.3 KB
+- [upload_002] report_template.md (markdown) - 报告模板 | 4.8 KB
+
+**你可以：**
+- 使用 `<code_ref>code_id</code_ref>` 引用代码文件
+- 使用 `<file_ref>file_id</file_ref>` 引用上传文件
 ```
 
-**上下文清理**：
+#### 作用
 
-```json
-{
-    "type": "BackendProcessing",
-    "event": "context_cleaned",
-    "original_tokens": 5000,
-    "cleaned_tokens": 3000,
-    "saved_tokens": 2000,
-    "timestamp": "2026-02-07T10:30:05Z"
-}
-```
-
-### 4.2 日志格式
-
-**文件名**：`conversation_{conversation_id}_{timestamp}.jsonl`
-
-**按轮次分组**：
-
-```jsonl
-{"type": "round_start", "round": 1, "timestamp": "2026-02-07T10:30:00Z"}
-{"type": "ModelInput", "role": "user", "content": "...", "token_count": 150, "timestamp": "2026-02-07T10:30:00Z"}
-{"type": "ModelOutput", "raw_content": "...", "structured_response": {...}, "token_count": 500, "timestamp": "2026-02-07T10:30:01Z"}
-{"type": "BackendProcessing", "event": "tool_call", "tool_name": "run_python", "timestamp": "2026-02-07T10:30:02Z"}
-{"type": "BackendProcessing", "event": "code_saved", "code_id": "code_20250207_a1b2c3d4", "timestamp": "2026-02-07T10:30:03Z"}
-{"type": "round_end", "round": 1, "duration_ms": 1234, "timestamp": "2026-02-07T10:30:04Z"}
-```
-
-**日志存储位置**：`logs/conversations/`
+让模型知道本次对话中有哪些文件可以引用，避免重复创建或上传。
 
 ---
 
-## 五、API 响应格式
+## 五、后端日志系统
 
-### 5.1 tool_call 响应
+### 日志记录内容
 
-**端点**: `POST /api/v1/agent/query`
+后端会详细记录整个处理过程中的关键信息。
 
-```json
-{
-    "success": true,
-    "data": {
-        "response": "",
-        "conversation_id": "conv_a87365d8983d",
-        "duration_ms": 1234,
-        "tool_calls": [],
-        "artifacts": [],
-        "metadata": {
-            "content_type": "text",
-            "has_structured_response": true,
-            "action_type": "tool_call",
-            "current_round": 1,
-            "task_analysis": "用户需分析销售数据，识别为数据分析任务。1. 需要查询数据库获取销售记录；2. 计算各项指标；3. 生成可视化图表。",
-            "execution_plan": "R1: 数据查询与计算; R2: 可视化与报告",
-            "tool_calls": [
-                {
-                    "tool_name": "run_python",
-                    "tool_call_id": "call_abc123",
-                    "arguments": {
-                        "code": "import pandas as pd\ndf = pd.read_csv('sales.csv')\nprint(df.groupby('quarter').sum())",
-                        "timeout": 60,
-                        "response_format": "standard"
-                    }
-                },
-                {
-                    "tool_name": "file_reader",
-                    "tool_call_id": "call_def456",
-                    "arguments": {
-                        "path": "data/sales.csv",
-                        "format": "csv",
-                        "nrows": 100,
-                        "response_format": "standard"
-                    }
-                }
-            ],
-            "status": "processing"
-        }
-    }
-}
-```
+#### 记录的事件类型
 
-**字段说明**：
+| 事件类型 | 说明 |
+|---------|------|
+| ModelInput | 模型输入内容 |
+| ModelOutput | 模型原始输出 |
+| BackendProcessing | 后端处理事件 |
+| code_saved | 代码保存事件 |
+| code_retrieved | 代码检索事件 |
+| context_cleaned | 上下文清理事件 |
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `response` | string | 空字符串（tool_call 时无 final_report） |
-| `conversation_id` | string | 对话 ID |
-| `duration_ms` | number | 处理耗时（毫秒） |
-| `metadata.status` | "processing" | 状态为处理中 |
-| `metadata.tool_calls` | array | 工具调用详情 |
+#### 日志格式
 
-### 5.2 complete 响应（纯文本）
+日志以 JSONL 格式存储，每行一个 JSON 对象，包含时间戳和事件详情。
 
-```json
-{
-    "success": true,
-    "data": {
-        "response": "根据数据分析结果：\n\n- Q1 销售额：500万元，同比增长15%\n- Q2 销售额：520万元，同比增长18%\n- Q3 销售额：580万元，同比增长22%\n\n主要增长来源于电子产品线，贡献了60%的增量。",
-        "conversation_id": "conv_a87365d8983d",
-        "duration_ms": 5678,
-        "tool_calls": [],
-        "artifacts": [],
-        "metadata": {
-            "content_type": "markdown",
-            "has_structured_response": true,
-            "action_type": "complete",
-            "current_round": 3,
-            "task_analysis": "分析完成。已获取销售数据，计算了同比增长率，准备好最终报告。",
-            "execution_plan": "R1: 数据查询; R2: 数据分析; R3: 生成报告(当前)",
-            "status": "complete",
-            "contains_html": false,
-            "recommended_questions": [
-                "各产品线的销售占比如何？",
-                "可以按地区分解销售数据吗？"
-            ],
-            "download_links": ["sales_report.xlsx", "analysis_chart.png"]
-        }
-    }
-}
-```
+#### 日志存储位置
 
-**字段说明**：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `response` | string | 最终报告内容（纯文本/markdown） |
-| `metadata.content_type` | "markdown" | 内容类型为 markdown |
-| `metadata.contains_html` | false | 不包含模型生成的 HTML |
-| `metadata.recommended_questions` | array | 推荐问题列表 |
-| `metadata.download_links` | array | 可下载文件列表 |
-
-### 5.3 complete 响应（含 ECharts 图表）
-
-```json
-{
-    "success": true,
-    "data": {
-        "response": "<div class='chart-wrapper'><div id='chart-sales' style='width:600px;height:400px;'></div></div><script>(function(){const chart = echarts.init(document.getElementById('chart-sales'));chart.setOption({xAxis:{type:'category',data:['Q1','Q2','Q3','Q4']},yAxis:{type:'value'},series:[{type:'bar',data:[500,520,580,620]}]});})();</script>",
-        "conversation_id": "conv_a87365d8983d",
-        "duration_ms": 5678,
-        "tool_calls": [],
-        "artifacts": [],
-        "metadata": {
-            "content_type": "html",
-            "has_structured_response": true,
-            "action_type": "complete",
-            "current_round": 2,
-            "task_analysis": "数据可视化分析完成",
-            "execution_plan": "R1: 数据查询; R2: 生成可视化图表(当前)",
-            "status": "complete",
-            "contains_html": true
-        }
-    }
-}
-```
-
-**字段说明**：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `response` | string | 最终报告内容（HTML/JavaScript） |
-| `metadata.content_type` | "html" | 内容类型为 HTML |
-| `metadata.contains_html` | true | 包含模型生成的 HTML |
+日志文件保存在 logs/conversations/ 目录，文件名格式为 `conversation_{id}_{timestamp}.jsonl`。
 
 ---
 
-## 六、前端渲染逻辑
+## 六、API 响应格式
 
-### 6.1 渲染流程
+### tool_call 响应
 
-**代码位置**: `frontend/index.html:814-916`
+当 action_type 为 tool_call 时，响应包含工具调用详情，response 字段为空。
 
-```
-addMessage(content, isUser, metadata)
-    ↓
-renderStructuredResponse(container, content, metadata)
-    ↓
-按顺序渲染各个组件
-```
+主要字段：
+- response: 空字符串
+- metadata.action_type: "tool_call"
+- metadata.tool_calls: 工具调用数组
+- metadata.status: "processing"
 
-### 6.2 组件渲染顺序
+### complete 响应（纯文本）
+
+当 action_type 为 complete 且不包含 HTML 时，响应包含最终报告内容。
+
+主要字段：
+- response: 最终报告内容（纯文本/markdown）
+- metadata.content_type: "markdown"
+- metadata.contains_html: false
+- metadata.recommended_questions: 推荐问题列表
+- metadata.download_links: 可下载文件列表
+
+### complete 响应（含 HTML）
+
+当 action_type 为 complete 且包含 HTML 时，响应包含图表等内容。
+
+主要字段：
+- response: HTML/JavaScript 内容
+- metadata.content_type: "html"
+- metadata.contains_html: true
+
+### 包含代码引用的响应
+
+当响应包含 code_ref 标签时，后端会解析并返回代码信息列表。
+
+主要字段：
+- response: 处理后的内容（code_ref 替换为占位符）
+- metadata.code_refs: 代码信息列表
+  - code_id: 代码标识
+  - language: 代码语言
+  - description: 代码描述
+  - index: 显示顺序
+
+---
+
+## 七、前端渲染逻辑
+
+### 渲染流程
+
+前端收到 API 响应后，按顺序渲染各个组件。
+
+### 组件渲染顺序
 
 | 顺序 | 组件 | 条件 | 渲染方式 |
 |------|------|------|----------|
@@ -668,468 +371,156 @@ renderStructuredResponse(container, content, metadata)
 | 2 | execution_plan | metadata.execution_plan 存在 | 橙色固定框 |
 | 3 | tool_call_status | action_type="tool_call" | 蓝色加载框 + 旋转动画 |
 | 4 | final_report | 任何情况 | Markdown/HTML 渲染 |
-| 5 | saved_code_notice | response 包含 CODE_SAVED 标记 | 灰色提示框 |
-| 6 | recommended_questions | metadata.recommended_questions 存在 | 灰色可点击按钮 |
-| 7 | download_links | metadata.download_links 存在 | 绿色下载按钮 |
+| 5 | code_blocks | metadata.code_refs 存在 | 代码块组件 |
+| 6 | recommended_questions | metadata.recommended_questions 存在 | 可点击按钮 |
+| 7 | download_links | metadata.download_links 存在 | 下载按钮 |
 
-### 6.3 组件详细说明
+### 组件详细说明
 
-#### 6.3.1 task_analysis（思维链分析）
+#### task_analysis（思维链分析）
 
-**渲染条件**: `metadata.task_analysis` 存在
+蓝色可折叠框，展示模型的思维链分析过程。
 
-**渲染效果**:
-```
-┌─────────────────────────────────────┐
-│ 💡 思维链分析 ▼                     │
-│ 用户需分析销售数据，识别为数据...   │
-└─────────────────────────────────────┘
-```
+#### execution_plan（执行计划）
 
-**样式**:
-- 背景: `#f0f7ff` (浅蓝)
-- 左边框: `3px solid #2196F3` (蓝色)
-- 可折叠: `<details>` 元素
+橙色固定框，展示多轮执行的计划（R1, R2, R3...）。
 
-#### 6.3.2 execution_plan（执行计划）
+#### tool_call_status（工具调用状态）
 
-**渲染条件**: `metadata.execution_plan` 存在
+蓝色加载框，显示当前正在执行的工具名称。
 
-**渲染效果**:
-```
-┌─────────────────────────────────────┐
-│ 📋 执行计划                         │
-│ R1: 数据查询与计算; R2: 可视化     │
-└─────────────────────────────────────┘
-```
+#### final_report（最终报告）
 
-**样式**:
-- 背景: `#fff3e0` (浅橙)
-- 左边框: `3px solid #FF9800` (橙色)
+根据 content_type 决定渲染方式：
+- markdown: 保留换行符的文本渲染
+- html: 使用 innerHTML 渲染，初始化 ECharts 图表
 
-#### 6.3.3 tool_call_status（工具调用状态）
+#### code_blocks（代码块）
 
-**渲染条件**: `metadata.action_type === "tool_call"`
+当代码信息列表存在时，按照 index 顺序渲染代码块，每个代码块包含：
+- 代码语言标识
+- 代码描述
+- 语法高亮的代码内容
+- 查看和下载按钮
 
-**渲染效果**:
-```
-┌─────────────────────────────────────┐
-│ ⏳ 正在执行: run_python, file_reader │
-└─────────────────────────────────────┘
-```
+#### recommended_questions（推荐问题）
 
-**样式**:
-- 背景: `#e3f2fd` (浅蓝)
-- 旋转动画: CSS `@keyframes spin`
-- 显示所有工具名称
+可点击按钮，点击后自动填充到输入框。
 
-#### 6.3.4 final_report（最终报告）
+#### download_links（下载链接）
 
-**渲染条件**: 始终渲染
-
-**情况1**: `metadata.contains_html === false`
-- 渲染方式: `textContent`
-- 样式: `line-height: 1.6; white-space: pre-wrap`
-- 保留换行符
-
-**情况2**: `metadata.contains_html === true`
-- 渲染方式: `innerHTML`
-- 初始化 ECharts 图表
-- 响应式调整
-
-#### 6.3.5 saved_code_notice（代码保存提示）
-
-**渲染条件**: `response` 包含 `<!-- CODE_SAVED: ... -->` 标记
-
-**渲染效果**:
-```
-┌─────────────────────────────────────┐
-│ 📝 代码已保存                       │
-│ Python 代码已保存到 code_20250207_...│
-│ [查看代码] [下载代码]               │
-└─────────────────────────────────────┘
-```
-
-**交互**: 点击"查看代码"通过 file_reader 检索代码
-
-#### 6.3.6 recommended_questions（推荐问题）
-
-**渲染条件**: `metadata.recommended_questions` 数组非空
-
-**渲染效果**:
-```
-┌─────────────────────────────────────┐
-│ 🤔 推荐问题                         │
-│ [💡 各产品线的销售占比如何？]      │
-│ [💡 可以按地区分解销售数据吗？]    │
-└─────────────────────────────────────┘
-```
-
-**交互**: 点击按钮自动填充到输入框并聚焦
-
-#### 6.3.7 download_links（下载链接）
-
-**渲染条件**: `metadata.download_links` 数组非空
-
-**渲染效果**:
-```
-┌─────────────────────────────────────┐
-│ 📦 可下载文件                       │
-│ [📥 sales_report.xlsx] [📥 analysis_chart.png] │
-└─────────────────────────────────────┘
-```
-
-**链接格式**: `/api/v1/files/download/{filename}`
+下载按钮，链接到文件下载接口。
 
 ---
 
-## 七、完整示例
+## 八、完整流程示例
 
-### 7.1 场景：销售数据分析（多轮对话）
+### 场景：销售数据分析（多轮对话）
 
 #### 第一轮：工具调用
 
-**用户输入**: "分析 sales.csv 文件，计算季度销售额"
+用户请求分析销售数据。
 
-**大模型返回**:
-```json
-{
-    "task_analysis": "用户请求分析 CSV 文件中的销售数据。1. 需要读取文件；2. 按季度分组统计；3. 计算总额。",
-    "execution_plan": "R1: 读取数据并计算; R2: 生成分析报告",
-    "current_round": 1,
-    "action": {
-        "type": "tool_call",
-        "content": [
-            {
-                "tool_name": "run_python",
-                "tool_call_id": "call_q1_read",
-                "arguments": {
-                    "code": "import pandas as pd\ndf = pd.read_csv('sales.csv')\nresult = df.groupby('quarter')['sales'].sum()\nprint(result)",
-                    "timeout": 60,
-                    "response_format": "standard"
-                }
-            }
-        ]
-    }
-}
-```
+模型返回 tool_call 类型响应，包含查询数据的工具调用。
 
-**API 响应**:
-```json
-{
-    "data": {
-        "response": "",
-        "metadata": {
-            "action_type": "tool_call",
-            "current_round": 1,
-            "task_analysis": "用户请求分析 CSV 文件...",
-            "execution_plan": "R1: 读取数据并计算; R2: 生成分析报告",
-            "tool_calls": [
-                {"tool_name": "run_python", "tool_call_id": "call_q1_read", "arguments": {...}}
-            ],
-            "status": "processing"
-        }
-    }
-}
-```
-
-**前端渲染**:
-```
-┌─────────────────────────────────────┐
-│ 💡 思维链分析 ▼                     │
-│ 用户请求分析 CSV 文件中的销售...   │
-├─────────────────────────────────────┤
-│ 📋 执行计划                         │
-│ R1: 读取数据并计算; R2: 生成分析报告│
-├─────────────────────────────────────┤
-│ ⏳ 正在执行: run_python             │
-└─────────────────────────────────────┘
-```
+后端解析并返回工具调用信息，前端显示加载状态。
 
 #### 第二轮：完成报告
 
-**工具执行结果返回给模型后，模型继续分析**
+工具执行完成后，模型返回 complete 类型响应，包含分析结果。
 
-**大模型返回**:
-```json
-{
-    "task_analysis": "工具执行完成，已获取季度销售数据。Q1: 500万, Q2: 520万, Q3: 580万, Q4: 620万。需要生成分析报告。",
-    "execution_plan": "R1: 读取数据并计算; R2: 生成分析报告(当前)",
-    "current_round": 2,
-    "action": {
-        "type": "complete",
-        "content": "## 销售数据分析报告\n\n### 季度销售额\n- Q1: 500万元\n- Q2: 520万元 (环比增长4%)\n- Q3: 580万元 (环比增长11.5%)\n- Q4: 620万元 (环比增长6.9%)\n\n### 趋势分析\n全年销售额呈现稳定增长趋势，Q3 增长最为显著，主要受促销活动推动。",
-        "recommended_questions": [
-            "各产品线的销售贡献如何？",
-            "可以生成可视化图表吗？"
-        ],
-        "download_links": ["quarterly_sales.xlsx"]
-    }
-}
-```
+后端解析响应，提取推荐问题和下载链接。
 
-**API 响应**:
-```json
-{
-    "data": {
-        "response": "## 销售数据分析报告\n\n### 季度销售额\n- Q1: 500万元\n- Q2: 520万元 (环比增长4%)\n- Q3: 580万元 (环比增长11.5%)\n- Q4: 620万元 (环比增长6.9%)\n\n### 趋势分析\n全年销售额呈现稳定增长趋势，Q3 增长最为显著，主要受促销活动推动。",
-        "metadata": {
-            "action_type": "complete",
-            "current_round": 2,
-            "task_analysis": "工具执行完成，已获取季度销售数据...",
-            "execution_plan": "R1: 读取数据并计算; R2: 生成分析报告(当前)",
-            "status": "complete",
-            "content_type": "markdown",
-            "contains_html": false,
-            "recommended_questions": ["各产品线的销售贡献如何？", "可以生成可视化图表吗？"],
-            "download_links": ["quarterly_sales.xlsx"]
-        }
-    }
-}
-```
+前端渲染：
+- 思维链分析（可折叠）
+- 执行计划
+- 分析报告内容
+- 推荐问题按钮
+- 下载链接按钮
 
-**前端渲染**:
-```
-┌─────────────────────────────────────┐
-│ 💡 思维链分析 ▼                     │
-│ 工具执行完成，已获取季度销售数据... │
-├─────────────────────────────────────┤
-│ 📋 执行计划                         │
-│ R1: 读取数据并计算; R2: 生成分析报告│
-├─────────────────────────────────────┤
-│ ## 销售数据分析报告                 │
-│                                     │
-│ ### 季度销售额                      │
-│ - Q1: 500万元                       │
-│ - Q2: 520万元 (环比增长4%)          │
-│ ...                                 │
-├─────────────────────────────────────┤
-│ 🤔 推荐问题                         │
-│ [💡 各产品线的销售贡献如何？]      │
-│ [💡 可以生成可视化图表吗？]        │
-├─────────────────────────────────────┤
-│ 📦 可下载文件                       │
-│ [📥 quarterly_sales.xlsx]           │
-└─────────────────────────────────────┘
-```
+### 场景：代码创建与引用
 
-### 7.2 场景：代码块保存和检索
+#### 创建代码
 
-#### 用户请求生成分析代码
+用户请求生成分析代码。
 
-**用户输入**: "生成分析销售数据的 Python 代码"
+模型返回 complete 响应，包含 code_blocks。
 
-**大模型返回**:
-```json
-{
-    "task_analysis": "用户需要生成销售数据分析的 Python 代码。需要编写完整的数据处理和分析脚本。",
-    "execution_plan": "R1: 生成分析代码(当前)",
-    "current_round": 1,
-    "action": {
-        "type": "complete",
-        "content": "以下是销售数据分析代码：\n\n```python\nimport pandas as pd\nimport matplotlib.pyplot as plt\n\ndf = pd.read_csv('sales.csv')\nquarterly = df.groupby('quarter').sum()\n\nplt.figure(figsize=(10, 6))\nquarterly['sales'].plot(kind='bar')\nplt.title('季度销售趋势')\nplt.savefig('sales_trend.png')\n```\n\n代码已保存，您可以通过文件读取工具查看完整代码。"
-    }
-}
-```
+后端处理：
+1. 验证 language 类型（如 python）
+2. 选择文件扩展名（.py）
+3. 保存到 data/code_xxx.py
+4. 记录元数据
 
-**后端处理**:
+前端渲染：
+- 思维链分析
+- 执行计划
+- 内容描述
+- 代码保存提示
 
-```python
-# 检测到 Python 代码块
-code_id = "code_20250207_a1b2c3d4"
-file_path = "data/code_20250207_a1b2c3d4.py"
+#### 引用代码
 
-# 保存代码
-FileStore.save_file(file_path, code, "python")
+用户请求使用之前创建的代码。
 
-# 替换为占位符
-content = content.replace(
-    "```python\n...```",
-    "<!-- CODE_SAVED: code_20250207_a1b2c3d4 | import pandas as pd... -->"
-)
+模型使用 `file_reader` 工具主动读取代码文件：
+1. 模型调用 `file_reader` 工具，指定要读取的 code_id
+2. 系统从 CodeStore 读取完整代码
+3. 文件内容返回给模型供使用
+4. 在下一轮对话中，文件内容被自动清理为梗概以节省 token
 
-# 记录日志
-logger.info({
-    "type": "BackendProcessing",
-    "event": "code_saved",
-    "code_id": code_id,
-    "original_length": len(code)
-})
-```
+### 场景：最终报告中引用代码
 
-**API 响应**:
-```json
-{
-    "data": {
-        "response": "以下是销售数据分析代码：\n\n<!-- CODE_SAVED: code_20250207_a1b2c3d4 | import pandas as pd... -->\n\n代码已保存，您可以通过文件读取工具查看完整代码。",
-        "metadata": {
-            "action_type": "complete",
-            "current_round": 1,
-            "saved_codes": [
-                {
-                    "code_id": "code_20250207_a1b2c3d4",
-                    "file_path": "data/code_20250207_a1b2c3d4.py",
-                    "description": "import pandas as pd...",
-                    "original_length": 250
-                }
-            ]
-        }
-    }
-}
-```
+用户请求生成包含代码展示的报告。
 
-**前端渲染**:
-```
-┌─────────────────────────────────────┐
-│ 💡 思维链分析 ▼                     │
-│ 用户需要生成销售数据分析的 Python... │
-├─────────────────────────────────────┤
-│ 📋 执行计划                         │
-│ R1: 生成分析代码(当前)              │
-├─────────────────────────────────────┤
-│ 以下是销售数据分析代码：             │
-│                                     │
-│ 📝 代码已保存                       │
-│ Python 代码已保存到 code_20250207... │
-│ [查看代码] [下载代码]               │
-│                                     │
-│ 代码已保存，您可以通过文件读取工具...│
-└─────────────────────────────────────┘
-```
+模型返回 complete 响应，content 中包含 `<code_ref>code_xxx</code_ref>` 标签。
 
-#### 用户请求查看代码
+后端解析：
+1. 提取所有 code_ref 标签
+2. 从 CodeStore 查询代码信息
+3. 替换为占位符 {{CODE:N}}
+4. 返回代码信息列表
 
-**用户输入**: "查看保存的代码"
-
-**大模型返回**:
-```json
-{
-    "task_analysis": "用户想查看之前保存的代码，需要使用 file_reader 读取。",
-    "execution_plan": "R1: 读取代码文件(当前)",
-    "current_round": 1,
-    "action": {
-        "type": "tool_call",
-        "content": [
-            {
-                "tool_name": "file_reader",
-                "tool_call_id": "call_read_code",
-                "arguments": {
-                    "path": "data/code_20250207_a1b2c3d4.py",
-                    "format": "python",
-                    "response_format": "full"
-                }
-            }
-        ]
-    }
-}
-```
-
-### 7.3 场景：生成可视化图表
-
-**用户输入**: "生成销售趋势的可视化图表"
-
-**大模型返回**:
-```json
-{
-    "task_analysis": "用户需要可视化销售趋势数据。已准备好季度销售数据，可以生成 ECharts 柱状图。",
-    "execution_plan": "R1: 生成可视化图表(当前)",
-    "current_round": 1,
-    "action": {
-        "type": "complete",
-        "content": "<div class='chart-wrapper' style='margin: 20px 0;'><div id='chart-sales-trend' style='width:100%;height:400px;'></div></div><script>(function(){const chart = echarts.init(document.getElementById('chart-sales-trend'));chart.setOption({title:{text:'季度销售趋势'},tooltip:{},xAxis:{type:'category',data:['Q1','Q2','Q3','Q4']},yAxis:{type:'value',name:'销售额(万元)'},series:[{type:'bar',data:[500,520,580,620],itemStyle:{color:'#2196F3'}}]});})();</script>"
-    }
-}
-```
-
-**API 响应**:
-```json
-{
-    "data": {
-        "response": "<div class='chart-wrapper' style='margin: 20px 0;'><div id='chart-sales-trend' style='width:100%;height:400px;'></div></div><script>...</script>",
-        "metadata": {
-            "action_type": "complete",
-            "current_round": 1,
-            "task_analysis": "用户需要可视化销售趋势数据...",
-            "execution_plan": "R1: 生成可视化图表(当前)",
-            "status": "complete",
-            "content_type": "html",
-            "contains_html": true
-        }
-    }
-}
-```
-
-**前端渲染**:
-```
-┌─────────────────────────────────────┐
-│ 💡 思维链分析 ▼                     │
-│ 用户需要可视化销售趋势数据...       │
-├─────────────────────────────────────┤
-│ 📋 执行计划                         │
-│ R1: 生成可视化图表(当前)            │
-├─────────────────────────────────────┤
-│     [ECharts 柱状图渲染区域]        │
-│                                     │
-│    季度销售趋势                     │
-│    ▂▃▅▇▃▂                          │
-│    500 520 580 620                  │
-└─────────────────────────────────────┘
-```
+前端渲染：
+- 按照占位符顺序渲染代码块
+- 每个代码块显示语言、描述和内容
 
 ---
 
 ## 附录
 
-### A. 相关文件
+### 相关文件
 
 | 文件 | 说明 |
 |------|------|
-| `backend/models/response.py` | 结构化响应模型定义，包含提示词加载逻辑 |
-| `backend/api/services/ba_agent.py` | 响应解析和处理逻辑，包含代码保存功能 |
-| `backend/core/file_store.py` | 文件存储管理 |
-| `backend/core/logger.py` | 后端日志系统 |
-| `frontend/index.html` | 前端渲染逻辑 |
-| `docs/prompts.md` | 系统提示词定义 |
-| `docs/api.md` | API 端点文档 |
+| backend/models/response.py | 结构化响应模型定义，包含提示词加载逻辑 |
+| backend/api/services/ba_agent.py | 响应解析和处理逻辑 |
+| backend/filestore/stores/code_store.py | 代码文件存储管理 |
+| backend/core/context_manager.py | 上下文管理器 |
+| docs/prompts.md | 系统提示词定义 |
+| docs/context-management.md | 上下文管理详细文档 |
 
-### B. 数据模型定义
+### 数据模型定义
 
-```python
-# backend/models/response.py
+结构化响应包含以下主要模型：
 
-class ToolCall(BaseModel):
-    tool_name: str
-    tool_call_id: str
-    arguments: Dict[str, Any]
+- ToolCall: 工具调用定义（tool_name, tool_call_id, arguments）
+- CodeBlock: 代码块定义（code_id, code, language, description）
+- Action: 动作定义（type, content, recommended_questions, download_links, code_blocks）
+- StructuredResponse: 完整响应（task_analysis, execution_plan, current_round, action）
 
-class Action(BaseModel):
-    type: Literal["tool_call", "complete"]
-    content: Union[List[ToolCall], str]
-    recommended_questions: Optional[List[str]] = None
-    download_links: Optional[List[str]] = None
+### 工具调用参数规范
 
-class StructuredResponse(BaseModel):
-    task_analysis: str
-    execution_plan: str
-    current_round: int = 1
-    action: Action
+#### run_python（Python 代码执行）
 
-# 提示词加载函数
-def _load_system_prompt() -> str:
-    """从 docs/prompts.md 加载系统提示词"""
-    # ... 实现逻辑
-```
+**用途**：执行 Python 代码进行数据分析、计算、可视化
 
-### C. 工具调用参数规范
-
-#### run_python (Python 代码执行)
-
+**JSON 格式**：
 ```json
 {
     "tool_name": "run_python",
     "tool_call_id": "call_xxx",
     "arguments": {
-        "code": "要执行的 Python 代码（仅支持白名单库）",
+        "code": "import pandas as pd\nimport matplotlib.pyplot as plt\n...",
         "timeout": 60,
         "response_format": "standard"
     }
@@ -1137,102 +528,130 @@ def _load_system_prompt() -> str:
 ```
 
 **参数说明**：
-- `code` (必需): 要执行的 Python 代码
-- `timeout` (可选): 执行超时时间（秒），范围 5-300，默认 60
-- `response_format` (可选): 响应格式，可选值：brief/standard/full，默认 standard
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| code | string | 是 | - | 要执行的 Python 代码 |
+| timeout | integer | 否 | 60 | 执行超时时间（秒） |
+| response_format | string | 否 | standard | 响应格式：brief/standard/full |
 
-**白名单库**: json, csv, datetime, math, statistics, random, pandas, numpy, scipy, statsmodels, openpyxl, xlrd, xlsxwriter, matplotlib, seaborn, plotly
+**白名单库**：json, csv, datetime, math, statistics, random, pandas, numpy, scipy, statsmodels, openpyxl, xlrd, xlsxwriter, matplotlib, seaborn, plotly
 
-#### file_reader (文件读取)
+---
 
+#### file_reader（文件读取）
+
+**用途**：读取用户上传的文件内容
+
+**JSON 格式**：
 ```json
 {
     "tool_name": "file_reader",
     "tool_call_id": "call_xxx",
     "arguments": {
-        "path": "文件路径",
+        "path": "upload_001",
         "format": "csv",
         "encoding": "utf-8",
-        "sheet_name": 0,
         "nrows": 100,
-        "parse_metadata": false,
         "response_format": "standard"
     }
 }
 ```
 
 **参数说明**：
-- `path` (必需): 文件路径
-- `format` (可选): 文件格式，可选值：csv/excel/json/text/python/sql，不指定则自动检测
-- `encoding` (可选): 文本编码，默认 utf-8
-- `sheet_name` (可选): Excel 工作表名称或索引，默认第一个表
-- `nrows` (可选): 最大读取行数，None 表示读取全部
-- `parse_metadata` (可选): 是否解析元数据，默认 false
-- `response_format` (可选): 响应格式，可选值：brief/standard/full，默认 standard
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| path | string | 是 | - | 文件引用（upload_xxx 或文件路径） |
+| format | string | 否 | auto | 文件格式：csv/excel/json/text/python/sql |
+| encoding | string | 否 | utf-8 | 文本编码 |
+| nrows | integer | 否 | - | 最大读取行数 |
+| response_format | string | 否 | standard | 响应格式：brief/standard/full |
 
-#### query_database (数据库查询)
+---
 
+#### query_database（数据库查询）
+
+**用途**：查询业务数据库
+
+**JSON 格式**：
 ```json
 {
     "tool_name": "query_database",
     "tool_call_id": "call_xxx",
     "arguments": {
-        "query": "SELECT ...",
-        "connection": "primary",
-        "params": {},
+        "query": "SELECT * FROM sales WHERE date >= '2024-01-01'",
         "max_rows": 1000,
+        "params": {},
         "response_format": "standard"
     }
 }
 ```
 
 **参数说明**：
-- `query` (必需): SQL 查询语句
-- `connection` (可选): 数据库连接名称，默认 primary
-- `params` (可选): 查询参数（用于参数化查询，防止 SQL 注入）
-- `max_rows` (可选): 最大返回行数，范围 1-10000，默认 1000
-- `response_format` (可选): 响应格式，可选值：brief/standard/full，默认 standard
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| query | string | 是 | - | SQL 查询语句 |
+| max_rows | integer | 否 | 1000 | 最大返回行数 |
+| params | object | 否 | {} | 查询参数（参数化查询） |
+| response_format | string | 否 | standard | 响应格式：brief/standard/full |
 
-#### web_search (网络搜索)
+---
 
+#### web_search（网络搜索）
+
+**用途**：搜索网络信息
+
+**JSON 格式**：
 ```json
 {
     "tool_name": "web_search",
     "tool_call_id": "call_xxx",
     "arguments": {
-        "query": "搜索关键词",
-        "num_results": 10,
-        "response_format": "standard"
+        "query": "2024年销售趋势分析",
+        "num_results": 10
     }
 }
 ```
 
 **参数说明**：
-- `query` (必需): 搜索关键词
-- `num_results` (可选): 返回结果数量，默认 10
-- `response_format` (可选): 响应格式，可选值：brief/standard/full，默认 standard
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| query | string | 是 | - | 搜索关键词 |
+| num_results | integer | 否 | 10 | 返回结果数量 |
 
-#### web_reader (网页读取)
+---
 
+#### web_reader（网页读取）
+
+**用途**：读取网页内容
+
+**JSON 格式**：
 ```json
 {
     "tool_name": "web_reader",
     "tool_call_id": "call_xxx",
     "arguments": {
-        "url": "https://example.com",
+        "url": "https://example.com/article",
         "response_format": "standard"
     }
 }
 ```
 
 **参数说明**：
-- `url` (必需): 网页 URL
-- `response_format` (可选): 响应格式，可选值：brief/standard/full，默认 standard
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| url | string | 是 | - | 网页 URL |
+| response_format | string | 否 | standard | 响应格式：brief/standard/full |
 
-### D. 版本历史
+---
+
+## 变更日志
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
-| v2.3.0 | 2026-02-07 | 新增代码管理流程、后端日志系统；更新提示词来源；更新工具调用参数 |
+| v2.7.0 | 2026-02-07 | 移除自动代码注入机制，改用模型主动调用 file_reader；添加文件读取后内容清理为梗概的机制 |
+| v2.6.0 | 2026-02-07 | 补充完整工具参数 JSON 格式规范，包含参数表格和示例 |
+| v2.5.0 | 2026-02-07 | 添加统一文件列表机制（代码+上传）、file_ref 标签处理、markdown 格式文件列表 |
+| v2.4.0 | 2026-02-07 | 添加代码引用解析、多语言代码文件支持、可用代码列表机制；移除具体代码示例 |
+| v2.3.0 | 2026-02-07 | 新增代码管理流程、后端日志系统；更新提示词来源 |
 | v2.2.0 | 2026-02-07 | 重构响应格式：后端返回数据，前端渲染组件 |
 | v2.1.0 | 2026-02-06 | 初始结构化响应格式 |

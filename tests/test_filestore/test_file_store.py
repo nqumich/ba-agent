@@ -157,8 +157,8 @@ class TestFileStoreStorageStats:
         """测试获取所有类别统计"""
         stats = file_store.get_storage_stats()
 
-        # 应该有 7 个类别（artifact, upload, report, chart, cache, temp, memory）
-        assert len(stats) == 7
+        # 应该有 8 个类别（artifact, upload, report, chart, cache, temp, memory, code）
+        assert len(stats) == 8
 
 
 class TestFileStoreCleanup:

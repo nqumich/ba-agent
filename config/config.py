@@ -36,6 +36,10 @@ class DatabaseSecurityConfig(BaseModel):
 class DatabaseConnectionConfig(BaseModel):
     """单个数据库连接配置"""
 
+    type: str = Field(default="sqlite", description="数据库类型 (sqlite, postgresql, clickhouse)")
+    # SQLite 配置
+    path: str = Field(default="./data/ba_agent.db", description="SQLite 数据库文件路径")
+    # PostgreSQL/ClickHouse 配置
     host: str = Field(default="localhost", description="数据库主机")
     port: int = Field(default=5432, description="数据库端口")
     username: str = Field(default="", description="数据库用户名")
@@ -46,9 +50,19 @@ class DatabaseConnectionConfig(BaseModel):
 
 
 class DatabaseConfig(BaseModel):
-    """数据库配置"""
+    """数据库配置
 
-    # 默认连接配置（向后兼容）
+    默认使用 SQLite（嵌入式数据库，无需外部服务器）
+    可配置 PostgreSQL 或 ClickHouse 用于企业级部署
+    """
+
+    # 数据库类型
+    type: str = Field(default="sqlite", description="数据库类型 (sqlite, postgresql, clickhouse)")
+
+    # SQLite 配置（默认）
+    path: str = Field(default="./data/ba_agent.db", description="SQLite 数据库文件路径")
+
+    # PostgreSQL/ClickHouse 配置（可选）
     host: str = Field(default="localhost", description="数据库主机")
     port: int = Field(default=5432, description="数据库端口")
     username: str = Field(default="", description="数据库用户名")

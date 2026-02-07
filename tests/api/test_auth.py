@@ -309,7 +309,7 @@ class TestAPIVersionUpdate:
 
     def test_api_version(self, client):
         """测试 API 版本"""
-        response = client.get("/")
+        response = client.get("/api")
         assert response.status_code == 200
 
         data = response.json()
@@ -317,7 +317,7 @@ class TestAPIVersionUpdate:
 
     def test_api_features(self, client):
         """测试 API 功能列表"""
-        response = client.get("/")
+        response = client.get("/api")
         assert response.status_code == 200
 
         data = response.json()

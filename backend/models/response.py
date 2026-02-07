@@ -1,15 +1,111 @@
 """
-Agent 结构化响应模型 (v2.0)
+Agent 结构化响应模型 (v3.5)
 
 定义 Agent 返回的结构化响应格式，支持：
 - 多轮对话 (current_round)
 - 工具调用 (type="tool_call")
 - 最终报告 (type="complete")
 - 推荐问题和下载链接
+- 代码块管理和引用
+
+系统提示词从 docs/prompts.md 加载，不使用备用提示词
 """
 
 from typing import List, Optional, Any, Union, Dict, Literal
 from pydantic import BaseModel, Field
+from pathlib import Path
+
+
+class FileInfo(BaseModel):
+    """
+    统一文件信息格式
+
+    用于代码文件和上传文件的统一描述，便于管理和展示
+    """
+
+    file_id: str = Field(
+        ...,
+        description="文件唯一标识，代码文件为 code_xxx，上传文件为 upload_xxx"
+    )
+    filename: str = Field(
+        ...,
+        description="文件名，包含扩展名"
+    )
+    file_type: str = Field(
+        ...,
+        description="文件类型/扩展名，如 python, js, csv, md 等"
+    )
+    size_bytes: int = Field(
+        ...,
+        description="文件大小（字节）"
+    )
+    description: str = Field(
+        ...,
+        description="文件描述"
+    )
+
+    # 代码文件特有字段
+    language: Optional[str] = Field(
+        default=None,
+        description="代码语言类型，仅代码文件有值"
+    )
+
+    @property
+    def size_formatted(self) -> str:
+        """格式化文件大小"""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if self.size_bytes < 1024.0:
+                return f"{self.size_bytes:.1f} {unit}"
+            self.size_bytes /= 1024.0
+        return f"{self.size_bytes:.1f} TB"
+
+    def to_markdown(self) -> str:
+        """
+        转换为 markdown 格式
+
+        格式: - [file_id] filename (file_type) - description | size
+        """
+        desc = f" - {self.description}" if self.description else ""
+        return f"- [{self.file_id}] {self.filename} ({self.file_type}){desc} | {self.size_formatted}"
+
+    @classmethod
+    def from_code_metadata(
+        cls,
+        file_id: str,
+        filename: str,
+        file_type: str,
+        size_bytes: int,
+        description: str,
+        language: str
+    ) -> "FileInfo":
+        """从代码元数据创建 FileInfo"""
+        return cls(
+            file_id=file_id,
+            filename=filename,
+            file_type=file_type,
+            size_bytes=size_bytes,
+            description=description,
+            language=language
+        )
+
+    @classmethod
+    def from_upload_metadata(
+        cls,
+        file_id: str,
+        filename: str,
+        file_type: str,
+        size_bytes: int,
+        description: str
+    ) -> "FileInfo":
+        """从上传文件元数据创建 FileInfo"""
+        return cls(
+            file_id=file_id,
+            filename=filename,
+            file_type=file_type,
+            size_bytes=size_bytes,
+            description=description,
+            language=None
+        )
 
 
 class ToolCall(BaseModel):
@@ -160,7 +256,7 @@ def _load_prompt_from_docs() -> str:
     """
     从 docs/prompts.md 加载结构化响应提示词
 
-    如果文档不存在或读取失败，返回内嵌的备用提示词
+    提取 ### STRUCTURED_RESPONSE_SYSTEM_PROMPT 和 ### 之间的内容
     """
     from pathlib import Path
     import re
@@ -168,138 +264,27 @@ def _load_prompt_from_docs() -> str:
     docs_path = Path(__file__).parent.parent.parent / "docs" / "prompts.md"
 
     if not docs_path.exists():
-        # 文档不存在，使用备用提示词
-        return _get_fallback_prompt()
+        raise FileNotFoundError(f"提示词文件不存在: {docs_path}")
 
-    try:
-        content = docs_path.read_text(encoding='utf-8')
+    content = docs_path.read_text(encoding='utf-8')
 
-        # 提取 STRUCTURED_RESPONSE_SYSTEM_PROMPT 部分
-        # 查找从 ### STRUCTURED_RESPONSE_SYSTEM_PROMPT 到下一个 ### 之间的内容
-        pattern = r'### STRUCTURED_RESPONSE_SYSTEM_PROMPT\s+(.*?)(?=### |\Z)'
-        match = re.search(pattern, content, re.DOTALL)
+    # 提取 STRUCTURED_RESPONSE_SYSTEM_PROMPT 部分
+    # 查找从 ### STRUCTURED_RESPONSE_SYSTEM_PROMPT 到下一个 ### 之间的内容
+    pattern = r'### STRUCTURED_RESPONSE_SYSTEM_PROMPT\s+(.*?)(?=### |\Z)'
+    match = re.search(pattern, content, re.DOTALL)
 
-        if match:
-            prompt_text = match.group(1).strip()
-            # 移除 markdown 代码块标记（如果存在）
-            prompt_text = re.sub(r'^```\w*\n?', '', prompt_text, flags=re.MULTILINE)
-            prompt_text = prompt_text.rstrip('`\n')
-            return prompt_text
+    if not match:
+        raise ValueError(f"提示词文件中未找到 ### STRUCTURED_RESPONSE_SYSTEM_PROMPT 标记: {docs_path}")
 
-        # 如果没有找到，返回备用提示词
-        return _get_fallback_prompt()
+    prompt_text = match.group(1).strip()
+    # 移除 markdown 代码块标记（如果存在）
+    prompt_text = re.sub(r'^```\w*\n?', '', prompt_text, flags=re.MULTILINE)
+    prompt_text = prompt_text.rstrip('`\n')
 
-    except Exception as e:
-        # 读取失败，使用备用提示词
-        import warnings
-        warnings.warn(f"无法从文档加载提示词: {e}，使用备用提示词")
-        return _get_fallback_prompt()
+    return prompt_text
 
 
-def _get_fallback_prompt() -> str:
-    """
-    获取内嵌的备用提示词
-
-    这是当 docs/prompts.md 不存在或读取失败时使用的版本
-    """
-    return """你必须严格按照以下 JSON 格式返回响应：
-
-```json
-{{
-    "task_analysis": "思维链：1. 识别意图; 2. 预判数据风险; 3. 设计复合指令",
-    "execution_plan": "R1: [步骤描述]; R2: [步骤描述]",
-    "current_round": 1,
-    "action": {{
-        "type": "tool_call 或 complete",
-        "content": "...",
-        "recommended_questions": ["问题1", "问题2"],  // 仅 type=complete 时可选
-        "download_links": ["文件1.xlsx"],  // 仅 type=complete 时可选
-        "code_blocks": [  // 当 content 包含代码时提供
-            {{
-                "code_id": "code_描述_随机字符",
-                "language": "python",
-                "description": "代码描述"
-            }}
-        ]
-    }}
-}}
-```
-
-## Action Type 定义
-
-### type="tool_call" (调用工具)
-content 必须为数组，支持单次并行调用（最多6个）。
-
-### type="complete" (完成并返回报告)
-content 为字符串，包含最终分析结果或可视化代码。
-
-## 代码块处理 (code_blocks)
-
-当 content 中包含代码时，必须提供 code_blocks 字段：
-
-```json
-{{
-    "action": {{
-        "type": "complete",
-        "content": "```python\\nimport pandas as pd\\ndf = pd.read_csv('data.csv')\\n```",
-        "code_blocks": [
-            {{
-                "code_id": "code_data_analysis_abc123",
-                "language": "python",
-                "description": "数据分析代码"
-            }}
-        ]
-    }}
-}}
-```
-
-**代码标识命名规则**:
-- 格式: code_{描述}_{随机字符}
-- 描述使用英文或拼音，简短明了
-- 示例: code_sales_analysis, code_cleaning_xyz
-
-**后续引用代码**:
-```
-请使用 <!-- CODE: code_sales_analysis --> 进行分析
-```
-
-## 工具调用参数规范
-
-### run_python (Python 代码执行)
-- code: 要执行的 Python 代码
-- timeout: 执行超时时间（秒），范围 5-300，默认 60
-- response_format: brief/standard/full
-
-### file_reader (文件读取)
-- path: 文件路径
-- format: 文件格式（可选，自动检测）
-- encoding: 文本编码，默认 utf-8
-- nrows: 最大读取行数
-- response_format: brief/standard/full
-
-### query_database (数据库查询)
-- query: SQL 查询语句
-- connection: 数据库连接名称，默认 primary
-- max_rows: 最大返回行数，范围 1-10000
-- response_format: brief/standard/full
-
-### web_search (网络搜索)
-- query: 搜索关键词
-- num_results: 返回结果数量
-- response_format: brief/standard/full
-
-## 重要规则
-
-1. 必须返回有效 JSON，所有字符串使用双引号
-2. task_analysis 必须有深度，展示思维链
-3. execution_plan 要分轮次，R1/R2/R3 明确各轮目标
-4. tool_call_id 唯一性，使用 call_xxx 格式
-5. current_round 随对话递增，直到 type="complete"
-6. content 包含代码块时，必须提供 code_blocks 字段
-"""
-
-
-# 系统提示词（从文档加载，失败时使用备用提示词）
+# 系统提示词（从 docs/prompts.md 加载）
 STRUCTURED_RESPONSE_SYSTEM_PROMPT = _load_prompt_from_docs()
 
 
@@ -458,24 +443,25 @@ def generate_retry_prompt(errors: List[str]) -> str:
     """
     errors_text = "\n".join([f"- {e}" for e in errors])
 
-    return f"""你的上一次响应格式不正确，请按照以下要求重新生成：
+    return f"""你的上一次响应格式需要调整，请按照以下要求重新生成：
 
-## 错误信息
+## 需要修正的问题
+
 {errors_text}
 
 ## 正确格式要求
 
-你必须严格按照以下 JSON 格式返回：
+请严格按照以下 JSON 格式返回响应：
 
 ```json
 {{
-    "task_analysis": "思维链：1. 识别意图; 2. 预判数据风险; 3. 设计复合指令",
-    "execution_plan": "R1: [步骤描述]; R2: [步骤描述]",
+    "task_analysis": "[完整的思维链分析：需求理解、任务分解、风险预判、策略选择]",
+    "execution_plan": "R1: [步骤1]; R2: [步骤2]; R3: [步骤3]",
     "current_round": 1,
     "action": {{
         "type": "tool_call 或 complete",
         "content": "...",
-        "recommended_questions": ["问题1", "问题2"],  // 仅 type=complete 时可选
+        "recommended_questions": ["后续问题1", "后续问题2"],  // 仅 type=complete 时可选
         "download_links": ["文件1.xlsx"],  // 仅 type=complete 时可选
         "code_blocks": [  // 当需要提供代码时
             {{
@@ -489,19 +475,198 @@ def generate_retry_prompt(errors: List[str]) -> str:
 }}
 ```
 
-## 重要提醒
+## 关键要点
 
-1. **task_analysis**: 必须有深度，至少 10 个字符
-2. **execution_plan**: 必须包含 R1/R2 等轮次说明
+1. **task_analysis**: 展示完整思维链，包含需求理解、任务分解、策略选择
+2. **execution_plan**: 使用 R1/R2/R3 标记，明确每轮的具体目标
 3. **tool_call**: content 必须是数组，每个工具调用必须有 tool_name, tool_call_id, arguments
 4. **complete with code**:
-   - content 中放文字描述（不要包含代码块）
+   - content 中放文字描述（说明代码用途和使用方式）
    - code_blocks 中放代码，每个必须有 code_id, language, code
 
 请重新生成正确的响应。"""
 
 
+# ===== 代码引用处理 =====
+
+def extract_code_references(content: str) -> List[str]:
+    """
+    从内容中提取所有代码引用标识
+
+    Args:
+        content: 包含 <code_ref>code_id</code_ref> 标签的文本
+
+    Returns:
+        代码标识列表，按出现顺序排列
+
+    Example:
+        >>> content = "分析代码：<code_ref>code_sales</code_ref>"
+        >>> extract_code_references(content)
+        ['code_sales']
+    """
+    import re
+    pattern = r'<code_ref>\s*(code_[a-zA-Z0-9_]+)\s*</code_ref>'
+    matches = re.findall(pattern, content)
+    return matches
+
+
+def resolve_code_references(
+    content: str,
+    code_blocks: List[CodeBlock]
+) -> tuple[str, List[dict]]:
+    """
+    解析代码引用标签，返回处理后的内容和代码信息列表
+
+    Args:
+        content: 包含 <code_ref>code_id</code_ref> 标签的文本
+        code_blocks: 代码块列表
+
+    Returns:
+        (处理后的内容, 代码信息列表)
+        代码信息列表格式: [{"code_id": "...", "language": "...", "description": "...", "index": 0}, ...]
+        index 表示代码在内容中出现的顺序
+
+    Example:
+        >>> content = "分析代码：\\n\\n<code_ref>code_sales</code_ref>\\n\\n结果：..."
+        >>> code_blocks = [CodeBlock(code_id="code_sales", ...)]
+        >>> new_content, code_infos = resolve_code_references(content, code_blocks)
+        >>> # new_content 中 <code_ref> 被替换为占位符 {{CODE:0}}
+        >>> # code_infos 包含代码的元信息
+    """
+    import re
+
+    # 创建 code_id 到 code_block 的映射
+    code_map = {cb.code_id: cb for cb in code_blocks}
+
+    # 查找所有 <code_ref> 标签并记录位置
+    pattern = r'<code_ref>\s*(code_[a-zA-Z0-9_]+)\s*</code_ref>'
+    matches = list(re.finditer(pattern, content))
+
+    if not matches:
+        return content, []
+
+    code_infos = []
+    processed_content = content
+    offset = 0  # 用于处理替换后的位置偏移
+
+    for idx, match in enumerate(matches):
+        code_id = match.group(1)
+
+        if code_id not in code_map:
+            # 代码不存在，保留原标签并添加警告
+            continue
+
+        code_block = code_map[code_id]
+
+        # 记录代码信息
+        code_infos.append({
+            "code_id": code_id,
+            "language": code_block.language,
+            "description": code_block.description or code_id,
+            "index": idx
+        })
+
+        # 将标签替换为占位符
+        placeholder = f"{{{{CODE:{idx}}}}}"
+        start = match.start() + offset
+        end = match.end() + offset
+        processed_content = processed_content[:start] + placeholder + processed_content[end:]
+        offset += len(placeholder) - (end - start)
+
+    return processed_content, code_infos
+
+
+def extract_file_references(content: str) -> List[str]:
+    """
+    从内容中提取所有文件引用标识
+
+    Args:
+        content: 包含 <file_ref>file_id</file_ref> 标签的文本
+
+    Returns:
+        文件标识列表，按出现顺序排列
+
+    Example:
+        >>> content = "数据文件：<file_ref>upload_001</file_ref>"
+        >>> extract_file_references(content)
+        ['upload_001']
+    """
+    import re
+    pattern = r'<file_ref>\s*(upload_[a-zA-Z0-9_]+)\s*</file_ref>'
+    matches = re.findall(pattern, content)
+    return matches
+
+
+def resolve_file_references(
+    content: str,
+    file_list: List[dict]
+) -> tuple[str, List[dict]]:
+    """
+    解析文件引用标签，返回处理后的内容和文件信息列表
+
+    Args:
+        content: 包含 <file_ref>file_id</file_ref> 标签的文本
+        file_list: 文件信息列表
+
+    Returns:
+        (处理后的内容, 文件信息列表)
+        文件信息列表格式: [{"file_id": "...", "filename": "...", "file_type": "...", "index": 0}, ...]
+        index 表示文件在内容中出现的顺序
+
+    Example:
+        >>> content = "数据文件：\\n\\n<file_ref>upload_001</file_ref>\\n\\n分析：..."
+        >>> files = [{"file_id": "upload_001", "filename": "data.csv", ...}]
+        >>> new_content, file_infos = resolve_file_references(content, files)
+        >>> # new_content 中 <file_ref> 被替换为占位符 {{FILE:0}}
+        >>> # file_infos 包含文件的元信息
+    """
+    import re
+
+    # 创建 file_id 到文件信息的映射
+    file_map = {f["file_id"]: f for f in file_list}
+
+    # 查找所有 <file_ref> 标签并记录位置
+    pattern = r'<file_ref>\s*(upload_[a-zA-Z0-9_]+)\s*</file_ref>'
+    matches = list(re.finditer(pattern, content))
+
+    if not matches:
+        return content, []
+
+    file_infos = []
+    processed_content = content
+    offset = 0  # 用于处理替换后的位置偏移
+
+    for idx, match in enumerate(matches):
+        file_id = match.group(1)
+
+        if file_id not in file_map:
+            # 文件不存在，保留原标签并添加警告
+            continue
+
+        file_info = file_map[file_id]
+
+        # 记录文件信息
+        file_infos.append({
+            "file_id": file_id,
+            "filename": file_info["filename"],
+            "file_type": file_info["file_type"],
+            "size_bytes": file_info["size_bytes"],
+            "description": file_info.get("description", file_info["filename"]),
+            "index": idx
+        })
+
+        # 将标签替换为占位符
+        placeholder = f"{{{{FILE:{idx}}}}}"
+        start = match.start() + offset
+        end = match.end() + offset
+        processed_content = processed_content[:start] + placeholder + processed_content[end:]
+        offset += len(placeholder) - (end - start)
+
+    return processed_content, file_infos
+
+
 __all__ = [
+    "FileInfo",
     "StructuredResponse",
     "Action",
     "ToolCall",
@@ -511,4 +676,8 @@ __all__ = [
     "validate_structured_response",
     "generate_retry_prompt",
     "FINAL_REPORT_CONTENT_TYPES",
+    "extract_code_references",
+    "resolve_code_references",
+    "extract_file_references",
+    "resolve_file_references",
 ]
