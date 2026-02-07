@@ -53,10 +53,6 @@ try:
     SQLALCHEMY_AVAILABLE = True
 except ImportError:
     SQLALCHEMY_AVAILABLE = False
-    warnings.warn(
-        "SQLAlchemy 不可用，数据库查询工具将使用 mock 模式。"
-        "请安装: pip install sqlalchemy psycopg2-binary"
-    )
 
 # 类型提示（仅在类型检查时使用）
 if TYPE_CHECKING:
@@ -67,6 +63,7 @@ if TYPE_CHECKING:
 _engines: Dict[str, Any] = {}  # Store Engine objects when available
 _engines_lock = threading.Lock() if SQLALCHEMY_AVAILABLE else None
 _USE_MOCK = not SQLALCHEMY_AVAILABLE
+_SQLALCHEMY_WARNING_ISSUED = False  # 跟踪警告是否已发出
 
 
 def _get_engine(connection_name: str, db_config: Dict[str, Any]) -> Optional[Any]:
@@ -352,6 +349,15 @@ def query_database_impl(
 
     # 检查是否使用 mock 模式
     if _USE_MOCK:
+        # 只在第一次使用时发出警告（避免重复）
+        global _SQLALCHEMY_WARNING_ISSUED
+        if not _SQLALCHEMY_WARNING_ISSUED:
+            warnings.warn(
+                "SQLAlchemy 不可用，数据库查询工具将使用 mock 模式。"
+                "请安装: pip install sqlalchemy psycopg2-binary"
+            )
+            _SQLALCHEMY_WARNING_ISSUED = True
+
         # 使用 mock 数据（SQLAlchemy 不可用时）
         mock_rows, mock_columns = _generate_mock_result(query, max_rows)
         duration_ms = (time.time() - start_time) * 1000

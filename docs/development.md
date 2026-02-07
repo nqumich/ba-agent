@@ -333,6 +333,53 @@ class TestMemoryFlush:
 
 ---
 
+## 研究发现
+
+### LangChain 1.2.x API 变更
+**重要性**: ⚠️ 重要
+
+**问题**: LangChain 1.2.x 有重大 API 变更，旧 API 不再可用
+
+**解决方案**:
+```python
+# 新 API (LangChain 1.2.8+)
+from langchain.agents import create_agent
+from langchain_core.tools import StructuredTool, tool
+from langgraph.checkpoint.memory import MemorySaver
+
+memory = MemorySaver()
+agent = create_agent(model, tools, checkpointer=memory)
+```
+
+### Python 3.14 ARM64 兼容性
+**重要性**: ⚠️ 重要
+
+**问题**: Python 3.14 ARM64 暂不支持某些包 (如 chromadb)
+
+**解决方案**: 使用 Python 3.12
+
+### 三层记忆管理系统
+**重要性**: ✅ 核心设计
+
+**架构**: 基于 Clawdbot/Moltbot 的三层 Markdown 记忆
+
+| 层级 | 文件 | 内容 | 持久性 |
+|------|------|------|--------|
+| Layer 1 | `memory/YYYY-MM-DD.md` | 日常笔记、临时讨论 | 每日 |
+| Layer 2 | `MEMORY.md` | 长期知识、用户偏好 | 永久 |
+| Layer 3 | `CLAUDE.md`, `AGENTS.md` | 项目架构、系统指令 | 永久 |
+
+### 数据可视化方案
+**选择**: ECharts (通过 Gemini 3 Pro 生成代码)
+
+**原因**:
+- 交互性强
+- 中文支持好
+- 无需 Python 图表库
+- 适合 Web 应用
+
+---
+
 ## 相关文档
 
 - [README.md](README.md) - 快速开始
