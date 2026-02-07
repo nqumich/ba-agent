@@ -2,27 +2,27 @@
   "installed": {
     "skill_0": {
       "source_type": "zip",
-      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-187/test_multiple_skills0/skill_0.zip",
+      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-190/test_multiple_skills0/skill_0.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-08T00:19:34.317102"
+      "installed_at": "2026-02-08T01:48:56.785311"
     },
     "skill_1": {
       "source_type": "zip",
-      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-187/test_multiple_skills0/skill_1.zip",
+      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-190/test_multiple_skills0/skill_1.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-08T00:19:34.319339"
+      "installed_at": "2026-02-08T01:48:56.787924"
     },
     "skill_2": {
       "source_type": "zip",
-      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-187/test_multiple_skills0/skill_2.zip",
+      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-190/test_multiple_skills0/skill_2.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-08T00:19:34.321624"
+      "installed_at": "2026-02-08T01:48:56.790681"
     },
     "nested_skill": {
       "source_type": "zip",
@@ -42,12 +42,12 @@
     },
     "external_skill": {
       "source_type": "zip",
-      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-187/test_built_in_and_external_ski0/external_skill.zip",
+      "location": "/private/var/folders/sq/w6vq23nd1n1cx6shxzwq1qyc0000gn/T/pytest-of-qini/pytest-190/test_built_in_and_external_ski0/external_skill.zip",
       "subdirectory": null,
       "ref": null,
       "sha": null,
-      "installed_at": "2026-02-08T00:19:34.386465"
+      "installed_at": "2026-02-08T01:48:56.850459"
     }
   },
-  "last_update": "2026-02-08T00:19:34.386470"
+  "last_update": "2026-02-08T01:48:56.850464"
 }

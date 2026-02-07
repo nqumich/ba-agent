@@ -1,7 +1,8 @@
 # BA-Agent API 文档
 
-> **Version**: v2.2.0
+> **Version**: v2.3.0
 > **Base URL**: `http://localhost:8000`
+> **Last Updated**: 2026-02-08
 
 BA-Agent REST API 提供文件管理、Agent 交互、Skills 管理、用户认证等功能。
 
@@ -382,3 +383,35 @@ X-RateLimit-User-Limit: 120
 | user | user123 | user | read, write |
 
 ⚠️ **生产环境必须修改默认密码！**
+
+---
+
+## 内部架构 (v2.3.0)
+
+### 上下文协调机制
+
+**ContextCoordinator** 是 v2.3.0 新增的协调层，负责统一协调 LangGraph、ContextManager 和 Memory Flush 的交互。
+
+**核心功能**：
+- 准备发送给 LLM 的消息列表
+- 协调文件清理和上下文构建
+- 确保系统提示在第一位
+- 保持消息顺序
+
+**文件清理统一入口**：
+- 所有文件内容清理通过 `ContextCoordinator.prepare_messages()`
+- 委托给 `ContextManager.clean_langchain_messages()` 执行
+- 清理超过 2000 字符的文件内容，替换为梗概
+
+### 相关文件
+
+| 文件 | 说明 |
+|------|------|
+| backend/api/services/ba_agent.py | BAAgentService 服务类 |
+| backend/agents/agent.py | BAAgent 主实现 |
+| backend/core/context_coordinator.py | 上下文协调器 (v2.3.0 新增) |
+| backend/core/context_manager.py | 上下文管理器 |
+| docs/context-management.md | 上下文管理详细文档 |
+| docs/response-flow.md | 响应格式流转文档 |
+
+---

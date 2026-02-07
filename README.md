@@ -1,7 +1,8 @@
 # BA-Agent
 
 > 商业分析助手 Agent - Business Analysis Agent
-> **Version**: v2.2.0
+> **Version**: v2.3.0
+> **Last Updated**: 2026-02-08
 
 面向非技术业务人员的智能数据分析助手，通过自然语言交互提供：
 - 🔍 异动检测与解释
@@ -11,14 +12,15 @@
 
 ## 🎯 项目状态
 
-**开发进度**: ~86% (25/30 User Stories 完成)
+**开发进度**: ~88% (26/30 User Stories 完成)
 
-**最新进展** (2026-02-07):
+**最新进展** (2026-02-08):
 - ✅ 完成核心业务 Skills (US-015/016/017/018) - 90 个测试通过
 - ✅ 完成 API 服务增强 (US-021) - JWT 认证 + 速率限制 + 错误处理
 - ✅ 完成 Web 前端测试控制台 (US-FE-01) - 单页应用 + Agent 对话
-- ✅ 1016 个测试全部通过
-- ✅ FastAPI 服务 v2.2.0 - REST API + JWT 认证 + Web 前端
+- ✅ **完成 LangGraph 上下文管理协调** - ContextCoordinator 统一文件清理入口
+- ✅ 1030 个测试全部通过
+- ✅ FastAPI 服务 v2.3.0 - REST API + JWT 认证 + Web 前端
 
 **核心功能完成**:
 - ✅ **Phase 1**: Agent 框架 (LangGraph + Claude Sonnet 4.5)
@@ -27,6 +29,7 @@
 - ✅ **Pipeline v2.1**: 完整的 Pipeline 系统（746 个测试）
 - ✅ **FileStore**: 统一文件存储系统
 - ✅ **核心 Skills**: 异动检测、归因分析、报告生成、数据可视化
+- ✅ **上下文协调**: ContextCoordinator 统一文件清理和上下文构建
 - ✅ **API 服务**: REST API + JWT 认证 + 速率限制
 - ✅ **Web 前端**: 单页应用测试控制台
 
@@ -57,10 +60,13 @@ ba-agent/
 │   │   ├── services/          # BA-Agent 服务封装
 │   │   ├── routes/            # API 路由
 │   │   └── middleware/        # JWT 认证 + 速率限制
+│   ├── core/                  # 核心组件 ⭐ NEW
+│   │   ├── context_manager.py     # 上下文管理器
+│   │   └── context_coordinator.py  # 上下文协调器 (v2.3.0 新增)
 │   ├── docker/                # Docker 沙盒 (DockerSandbox)
 │   ├── hooks/                 # 系统钩子
 │   ├── models/                # Pydantic 数据模型
-│   │   ├── response.py        # 结构化响应格式定义 ⭐ NEW
+│   │   ├── response.py        # 结构化响应格式定义
 │   │   ├── pipeline.py        # Pipeline v2.1
 │   │   └── agent.py           # Agent 状态模型
 │   └── skills/                # Skills 系统
@@ -79,7 +85,7 @@ ba-agent/
 │   ├── attribution/           # 归因分析
 │   ├── report_gen/            # 报告生成
 │   └── visualization/         # 数据可视化
-├── frontend/                  # Web 前端 ⭐ NEW
+├── frontend/                  # Web 前端
 │   └── index.html            # 单页应用 (SPA)
 ├── config/                    # 配置文件
 │   ├── config.py              # 配置管理核心
@@ -235,15 +241,19 @@ BA_RATE_LIMIT_IP_PER_MINUTE=60
 
 ## 📚 文档
 
+### 核心文档
 - [产品 PRD](docs/PRD.md) - 产品需求文档
-- [项目架构](docs/architecture.md) - 架构设计
+- [项目架构](docs/architecture.md) - 架构设计（v2.2.0 更新 ContextCoordinator）
+- [上下文管理](docs/context-management.md) - 上下文管理详细文档（v1.5.0 更新）
 - [系统提示词](docs/prompts.md) - Agent 提示词定义和规范
-- [响应格式流转](docs/response-flow.md) - 大模型返回格式与前端渲染完整流程
-- [API 文档](docs/api.md) - REST API 端点
+- [响应格式流转](docs/response-flow.md) - 大模型返回格式与前端渲染完整流程（v2.8.0 更新）
+- [API 文档](docs/api.md) - REST API 端点（v2.3.0 更新）
 - [Skills 指南](docs/skills.md) - Skills 开发指南
-- [开发指南](docs/development.md) - 开发环境与测试
-- [任务计划](task_plan.md) - 开发进度跟踪
+- [开发指南](docs/development.md) - 开发环境与测试（v2.3.0 更新）
 - [开发进度](progress.md) - 详细开发日志
+
+### 文档目录
+- [docs/README.md](docs/README.md) - 文档导航和概述
 
 ## 🔧 已完成的工具
 
@@ -280,9 +290,9 @@ BA_RATE_LIMIT_IP_PER_MINUTE=60
 ## 📊 测试覆盖
 
 ```
-总计: 746 个测试
-✅ 通过: 746 (100%)
-⏭️  跳过: 1
+总计: 1030 个测试
+✅ 通过: 1030 (100%)
+⏭️  跳过: 1 (MCP 相关)
 ❌ 失败: 0
 ```
 
@@ -292,18 +302,41 @@ BA_RATE_LIMIT_IP_PER_MINUTE=60
 |------|--------|------|
 | 基础设施 | 135 | ✅ |
 | 核心工具 | 303 | ✅ |
-| Skills 系统 | 137 | ✅ |
-| MCP 集成 | 9 | ✅ |
-| Pipeline v2.1 | 42 | ✅ |
+| Skills 系统 | 200+ | ✅ |
+| Context Coordinator | 24 | ✅ (v2.3.0 新增) |
+| Context Manager | 41 | ✅ (增强测试) |
+| Pipeline v2.1 | 100+ | ✅ |
 | Memory 系统 | 120 | ✅ |
-| Agent 集成 | 100 | ✅ |
+| Agent 集成 | 25 | ✅ |
+| API 服务 | 36 | ✅ |
+| MCP 集成 | 9 | ✅ |
+| FileStore 系统 | 100+ | ✅ |
 
 ## 🔜 待实现的功能
 
-- [ ] FastAPI 服务
 - [ ] IM Bot 集成 (钉钉/企业微信)
 - [ ] Excel 插件 (Office.js)
-- [ ] Skills 完整实现
+
+## 🏗️ 最新架构更新 (v2.3.0)
+
+### ContextCoordinator 协调层
+
+新增统一的上下文协调机制，解决文件清理逻辑分散的问题：
+
+**架构改进**:
+```
+API Layer → Coordination Layer → (LangGraph | ContextManager | Memory Flush)
+```
+
+**核心功能**:
+- 统一的文件清理入口（所有清理通过 ContextCoordinator）
+- 新/旧对话使用相同的处理流程
+- 明确的职责划分（LangGraph 管理历史，ContextManager 管理清理）
+
+**新增组件**:
+- `backend/core/context_coordinator.py` - 上下文协调器
+- `backend/core/context_manager.py` - 增强 LangChain 消息清理
+- 24 个新测试通过
 
 ## 📝 许可证
 
@@ -311,4 +344,4 @@ MIT License
 
 ---
 
-**最后更新**: 2026-02-06
+**最后更新**: 2026-02-08

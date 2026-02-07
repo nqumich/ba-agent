@@ -152,8 +152,8 @@ async def get_file_metadata(
             category=FileCategory.UPLOAD
         )
 
-        # 检查文件是否存在
-        metadata = file_store.uploads.get_metadata(file_id)
+        # 检查文件是否存在并获取元数据
+        metadata = file_store.uploads.get_file_metadata(file_id)
 
         if not metadata:
             raise HTTPException(status_code=404, detail=f"文件未找到: {file_id}")
@@ -181,11 +181,21 @@ async def download_file(
     try:
         file_store = get_file_store()
 
-        # 从 UploadStore 读取文件
-        content, filename = file_store.uploads.read(file_id)
+        # 创建 FileRef 并读取文件
+        file_ref = FileRef(
+            file_id=file_id,
+            category=FileCategory.UPLOAD
+        )
 
-        if not content:
+        # 使用 retrieve 方法读取文件内容
+        content = file_store.uploads.retrieve(file_ref)
+
+        if content is None:
             raise HTTPException(status_code=404, detail=f"文件未找到: {file_id}")
+
+        # 从元数据获取文件名
+        metadata = file_store.uploads.get_file_metadata(file_id)
+        filename = metadata.get("filename", file_id) if metadata else file_id
 
         # 返回文件
         return StreamingResponse(
@@ -234,7 +244,13 @@ async def list_files(
         else:
             # 列出所有文件（这里简化为只列出上传文件）
             store = file_store.uploads
-            files = store.list_files()
+            # 使用 list_session_files 获取更方便的格式
+            upload_files = store.list_session_files(session_id=session_id, limit=limit)
+
+            return FileListResponse(data={
+                "total": len(upload_files),
+                "files": upload_files
+            })
 
         # 过滤和限制
         if session_id:
@@ -243,16 +259,16 @@ async def list_files(
         files = files[:limit]
 
         # 构建响应
-        file_list = [
-            {
-                "file_id": f.file_id,
-                "filename": f.metadata.get("filename", f.file_id),
-                "size": f.size_bytes,
-                "session_id": f.session_id,
-                "created_at": f.metadata.get("created_at")
-            }
-            for f in files
-        ]
+        file_list = []
+        for f in files:
+            # FileMetadata 对象，需要从 file_ref 和 filename 字段获取信息
+            file_list.append({
+                "file_id": f.file_ref.file_id,
+                "filename": f.filename,
+                "size": f.file_ref.size_bytes,
+                "session_id": f.file_ref.session_id,
+                "created_at": f.created_at.isoformat() if f.created_at else None
+            })
 
         return FileListResponse(data={
             "total": len(file_list),
@@ -280,8 +296,13 @@ async def delete_file(
     try:
         file_store = get_file_store()
 
-        # 从 UploadStore 删除文件
-        success = file_store.uploads.delete(file_id)
+        # 创建 FileRef 并删除文件
+        file_ref = FileRef(
+            file_id=file_id,
+            category=FileCategory.UPLOAD
+        )
+
+        success = file_store.uploads.delete(file_ref)
 
         if not success:
             raise HTTPException(status_code=404, detail=f"文件未找到: {file_id}")

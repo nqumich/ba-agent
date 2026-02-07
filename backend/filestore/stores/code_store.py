@@ -143,7 +143,8 @@ class CodeStore(IndexableStore, WriteableStore):
             hash=content_hash,
             mime_type="text/x-python",
             session_id=session_id,
-            metadata=metadata
+            metadata=metadata,
+            expires_at=None  # 代码文件不过期
         )
 
         return FileRef(

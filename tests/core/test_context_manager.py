@@ -316,3 +316,158 @@ class TestContextManagerOldMethodsRemoved:
         assert not hasattr(manager, "CODE_BLOCK_START")
         assert not hasattr(manager, "CODE_BLOCK_END")
         assert not hasattr(manager, "CODE_BLOCK_PATTERN")
+
+
+class TestContextManagerLangChainMessages:
+    """测试 LangChain 消息清理功能（新增）"""
+
+    def test_clean_langchain_messages_empty(self):
+        """测试空消息列表"""
+        manager = ContextManager()
+
+        result = manager.clean_langchain_messages([])
+
+        assert result == []
+
+    def test_clean_langchain_messages_small_content(self):
+        """测试小内容消息（不需要清理）"""
+        from langchain_core.messages import HumanMessage, AIMessage
+
+        manager = ContextManager()
+        messages = [
+            HumanMessage(content="Hello"),
+            AIMessage(content="Hi there")
+        ]
+
+        result = manager.clean_langchain_messages(messages)
+
+        assert len(result) == 2
+        assert result[0].content == "Hello"
+        assert result[1].content == "Hi there"
+
+    def test_clean_langchain_messages_large_content(self):
+        """测试大内容消息的清理"""
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        manager = ContextManager()
+
+        # 创建超过阈值的内容
+        large_content = "A" * 3000
+        messages = [
+            HumanMessage(content="User message"),
+            AIMessage(content=large_content)
+        ]
+
+        result = manager.clean_langchain_messages(messages)
+
+        assert len(result) == 2
+        assert result[0].content == "User message"
+        # 大内容应该被清理
+        assert "[大文件内容已清理" in result[1].content
+        assert "原始 3000 字符" in result[1].content
+
+    def test_clean_langchain_messages_preserves_id(self):
+        """测试保留消息 ID"""
+        from langchain_core.messages import AIMessage
+
+        manager = ContextManager()
+
+        msg = AIMessage(content="A" * 3000, id="msg_123")
+        result = manager.clean_langchain_messages([msg])
+
+        assert len(result) == 1
+        assert result[0].id == "msg_123"
+
+    def test_clean_langchain_messages_preserves_tool_calls(self):
+        """测试保留 AIMessage 的 tool_calls"""
+        from langchain_core.messages import AIMessage
+
+        manager = ContextManager()
+
+        tool_calls = [{"name": "test_tool", "args": {}, "id": "call_123"}]
+        msg = AIMessage(content="A" * 3000, tool_calls=tool_calls)
+        result = manager.clean_langchain_messages([msg])
+
+        assert len(result) == 1
+        # tool_calls 应该被保留（LangChain 会添加 type 字段）
+        assert len(result[0].tool_calls) == 1
+        assert result[0].tool_calls[0]["name"] == "test_tool"
+        assert result[0].tool_calls[0]["id"] == "call_123"
+
+    def test_clean_langchain_messages_tool_message(self):
+        """测试 ToolMessage 的清理"""
+        from langchain_core.messages import ToolMessage
+
+        manager = ContextManager()
+
+        msg = ToolMessage(
+            content="B" * 3000,
+            tool_call_id="call_read_file_123",
+            name="read_file"
+        )
+        result = manager.clean_langchain_messages([msg])
+
+        assert len(result) == 1
+        assert isinstance(result[0], ToolMessage)
+        assert "[大文件内容已清理" in result[0].content
+        assert result[0].tool_call_id == "call_read_file_123"
+        assert result[0].name == "read_file"
+
+    def test_generate_content_summary(self):
+        """测试内容梗概生成"""
+        manager = ContextManager()
+
+        # 短内容
+        content = "Short content"
+        summary = manager._generate_content_summary(content)
+        assert "原始 13 字符" in summary
+        assert "Short content" in summary
+
+        # 长内容（多行）
+        long_content = "\n".join(["Line " + str(i) for i in range(100)])
+        summary = manager._generate_content_summary(long_content)
+        assert "原始" in summary
+        assert "预览:" in summary
+        assert "Line 0" in summary
+
+    def test_format_size(self):
+        """测试文件大小格式化"""
+        manager = ContextManager()
+
+        assert manager._format_size(100) == "100.0B"
+        assert manager._format_size(1024) == "1.0KB"
+        assert manager._format_size(1024 * 1024) == "1.0MB"
+        assert manager._format_size(1024 * 1024 * 1024) == "1.0GB"
+
+    def test_custom_threshold(self):
+        """测试自定义阈值"""
+        from langchain_core.messages import AIMessage
+
+        manager = ContextManager()
+
+        # 使用较小的阈值
+        messages = [AIMessage(content="A" * 1000)]
+        result = manager.clean_langchain_messages(messages, content_threshold=500)
+
+        assert "[大文件内容已清理" in result[0].content
+        assert "原始 1000 字符" in result[0].content
+
+    def test_multiple_large_messages(self):
+        """测试多个大消息的清理"""
+        from langchain_core.messages import AIMessage
+
+        manager = ContextManager()
+
+        messages = [
+            AIMessage(content="A" * 3000),
+            AIMessage(content="B" * 4000),
+            AIMessage(content="C" * 500),
+        ]
+
+        result = manager.clean_langchain_messages(messages)
+
+        assert len(result) == 3
+        assert "[大文件内容已清理" in result[0].content
+        assert "[大文件内容已清理" in result[1].content
+        # 第三条消息应该保持原样（小于默认阈值）
+        assert result[2].content == "C" * 500

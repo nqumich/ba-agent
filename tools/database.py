@@ -24,6 +24,7 @@ v3.0 变更 (2026-02-07)：
 import os
 import re
 import time
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from pydantic import BaseModel, Field, field_validator
@@ -227,95 +228,142 @@ def _execute_sqlite_query(
     tool_call_id = f"call_query_database_{int(time.time() * 1000)}"
     start_time = time.time()
 
+    # 获取配置的超时时间（默认 30 秒）
     try:
-        conn = _get_sqlite_connection(connection_name)
-        cursor = conn.cursor()
+        config = get_config()
+        if hasattr(config, 'database') and hasattr(config.database, 'security'):
+            query_timeout = config.database.security.query_timeout
+        else:
+            query_timeout = 30
+    except:
+        query_timeout = 30
 
-        # 安全检查：只允许 SELECT 和 WITH 语句
-        query_upper = query.strip().upper()
-        if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
-            return ToolExecutionResult(
+    # 使用线程和超时来执行查询
+    result_container = {"result": None, "error": None}
+    execution_complete = threading.Event()
+
+    def _execute_with_timeout():
+        try:
+            conn = _get_sqlite_connection(connection_name)
+            cursor = conn.cursor()
+
+            # 安全检查：只允许 SELECT 和 WITH 语句
+            query_upper = query.strip().upper()
+            if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
+                result_container["error"] = ToolExecutionResult(
+                    tool_call_id=tool_call_id,
+                    tool_name="query_database",
+                    observation=f"错误: 仅支持 SELECT 和 WITH 查询，不允许修改数据的操作",
+                    output_level=OutputLevel.STANDARD,
+                    success=False,
+                    error_type="SecurityError",
+                    error_message="仅允许只读查询",
+                    duration_ms=int((time.time() - start_time) * 1000),
+                    cache_policy=ToolCachePolicy.NO_CACHE,
+                )
+                execution_complete.set()
+                return
+
+            # 执行查询
+            cursor.execute(query)
+
+            # 获取结果
+            rows = cursor.fetchmany(max_rows)
+            row_count = len(rows)
+
+            # 获取列名
+            if rows:
+                columns = list(rows[0].keys())
+            else:
+                columns = []
+                # 尝试从 cursor.description 获取列名
+                if cursor.description:
+                    columns = [col[0] for col in cursor.description]
+
+            # 格式化结果
+            formatted_rows = []
+            for row in rows:
+                formatted_rows.append([str(v) if v is not None else "" for v in row])
+
+            # 构建观察结果
+            observation = f"查询成功，返回 {row_count} 行"
+
+            if row_count > 0:
+                observation += f"\n\n列: {', '.join(columns)}\n\n"
+                for i, row in enumerate(formatted_rows[:10]):  # 最多显示 10 行
+                    observation += f"第 {i+1} 行: {row}\n"
+                if row_count > 10:
+                    observation += f"\n... 还有 {row_count - 10} 行"
+
+            result_container["result"] = ToolExecutionResult(
                 tool_call_id=tool_call_id,
                 tool_name="query_database",
-                observation=f"错误: 仅支持 SELECT 和 WITH 查询，不允许修改数据的操作",
+                observation=observation,
                 output_level=OutputLevel.STANDARD,
-                success=False,
-                error_type="SecurityError",
-                error_message="仅允许只读查询",
+                success=True,
+                data={
+                    "rows": formatted_rows,
+                    "columns": columns,
+                    "row_count": row_count
+                },
                 duration_ms=int((time.time() - start_time) * 1000),
                 cache_policy=ToolCachePolicy.NO_CACHE,
             )
+        except Exception as e:
+            result_container["error"] = ToolExecutionResult(
+                tool_call_id=tool_call_id,
+                tool_name="query_database",
+                observation=f"查询执行失败: {str(e)}",
+                output_level=OutputLevel.STANDARD,
+                success=False,
+                error_type=type(e).__name__,
+                error_message=str(e),
+                duration_ms=int((time.time() - start_time) * 1000),
+                cache_policy=ToolCachePolicy.NO_CACHE,
+            )
+        finally:
+            execution_complete.set()
 
-        # 执行查询
-        cursor.execute(query)
+    # 启动执行线程
+    thread = threading.Thread(target=_execute_with_timeout, daemon=True)
+    thread.start()
 
-        # 获取结果
-        rows = cursor.fetchmany(max_rows)
-        row_count = len(rows)
+    # 等待执行完成或超时
+    thread.join(timeout=query_timeout)
 
-        # 获取列名
-        if rows:
-            columns = list(rows[0].keys())
-        else:
-            columns = []
-            # 尝试从 cursor.description 获取列名
-            if cursor.description:
-                columns = [col[0] for col in cursor.description]
-
-        # 格式化结果
-        formatted_rows = []
-        for row in rows:
-            formatted_rows.append([str(v) if v is not None else "" for v in row])
-
-        # 构建观察结果
-        observation = f"查询成功，返回 {row_count} 行"
-
-        if row_count > 0:
-            observation += f"\n\n列: {', '.join(columns)}\n\n"
-            for i, row in enumerate(formatted_rows[:10]):  # 最多显示 10 行
-                observation += f"第 {i+1} 行: {row}\n"
-            if row_count > 10:
-                observation += f"\n... 还有 {row_count - 10} 行"
-
+    if not execution_complete.is_set():
+        # 查询超时
         return ToolExecutionResult(
             tool_call_id=tool_call_id,
             tool_name="query_database",
-            observation=observation,
-            output_level=OutputLevel.STANDARD,
-            success=True,
-            data={
-                "rows": formatted_rows,
-                "columns": columns,
-                "row_count": row_count
-            },
-            duration_ms=int((time.time() - start_time) * 1000),
-            cache_policy=ToolCachePolicy.NO_CACHE,
-        )
-
-    except sqlite3.Error as e:
-        return ToolExecutionResult(
-            tool_call_id=tool_call_id,
-            tool_name="query_database",
-            observation=f"数据库查询失败: {str(e)}",
+            observation=f"查询超时（超过 {query_timeout} 秒）。请优化查询或减少数据量。",
             output_level=OutputLevel.STANDARD,
             success=False,
-            error_type="DatabaseError",
-            error_message=str(e),
-            duration_ms=int((time.time() - start_time) * 1000),
+            error_type="TimeoutError",
+            error_message=f"The read operation timed out after {query_timeout} seconds",
+            duration_ms=query_timeout * 1000,
             cache_policy=ToolCachePolicy.NO_CACHE,
         )
-    except Exception as e:
-        return ToolExecutionResult(
-            tool_call_id=tool_call_id,
-            tool_name="query_database",
-            observation=f"查询执行失败: {str(e)}",
-            output_level=OutputLevel.STANDARD,
-            success=False,
-            error_type=type(e).__name__,
-            error_message=str(e),
-            duration_ms=int((time.time() - start_time) * 1000),
-            cache_policy=ToolCachePolicy.NO_CACHE,
-        )
+
+    # 检查执行结果
+    if result_container["error"]:
+        return result_container["error"]
+
+    if result_container["result"]:
+        return result_container["result"]
+
+    # 不应该到这里，但作为后备
+    return ToolExecutionResult(
+        tool_call_id=tool_call_id,
+        tool_name="query_database",
+        observation=f"查询执行失败: 未知错误",
+        output_level=OutputLevel.STANDARD,
+        success=False,
+        error_type="UnknownError",
+        error_message="查询执行失败，未知错误",
+        duration_ms=int((time.time() - start_time) * 1000),
+        cache_policy=ToolCachePolicy.NO_CACHE,
+    )
 
 
 def _execute_postgresql_query(

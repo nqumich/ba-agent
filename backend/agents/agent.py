@@ -53,6 +53,9 @@ from backend.pipeline import (
     AdvancedContextManager,
     CompressionMode,
 )
+# NEW: Context Coordinator integration
+from backend.core.context_coordinator import create_context_coordinator
+from backend.core.context_manager import create_context_manager
 
 logger = logging.getLogger(__name__)
 
@@ -114,11 +117,16 @@ class BAAgent:
         # 初始化系统提示词
         self.system_prompt = system_prompt or self._get_default_system_prompt()
 
-        # 创建 Agent
-        self.agent = self._create_agent()
-
         # 初始化检查点保存器（用于对话历史）
-        self.memory = MemorySaver()
+        # 使用全局共享的 MemorySaver（从 BAAgentService 获取）
+        # 如果没有提供，则创建新的
+        if hasattr(self, '_memory') and self._memory is not None:
+            self.memory = self._memory
+        else:
+            self.memory = MemorySaver()
+
+        # 创建 Agent（现在可以使用 self.memory）
+        self.agent = self._create_agent()
 
         # 初始化 Memory Flush
         self.memory_flush = self._init_memory_flush()
@@ -149,6 +157,11 @@ class BAAgent:
             llm_summarizer=self.llm,  # 复用现有 LLM 用于 SUMMARIZE 模式
             token_counter=self.token_counter,  # 共享 token counter
         )
+
+        # NEW: 初始化 Context Coordinator (统一文件清理和上下文准备)
+        # 使用基础 ContextManager，而不是 AdvancedContextManager
+        self._basic_context_manager = create_context_manager(file_store=None)
+        self._context_coordinator = create_context_coordinator(self._basic_context_manager)
 
         # Active skill context modifier tracking
         self._active_skill_context: Dict[str, Any] = {}
@@ -1015,8 +1028,12 @@ class BAAgent:
         tool_node = ToolNode(self.tools)
 
         # 定义 Agent 状态类型
+        # 使用 Annotated 指定 messages 字段应该使用追加模式（append）而不是替换模式
+        from typing import Annotated
+        from operator import add
+
         class AgentState(TypedDict):
-            messages: Sequence[BaseMessage]
+            messages: Annotated[Sequence[BaseMessage], add]
             next: str  # "agent" 或 "end"
 
         def should_continue(state: AgentState) -> str:
@@ -1119,8 +1136,20 @@ class BAAgent:
             调用 LLM 进行决策
 
             输入包含系统提示词和用户消息
+
+            重要：只返回新增的消息（AI 响应），而不是完整的消息列表
+            这样 LangGraph 会将其追加到现有状态，而不是替换
+
+            注意：文件内容清理通过 ContextCoordinator 统一处理
             """
             messages = list(state["messages"])
+
+            # 使用 ContextCoordinator 清理大文件内容
+            # 这样确保文件清理逻辑统一在 ContextManager 中
+            messages = self._context_coordinator.prepare_messages(
+                messages,
+                session_id=getattr(self, '_current_session_id', None)
+            )
 
             # 确保第一条消息是系统提示词
             if not messages or not isinstance(messages[0], SystemMessage):
@@ -1128,7 +1157,9 @@ class BAAgent:
 
             # 调用 LLM
             response = self.llm.invoke(messages)
-            return {"messages": messages + [response]}
+
+            # 只返回新增的 AI 响应，让 LangGraph 追加到状态
+            return {"messages": [response]}
 
         # 构建图
         workflow = StateGraph(AgentState)
@@ -1158,8 +1189,8 @@ class BAAgent:
         # 转换后回到 agent（会触发工具调用）
         workflow.add_edge("convert_to_tool_call", "agent")
 
-        # 编译图
-        app = workflow.compile()
+        # 编译图，使用 checkpointer 保存对话历史
+        app = workflow.compile(checkpointer=self.memory)
 
         return app
 
@@ -1191,6 +1222,8 @@ class BAAgent:
         conversation_id: Optional[str] = None,
         user_id: Optional[str] = None,
         config: Optional[RunnableConfig] = None,
+        session_id: Optional[str] = None,
+        file_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         调用 Agent
@@ -1200,10 +1233,16 @@ class BAAgent:
             conversation_id: 对话 ID
             user_id: 用户 ID
             config: 可选的运行配置
+            session_id: 会话 ID（用于代码列表，传递给 ContextCoordinator）
+            file_context: 文件上下文（可选，用于文件上下文处理）
 
         Returns:
             Agent 响应结果
         """
+        # 保存 session_id 供 ContextCoordinator 使用
+        if session_id is not None:
+            self._current_session_id = session_id
+
         # 生成 ID（如果未提供）
         if conversation_id is None:
             conversation_id = f"conv_{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -1211,6 +1250,8 @@ class BAAgent:
             user_id = "user_default"
 
         # 准备输入消息
+        # 注意：如果 file_context 存在，需要将其添加到消息中
+        # 这里暂时不做处理，由 BAAgentService 层处理
         messages = [HumanMessage(content=message)]
 
         # 准备配置
@@ -1220,12 +1261,26 @@ class BAAgent:
         # 添加线程 ID 用于记忆
         config["configurable"] = {"thread_id": conversation_id}
 
-        # 调用 Agent
+        # 调用 Agent（LangGraph 会自动从 checkpointer 加载历史）
         try:
+            # 调试：检查 checkpointer 中是否有现有状态
+            existing_state = self.agent.get_state(config)
+            if existing_state and existing_state.values:
+                existing_messages = existing_state.values.get("messages", [])
+                if existing_messages:
+                    logger.info(f"[BAAgent.invoke] conversation_id={conversation_id}, 从 checkpointer 加载了 {len(list(existing_messages))} 条历史消息")
+
+            # 直接调用 invoke，LangGraph 会自动处理 checkpointer 中的历史
             result = self.agent.invoke(
                 {"messages": messages},
                 config,
             )
+
+            # 调试：检查 invoke 后的状态
+            new_state = self.agent.get_state(config)
+            if new_state and new_state.values:
+                new_messages = new_state.values.get("messages", [])
+                logger.info(f"[BAAgent.invoke] invoke 后共有 {len(list(new_messages))} 条消息")
 
             # 检查是否有 skill 激活结果
             skill_result = self._extract_skill_activation_result(result)
@@ -1258,6 +1313,10 @@ class BAAgent:
             # 提取响应
             response = self._extract_response(result)
 
+            # 清理临时状态
+            if hasattr(self, '_current_session_id'):
+                delattr(self, '_current_session_id')
+
             return {
                 "conversation_id": conversation_id,
                 "user_id": user_id,
@@ -1270,6 +1329,10 @@ class BAAgent:
             }
 
         except Exception as e:
+            # 清理临时状态
+            if hasattr(self, '_current_session_id'):
+                delattr(self, '_current_session_id')
+
             return {
                 "conversation_id": conversation_id,
                 "user_id": user_id,

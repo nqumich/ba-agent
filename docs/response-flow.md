@@ -1,7 +1,7 @@
 # BA-Agent 响应格式流转文档
 
-> **Version**: v2.7.0
-> **Last Updated**: 2026-02-07
+> **Version**: v2.8.0
+> **Last Updated**: 2026-02-08
 
 本文档详细描述 BA-Agent 从大模型返回到前端渲染的完整数据流转过程。
 
@@ -88,6 +88,8 @@
 代码块保存（如果包含 code_blocks）
     ↓
 上下文清理（减少 token 使用）
+    ├─ ContextCoordinator.prepare_messages()
+    └─ ContextManager.clean_langchain_messages()
     ↓
 构建 API 响应
     ↓
@@ -496,6 +498,8 @@
 | backend/api/services/ba_agent.py | 响应解析和处理逻辑 |
 | backend/filestore/stores/code_store.py | 代码文件存储管理 |
 | backend/core/context_manager.py | 上下文管理器 |
+| backend/core/context_coordinator.py | 上下文协调器（v2.8.0 新增） |
+| backend/agents/agent.py | BAAgent 主实现，集成 ContextCoordinator |
 | docs/prompts.md | 系统提示词定义 |
 | docs/context-management.md | 上下文管理详细文档 |
 
@@ -648,6 +652,7 @@
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v2.8.0 | 2026-02-08 | 添加 ContextCoordinator 协调层；统一文件清理入口；更新消息处理流程 |
 | v2.7.0 | 2026-02-07 | 移除自动代码注入机制，改用模型主动调用 file_reader；添加文件读取后内容清理为梗概的机制 |
 | v2.6.0 | 2026-02-07 | 补充完整工具参数 JSON 格式规范，包含参数表格和示例 |
 | v2.5.0 | 2026-02-07 | 添加统一文件列表机制（代码+上传）、file_ref 标签处理、markdown 格式文件列表 |

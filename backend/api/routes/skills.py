@@ -202,6 +202,74 @@ async def get_skill_categories():
         )
 
 
+@router.get("/preferences")
+async def get_skills_preferences():
+    """
+    获取用户 Skills 偏好设置
+    """
+    try:
+        import json
+        from pathlib import Path
+
+        prefs_file = Path("config/skills_preferences.json")
+
+        if not prefs_file.exists():
+            return SkillsListResponse(data={
+                "enabled_skills": [],
+                "total": 0
+            })
+
+        with open(prefs_file, "r", encoding="utf-8") as f:
+            prefs = json.load(f)
+
+        return SkillsListResponse(data={
+            "enabled_skills": prefs.get("enabled_skills", []),
+            "total": len(prefs.get("enabled_skills", []))
+        })
+
+    except Exception as e:
+        logger.error(f"获取 Skills 偏好失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"获取失败: {str(e)}"
+        )
+
+
+@router.post("/preferences")
+async def save_skills_preferences(request: Dict[str, Any]):
+    """
+    保存用户 Skills 偏好设置
+
+    - enabled_skills: 用户选择启用的 Skills 列表
+    """
+    try:
+        enabled_skills = request.get("enabled_skills", [])
+
+        # 保存到文件（简单实现）
+        import json
+        from pathlib import Path
+
+        prefs_file = Path("config/skills_preferences.json")
+        prefs_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(prefs_file, "w", encoding="utf-8") as f:
+            json.dump({"enabled_skills": enabled_skills}, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"保存 Skills 偏好: {len(enabled_skills)} 个已启用")
+
+        return SkillsListResponse(data={
+            "message": f"已保存 {len(enabled_skills)} 个 Skills 的设置",
+            "enabled_count": len(enabled_skills)
+        })
+
+    except Exception as e:
+        logger.error(f"保存 Skills 偏好失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"保存失败: {str(e)}"
+        )
+
+
 @router.get("/{skill_name}", response_model=SkillDetailResponse)
 async def get_skill_detail(skill_name: str):
     """

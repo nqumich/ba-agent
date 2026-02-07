@@ -8,8 +8,14 @@ from .context_manager import (
     ContextManager,
     create_context_manager
 )
+from .context_coordinator import (
+    ContextCoordinator,
+    create_context_coordinator
+)
 
 __all__ = [
     "ContextManager",
-    "create_context_manager"
+    "create_context_manager",
+    "ContextCoordinator",
+    "create_context_coordinator"
 ]

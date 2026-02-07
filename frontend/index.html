@@ -310,6 +310,66 @@
             text-align: center;
         }
 
+        /* Markdown 内容样式 */
+        .message-content .markdown-content {
+            line-height: 1.7;
+        }
+
+        .message-content .markdown-content p {
+            margin: 0.5em 0;
+        }
+
+        .message-content .markdown-content h1,
+        .message-content .markdown-content h2,
+        .message-content .markdown-content h3 {
+            margin: 0.8em 0 0.4em 0;
+            font-weight: 600;
+        }
+
+        .message-content .markdown-content code {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+
+        .message-content .markdown-content pre {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        .message-content .markdown-content pre code {
+            background: transparent;
+            padding: 0;
+        }
+
+        .message-content .markdown-content ul,
+        .message-content .markdown-content ol {
+            margin: 0.5em 0;
+            padding-left: 20px;
+        }
+
+        .message-content .markdown-content li {
+            margin: 4px 0;
+        }
+
+        .message-content .markdown-content a {
+            color: #FFD700;
+            text-decoration: underline;
+        }
+
+        .message-content .markdown-content strong {
+            font-weight: 600;
+        }
+
+        .message-content .markdown-content em {
+            font-style: italic;
+        }
+
         .chat-input {
             display: flex;
             gap: 10px;
@@ -373,6 +433,20 @@
         .skill-actions button {
             padding: 6px 12px;
             font-size: 12px;
+        }
+
+        /* Skills 勾选卡片 */
+        .skill-checkbox-card {
+            user-select: none;
+        }
+
+        .skill-checkbox-card:hover {
+            border-color: #94a3b8 !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .skill-checkbox-card input[type="checkbox"] {
+            cursor: pointer;
         }
 
         /* 状态指示 */
@@ -563,7 +637,10 @@
             <!-- Skills 管理 Tab -->
             <div id="skills-tab" class="tab-content">
                 <div class="card">
-                    <h2>Skills 列表</h2>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h2>Skills 列表</h2>
+                        <button onclick="loadSkills()" style="padding: 6px 12px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">🔄 刷新</button>
+                    </div>
                     <div id="skills-list" class="skills-grid">
                         <p style="text-align: center; color: #999; padding: 20px;">加载中...</p>
                     </div>
@@ -586,6 +663,9 @@
         // 模型配置
         let selectedModel = localStorage.getItem('selected_model') || 'glm-4.7';
         let apiKeys = JSON.parse(localStorage.getItem('api_keys') || '{}');
+
+        // 对话状态管理
+        let currentConversationId = localStorage.getItem('conversation_id') || null;
 
         // 模型配置映射
         const modelConfig = {
@@ -794,6 +874,11 @@
             // 显示选中的内容
             document.getElementById(`${tabName}-tab`).classList.add('active');
             event.target.classList.add('active');
+
+            // 切换到 Skills Tab 时加载 skills
+            if (tabName === 'skills') {
+                loadSkills();
+            }
         }
 
         // ========== Agent 对话 ==========
@@ -882,10 +967,9 @@
                     });
                 }, 100);
             } else {
-                // Markdown 格式渲染（简单处理：保留换行）
-                reportDiv.style.lineHeight = '1.6';
-                reportDiv.style.whiteSpace = 'pre-wrap';
-                reportDiv.textContent = content;
+                // Markdown 格式渲染
+                reportDiv.className = 'markdown-content';
+                reportDiv.innerHTML = renderMarkdown(content);
                 container.appendChild(reportDiv);
             }
 
@@ -922,6 +1006,52 @@
             return div.innerHTML;
         }
 
+        function renderMarkdown(text) {
+            // 简单的 Markdown 渲染器
+            if (!text) return '';
+
+            // 转义 HTML 特殊字符
+            let html = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+
+            // 代码块 ```code```
+            html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+                return `<pre><code class="language-${lang}">${code}</code></pre>`;
+            });
+
+            // 行内代码 `code`
+            html = html.replace(/`([^`\n]+)`/g, '<code style="background: #f4f4f4; padding: 2px 4px; border-radius: 3px; font-family: monospace;">$1</code>');
+
+            // 粗体 **text**
+            html = html.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+
+            // 斜体 *text*
+            html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+
+            // 标题 # heading
+            html = html.replace(/^### (.+)$/gm, '<h3 style="font-size: 1.17em; font-weight: 600; margin: 1em 0 0.5em 0; color: #333;">$1</h3>');
+            html = html.replace(/^## (.+)$/gm, '<h2 style="font-size: 1.5em; font-weight: 600; margin: 1em 0 0.5em 0; color: #333;">$1</h2>');
+            html = html.replace(/^# (.+)$/gm, '<h1 style="font-size: 2em; font-weight: 600; margin: 0.5em 0 0.5em 0; color: #333;">$1</h1>');
+
+            // 无序列表 - item
+            html = html.replace(/^[\s]*-[\s]+(.+)$/gm, '<li>$1</li>');
+            html = html.replace(/(<li>.*<\/li>)\n(?!<li>)/g, '$1</ul>\n');
+
+            // 有序列表 1. item
+            html = html.replace(/^[\s]*\d+\.[\s]+(.+)$/gm, '<li>$1</li>');
+
+            // 链接 [text](url)
+            html = html.replace(/\[([^\]]+)\]\(([^\)]+)\)/g, '<a href="$2" target="_blank" style="color: #1976D2;">$1</a>');
+
+            // 换行符转 <br>
+            html = html.replace(/\n\n/g, '</p><p>');
+            html = html.replace(/\n/g, '<br>');
+
+            return `<p>${html}</p>`;
+        }
+
         function addSystemMessage(content) {
             addMessage(content, false);
         }
@@ -944,7 +1074,8 @@
             try {
                 const requestBody = {
                     message: query,
-                    model: selectedModel
+                    model: selectedModel,
+                    conversation_id: currentConversationId  // 传递当前对话 ID
                 };
 
                 // 只有当用户在前端配置了 API Key 时才发送
@@ -962,6 +1093,12 @@
                     const responseData = data.data;
                     const responseText = responseData.response || '查询完成';
                     const responseMetadata = responseData.metadata || null;
+
+                    // 更新 conversation_id
+                    if (responseData.conversation_id) {
+                        currentConversationId = responseData.conversation_id;
+                        localStorage.setItem('conversation_id', currentConversationId);
+                    }
 
                     // 传递 metadata 给前端组件渲染
                     addMessage(responseText, false, responseMetadata);
@@ -1116,39 +1253,143 @@
 
         // ========== Skills 管理 ==========
 
+        // 存储用户选择的 skills
+        let selectedSkills = JSON.parse(localStorage.getItem('selected_skills') || '[]');
+
         async function loadSkills() {
             const listDiv = document.getElementById('skills-list');
-            listDiv.innerHTML = '<p style="text-align: center; color: #999;">加载中...</p>';
+            if (!listDiv) {
+                console.error('skills-list element not found!');
+                return;
+            }
+            listDiv.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">加载中...</p>';
 
             try {
+                // 添加调试信息
+                console.log('=== Loading skills ===');
+                console.log('API_BASE:', API_BASE);
+                console.log('authToken:', authToken ? 'exists' : 'none');
+
                 const response = await apiRequest('/skills');
+                console.log('Response status:', response.status);
+                console.log('Response ok:', response.ok);
 
                 if (response.ok) {
                     const data = await response.json();
                     const skills = data.data.skills || [];
+                    console.log('Loaded skills:', skills);
 
                     if (skills.length === 0) {
                         listDiv.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">暂无 Skills</p>';
                     } else {
-                        listDiv.innerHTML = skills.map(skill => `
-                            <div class="skill-card">
-                                <div class="skill-name">${skill.name}</div>
-                                <div class="skill-description">${skill.description || '无描述'}</div>
-                                <div class="skill-meta">
-                                    <span class="status ${skill.source === 'builtin' ? 'builtin' : ''}">${skill.source === 'builtin' ? '内置' : '外部'}</span>
-                                    ${skill.category ? `<span>分类: ${skill.category}</span>` : ''}
-                                </div>
-                                <div class="skill-actions">
-                                    ${skill.active ? '<span class="status active">已激活</span>' : ''}
-                                </div>
+                        // 添加保存按钮
+                        let html = `
+                            <div style="margin-bottom: 15px; padding: 10px; background: #f0f9ff; border-radius: 8px; border: 1px solid #bae6fd;">
+                                <p style="margin: 0 0 10px 0; color: #0369a1;">勾选您想要启用的 Skills：</p>
+                                <button onclick="saveSelectedSkills()" style="padding: 8px 16px; background: #0284c7; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                                    保存选择 (${selectedSkills.length}/${skills.length})
+                                </button>
                             </div>
-                        `).join('');
+                        `;
+
+                        // 分组显示 skills
+                        const grouped = data.data.grouped || {};
+
+                        for (const [category, categorySkills] of Object.entries(grouped)) {
+                            html += `<div style="margin-bottom: 20px;">
+                                <h3 style="color: #64748b; margin-bottom: 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">${category}</h3>
+                                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">`;
+
+                            categorySkills.forEach(skill => {
+                                const isSelected = selectedSkills.includes(skill.name);
+                                html += `
+                                    <label class="skill-checkbox-card ${isSelected ? 'selected' : ''}" style="display: flex; align-items: start; gap: 10px; padding: 12px; background: white; border: 2px solid ${isSelected ? '#0284c7' : '#e2e8f0'}; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                                        <input type="checkbox"
+                                            value="${skill.name}"
+                                            ${isSelected ? 'checked' : ''}
+                                            onchange="toggleSkill('${skill.name}', this.checked)"
+                                            style="margin-top: 2px; width: 16px; height: 16px;">
+                                        <div style="flex: 1;">
+                                            <div style="font-weight: 600; color: #1e293b; margin-bottom: 4px;">${skill.display_name || skill.name}</div>
+                                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">${skill.description || '无描述'}</div>
+                                            <div style="font-size: 11px; color: #94a3b8;">
+                                                <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">v${skill.version || '1.0'}</span>
+                                            </div>
+                                        </div>
+                                    </label>
+                                `;
+                            });
+
+                            html += `</div></div>`;
+                        }
+
+                        listDiv.innerHTML = html;
                     }
                 } else {
-                    listDiv.innerHTML = '<p style="text-align: center; color: #dc3545; padding: 20px;">加载失败</p>';
+                    const errorText = await response.text();
+                    console.error('Skills API error:', response.status, errorText);
+                    listDiv.innerHTML = `<p style="text-align: center; color: #dc3545; padding: 20px;">加载失败 (${response.status})</p>`;
                 }
             } catch (error) {
-                listDiv.innerHTML = `<p style="text-align: center; color: #dc3545; padding: 20px;">${error.message}</p>`;
+                console.error('Load skills error:', error);
+                listDiv.innerHTML = `<p style="text-align: center; color: #dc3545; padding: 20px;">${error.message}</p>
+                <p style="text-align: center; color: #64748b; font-size: 12px;">请检查 API 服务是否运行在 ${API_BASE}</p>`;
+            }
+        }
+
+        function toggleSkill(skillName, isChecked) {
+            if (isChecked) {
+                if (!selectedSkills.includes(skillName)) {
+                    selectedSkills.push(skillName);
+                }
+            } else {
+                selectedSkills = selectedSkills.filter(s => s !== skillName);
+            }
+
+            // 更新按钮显示
+            const button = document.querySelector('button[onclick="saveSelectedSkills()"]');
+            if (button) {
+                button.textContent = `保存选择 (${selectedSkills.length}/${document.querySelectorAll('input[type="checkbox"]').length})`;
+            }
+
+            // 更新卡片样式
+            const checkbox = document.querySelector(`input[value="${skillName}"]`);
+            if (checkbox) {
+                const card = checkbox.closest('.skill-checkbox-card');
+                if (isChecked) {
+                    card.classList.add('selected');
+                    card.style.borderColor = '#0284c7';
+                } else {
+                    card.classList.remove('selected');
+                    card.style.borderColor = '#e2e8f0';
+                }
+            }
+        }
+
+        async function saveSelectedSkills() {
+            try {
+                localStorage.setItem('selected_skills', JSON.stringify(selectedSkills));
+
+                // 保存到后端
+                const response = await apiRequest('/skills/preferences', {
+                    method: 'POST',
+                    body: JSON.stringify({ enabled_skills: selectedSkills })
+                });
+
+                if (response.ok) {
+                    alert(`已保存 ${selectedSkills.length} 个 Skills 的选择`);
+                    // 更新按钮
+                    const button = document.querySelector('button[onclick="saveSelectedSkills()"]');
+                    if (button) {
+                        button.textContent = `保存成功 (${selectedSkills.length} 已选择)`;
+                        setTimeout(() => loadSkills(), 500);
+                    }
+                } else {
+                    alert('保存失败，请重试');
+                }
+            } catch (error) {
+                console.error('Save skills error:', error);
+                alert('保存失败: ' + error.message);
             }
         }
 

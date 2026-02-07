@@ -1,7 +1,7 @@
 # BA-Agent 开发指南
 
-> **Version**: v2.2.0
-> **Last Updated**: 2026-02-07
+> **Version**: v2.3.0
+> **Last Updated**: 2026-02-08
 
 完整的开发指南，包括项目结构、测试、贡献流程等。
 
@@ -77,6 +77,22 @@ agents/
                        - MemoryFlush
                        - Conversation Compaction
                        - Pipeline v2.1 集成
+                       - ContextCoordinator 集成 (v2.2.0)
+```
+
+### backend/core/
+
+```
+core/
+├── __init__.py
+├── context_manager.py     # 上下文管理器
+│                            - clean_file_contents()
+│                            - build_context()
+│                            - clean_langchain_messages() (v2.2.0 新增)
+├── context_coordinator.py  # 上下文协调器 (v2.2.0 新增)
+│                            - prepare_messages()
+│                            - prepare_messages_with_system_prompt()
+└── ...
 ```
 
 ### backend/memory/
@@ -260,8 +276,8 @@ pytest --cov=backend --cov-report=html
 ### 测试状态
 
 ```
-总计: 1016 个测试
-✅ 通过: 1016 (100%)
+总计: 1030 个测试
+✅ 通过: 1030 (100%)
 ⏭️  跳过: 1 (MCP 相关)
 ❌ 失败: 0
 ```

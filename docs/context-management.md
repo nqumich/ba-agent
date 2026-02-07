@@ -1,8 +1,8 @@
 # 上下文管理文档
 
-> **Version**: v1.4.0
-> **Last Updated**: 2026-02-07
-> **Component**: ContextManager
+> **Version**: v1.5.0
+> **Last Updated**: 2026-02-08
+> **Component**: ContextManager + ContextCoordinator
 
 本文档描述 BA-Agent 的上下文管理机制，包括上下文如何被传递、处理以及各组件的触发时机。
 
@@ -28,41 +28,30 @@
 用户请求
     │
     ▼
-┌─────────────────┐
-│ BAAgentService  │
-│     .query()    │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ ContextManager  │
-│  .build_context()│
-│  ┌─────────────┐│
-│  │1.历史清理   ││
-│  │2.系统提示   ││
-│  │3.代码列表   ││
-│  │4.文件上下文 ││
-│  │5.用户消息   ││
-│  └─────────────┘│
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   模型调用       │
-│   (LangGraph)   │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ StructuredResponse│
-│   + code_blocks │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│   CodeStore     │
-│   (保存代码)     │
-└─────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         API Layer                                │
+│                   BAAgentService (ba_agent.py)                   │
+│  - 对话管理 (conversation_id, message_count)                     │
+│  - HTTP 接口包装                                                 │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Coordination Layer                            │
+│                   ContextCoordinator (新增)                      │
+│  - 统一的上下文准备入口                                          │
+│  - 协调文件清理和上下文构建                                      │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+┌─────────────────────┐ ┌──────────────┐ ┌──────────────────────┐
+│    LangGraph        │ │ContextManager│ │   Memory Flush       │
+│  (AgentState)       │ │              │ │                      │
+│  - 消息追加         │ │ - 文件清理   │ │ - Token 监控         │
+│  - Checkpointer     │ │ - 上下文构建 │ │ - 记忆提取           │
+│  - 对话历史         │ │ - 代码列表   │ │ - 持久化             │
+└─────────────────────┘ └──────────────┘ └──────────────────────┘
 ```
 
 ### 设计原则
@@ -73,6 +62,66 @@
 | **职责分离** | 存储、构建、调用职责清晰划分 |
 | **自动优化** | 自动清理冗余内容，节省 token |
 | **可追踪** | 清晰的触发时机和处理流程 |
+| **单一入口** | 文件清理统一通过 ContextCoordinator |
+
+---
+
+## ContextCoordinator 协调层
+
+### 职责
+
+ContextCoordinator 是 v1.5.0 新增的协调层，负责统一协调 LangGraph、ContextManager 和 Memory Flush 的交互。
+
+**核心功能**：
+- 准备发送给 LLM 的消息列表
+- 协调文件清理和上下文构建
+- 确保系统提示在第一位
+- 保持消息顺序
+
+**设计原则**：
+- 单一职责：专注于消息准备和清理
+- 委托模式：文件清理委托给 ContextManager
+- 无状态：不保存任何状态，所有状态由 LangGraph 管理
+
+### 文件清理统一入口
+
+**问题**：在 v1.5.0 之前，文件内容清理逻辑分散在多处：
+- `agent.py` 的 `call_model()` 中有大文件内容清理代码（2000+ 字符）
+- `context_manager.py` 的 `clean_file_contents()` 清理 read_file 结果
+- 两处都在清理大文件内容，导致功能重复
+
+**解决方案**：统一到 ContextCoordinator
+
+1. **移除重复代码**：删除 `agent.py` 中的文件清理代码
+2. **增强 ContextManager**：添加 `clean_langchain_messages()` 方法
+3. **统一清理路径**：所有文件清理都通过 ContextCoordinator → ContextManager
+
+**清理流程**：
+```
+LangGraph State (messages)
+    │
+    ▼
+ContextCoordinator.prepare_messages()
+    │
+    ▼
+ContextManager.clean_langchain_messages()
+    │
+    ├─ 检测大文件内容 (>2000 字符)
+    ├─ 生成梗概（保留预览）
+    └─ 返回清理后的消息
+    │
+    ▼
+LLM 调用（使用清理后的消息）
+```
+
+### 职责划分
+
+| 组件 | 职责 | 状态管理 |
+|------|------|----------|
+| **API 层** | HTTP 接口、简单计数 | conversation_id, message_count |
+| **协调层** | 消息准备、文件清理 | 无状态 |
+| **业务层** | LangGraph 管理、Memory Flush | session_tokens, compaction_count |
+| **数据层** | 对话历史持久化 | 完整消息列表 |
 
 ---
 
@@ -378,6 +427,25 @@ BAAgentService._extract_response_content()
 
 ## 组件职责划分
 
+### ContextCoordinator（上下文协调器）
+
+**核心职责**：
+
+- 准备发送给 LLM 的消息列表
+- 协调文件清理和上下文构建
+- 确保系统提示在第一位
+- 保持消息顺序
+
+**不负责**：
+
+- 具体的文件清理逻辑（委托给 ContextManager）
+- 对话历史管理（由 LangGraph 负责）
+- 模型调用（由 BAAgent 负责）
+
+**新增方法**：
+- `prepare_messages()` - 准备消息列表
+- `prepare_messages_with_system_prompt()` - 准备消息并确保系统提示
+
 ### ContextManager（上下文管理器）
 
 **核心职责**：
@@ -387,6 +455,10 @@ BAAgentService._extract_response_content()
 - 上下文压缩和总结
 - 文件上下文处理
 - 可用代码文件列表构建
+
+**新增方法**：
+- `clean_langchain_messages()` - 清理 LangChain 格式的消息
+- `_generate_content_summary()` - 生成内容梗概
 
 **不负责**：
 
@@ -542,6 +614,7 @@ BAAgentService._extract_response_content()
 
 | 版本 | 日期 | 变更说明 |
 |------|------|----------|
+| v1.5.0 | 2026-02-08 | **重大架构更新**：添加 ContextCoordinator 协调层，统一文件清理入口；移除 agent.py 中的重复清理代码；增强 ContextManager 支持 LangChain BaseMessage 格式 |
 | v1.4.0 | 2026-02-07 | 移除自动代码注入机制，改用模型主动调用 file_reader；添加文件读取后内容清理为梗概的机制 |
 | v1.3.0 | 2026-02-07 | 添加统一文件列表机制（代码+上传）、file_ref 标签、markdown 格式 |
 | v1.2.0 | 2026-02-07 | 添加代码文件管理、多语言支持、可用代码列表机制 |

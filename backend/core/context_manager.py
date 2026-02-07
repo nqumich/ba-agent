@@ -37,7 +37,7 @@ class ContextManager:
         """
         self.file_store = file_store
         self.code_store = file_store.code if file_store else None
-        self.upload_store = file_store.upload if file_store else None
+        self.upload_store = file_store.uploads if file_store else None
 
     # ===== 文件内容清理方法（v1.4.0 新增）=====
 
@@ -287,13 +287,13 @@ class ContextManager:
         构建完整的上下文消息列表
 
         处理流程：
-        1. 如果有历史消息，清理 read_file 返回的文件内容，替换为梗概
-        2. 添加系统提示
-        3. 添加可用代码文件列表（如果有）
+        1. 添加系统提示（必须在前，避免"multiple non-consecutive system messages"错误）
+        2. 添加可用代码文件列表（如果有）
+        3. 处理历史消息（排除系统消息，只保留对话历史）
         4. 处理用户上传的文件上下文
         5. 添加用户消息
 
-        v1.4.0 变更：移除自动代码注入，模型通过 read_file 工具主动读取文件
+        v1.4.1 变更：修复系统消息顺序，确保系统消息在消息列表开头且连续
 
         Args:
             message: 用户消息
@@ -307,20 +307,14 @@ class ContextManager:
         """
         messages = []
 
-        # 1. 处理历史消息（如果有）
-        # 注：自 v1.4.0 起，不再自动注入代码块，改用模型主动 read_file 机制
-        # 历史消息中清理 read_file 返回的文件内容，替换为梗概
-        if history_messages:
-            messages.extend(self.clean_file_contents(history_messages))
-
-        # 2. 添加系统提示
+        # 1. 首先添加系统提示（必须在前）
         from backend.models.response import STRUCTURED_RESPONSE_SYSTEM_PROMPT
         messages.append({
             "role": "system",
             "content": STRUCTURED_RESPONSE_SYSTEM_PROMPT
         })
 
-        # 3. 添加可用代码文件列表（在系统提示之后）
+        # 2. 添加可用代码文件列表（在系统提示之后）
         if session_id and self.code_store:
             code_list_context = self._build_code_list_context(session_id)
             if code_list_context:
@@ -329,6 +323,15 @@ class ContextManager:
                     "content": code_list_context
                 })
 
+        # 3. 处理历史消息（排除系统消息，只保留对话历史）
+        # 注：自 v1.4.0 起，不再自动注入代码块，改用模型主动 read_file 机制
+        # 历史消息中清理 read_file 返回的文件内容，替换为梗概
+        if history_messages:
+            # 清理文件内容并排除系统消息
+            cleaned = self.clean_file_contents(history_messages)
+            user_assistant_msgs = [m for m in cleaned if m.get("role") not in ("system",)]
+            messages.extend(user_assistant_msgs)
+
         # 4. 处理用户上传的文件上下文
         if file_context:
             messages.extend(self._build_file_context(file_context))
@@ -336,8 +339,6 @@ class ContextManager:
         # 5. 添加用户消息
         # 注：自 v1.4.0 起，移除自动代码注入，模型通过 read_file 工具主动读取文件
         # messages = self.inject_code_blocks(message, messages)  # 已移除自动注入
-
-        # 6. 添加用户消息
         messages.append({
             "role": "user",
             "content": message
@@ -470,20 +471,126 @@ class ContextManager:
         Returns:
             是否需要清理
         """
-        # 如果消息数量超过阈值，或者包含大量代码块，则需要清理
-        if len(messages) > 20:
-            return True
+        # v1.4.0: 移除自动代码注入后，只需检查消息数量
+        # 文件内容会通过 clean_file_contents() 自动清理为梗概
+        return len(messages) > 20
 
-        # 检查代码块数量
-        code_block_count = sum(
-            1 for msg in messages
-            if self.has_code_blocks(msg.get("content", ""))
+    def clean_langchain_messages(
+        self,
+        messages: List[Any],
+        session_id: Optional[str] = None,
+        content_threshold: int = 2000,
+    ) -> List[Any]:
+        """
+        清理 LangChain 格式的消息
+
+        识别并清理 ToolMessage 和其他消息中的大文件内容
+        与 clean_file_contents() 类似，但处理 LangChain BaseMessage 格式
+
+        清理策略：
+        - 检测消息内容长度超过阈值的
+        - 生成梗概：保留文件信息，替换大内容
+        - 保留消息类型和元数据（id, tool_calls 等）
+
+        Args:
+            messages: LangChain 消息列表 (BaseMessage)
+            session_id: 会话 ID（用于代码列表，暂未使用）
+            content_threshold: 内容清理阈值（字符数），默认 2000
+
+        Returns:
+            清理后的消息列表
+        """
+        from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+        cleaned_messages = []
+        cleaned_count = 0
+
+        for msg in messages:
+            # 检查是否需要清理
+            if hasattr(msg, 'content') and isinstance(msg.content, str):
+                content = msg.content
+                if len(content) > content_threshold:
+                    # 生成梗概
+                    summary = self._generate_content_summary(content)
+
+                    # 创建新消息对象，保留原始类型和元数据
+                    if isinstance(msg, AIMessage):
+                        cleaned_msg = AIMessage(content=summary)
+                        # 保留 tool_calls
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            cleaned_msg.tool_calls = msg.tool_calls
+                    elif isinstance(msg, HumanMessage):
+                        cleaned_msg = HumanMessage(content=summary)
+                    elif isinstance(msg, ToolMessage):
+                        # ToolMessage 需要 name 和 tool_call_id
+                        cleaned_msg = ToolMessage(
+                            content=summary,
+                            name=getattr(msg, 'name', None),
+                            tool_call_id=getattr(msg, 'tool_call_id', '')
+                        )
+                    else:
+                        # 其他类型，通用处理
+                        cleaned_msg = msg.__class__(content=summary)
+
+                    # 保留 id
+                    if hasattr(msg, 'id') and msg.id:
+                        cleaned_msg.id = msg.id
+
+                    cleaned_messages.append(cleaned_msg)
+                    cleaned_count += 1
+                    logger.debug(f"清理消息内容: {len(content)} 字符 -> {len(summary)} 字符")
+                else:
+                    cleaned_messages.append(msg)
+            else:
+                cleaned_messages.append(msg)
+
+        if cleaned_count > 0:
+            logger.info(f"[ContextManager] 清理了 {cleaned_count} 条大文件消息")
+
+        return cleaned_messages
+
+    def _generate_content_summary(self, content: str) -> str:
+        """
+        生成内容梗概（不使用 LLM，基于规则）
+
+        Args:
+            content: 原始内容
+
+        Returns:
+            内容梗概
+        """
+        # 计算原始大小
+        original_size = len(content)
+        size_str = self._format_size(original_size)
+
+        # 生成预览
+        lines = content.split('\n')
+        if len(lines) > 5:
+            preview = '\n'.join(lines[:5])
+        else:
+            preview = content[:500]
+
+        return (
+            f"[大文件内容已清理，原始 {original_size} 字符 ({size_str})]\n"
+            f"预览:\n{preview}...\n\n"
+            f"[注：完整内容已通过工具返回，此为梗概显示]"
         )
 
-        if code_block_count > 3:
-            return True
+    def _format_size(self, size_bytes: int) -> str:
+        """
+        格式化文件大小
 
-        return False
+        Args:
+            size_bytes: 字节数
+
+        Returns:
+            格式化后的大小字符串
+        """
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.1f}{unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.1f}TB"
 
     def summarize_context(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """
