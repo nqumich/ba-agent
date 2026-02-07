@@ -1,7 +1,9 @@
-# BA-Agent 产品需求文档 (PRD)
+# BA-Agent 文档导航
 
 > **版本**: v2.3.0
 > **最后更新**: 2026-02-08
+
+本文档是 BA-Agent 的产品需求文档和文档导航中心，描述产品愿景、目标用户、核心价值、功能需求。技术架构细节请参阅 [architecture.md](architecture.md)。
 
 ---
 
@@ -11,7 +13,7 @@
 
 | 文档 | 说明 | 版本 |
 |------|------|------|
-| **[PRD.md](PRD.md)** | 产品需求文档（本文档） | v2.3.0 |
+| **[README.md](README.md)** | 产品需求文档（本文档） | v2.3.0 |
 | [architecture.md](architecture.md) | 技术架构设计、组件交互、技术栈 | v2.3.0 |
 | [context-management.md](context-management.md) | 上下文管理详细文档 | v1.5.0 |
 | [response-flow.md](response-flow.md) | 响应格式流转文档 | v2.8.0 |

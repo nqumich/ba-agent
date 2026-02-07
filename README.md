@@ -242,7 +242,7 @@ BA_RATE_LIMIT_IP_PER_MINUTE=60
 ## 📚 文档
 
 ### 核心文档
-- [产品 PRD](docs/PRD.md) - 产品需求文档
+- [产品 PRD](docs/README.md) - 产品需求文档
 - [项目架构](docs/architecture.md) - 架构设计（v2.2.0 更新 ContextCoordinator）
 - [上下文管理](docs/context-management.md) - 上下文管理详细文档（v1.5.0 更新）
 - [系统提示词](docs/prompts.md) - Agent 提示词定义和规范

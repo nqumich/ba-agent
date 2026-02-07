@@ -5,7 +5,7 @@
 > **开发进度**: ~88% (26/30 User Stories 完成)
 > **测试状态**: 1030/1030 通过
 
-产品需求请参阅 [PRD.md](PRD.md)
+产品需求请参阅 [README.md](README.md)
 
 ---
 
@@ -665,7 +665,7 @@ open http://localhost:8000
 
 | 文档 | 说明 |
 |------|------|
-| [PRD.md](PRD.md) | 产品需求文档 |
+| [README.md](README.md) | 产品需求文档 |
 | [context-management.md](context-management.md) | 上下文管理详解 (v1.5.0) |
 | [response-flow.md](response-flow.md) | 响应格式流转 (v2.8.0) |
 | [prompts.md](prompts.md) | 系统提示词定义 |

@@ -492,7 +492,7 @@ agent = create_agent(model, tools, checkpointer=memory)
 ## 相关文档
 
 - [README.md](README.md) - 快速开始
-- [PRD.md](PRD.md) - 产品需求
+- [README.md](README.md) - 产品需求
 - [architecture.md](architecture.md) - 技术架构
 - [skills.md](skills.md) - Skills 系统
 - [guides/setup.md](guides/setup.md) - 环境搭建

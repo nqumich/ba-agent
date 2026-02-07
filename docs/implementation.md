@@ -2925,7 +2925,7 @@ class TestFileStoreIntegration:
 ### 9.1 相关文档
 
 - `docs/architecture.md` - 产品愿景和技术架构
-- `docs/PRD.md` - 产品需求文档
+- `docs/README.md` - 产品需求文档
 - `docs/project-structure.md` - 项目结构说明
 
 ### 9.2 现有代码参考
