@@ -181,6 +181,16 @@
   - [x] Skills 管理界面
   - [x] 拖拽上传支持
   - [x] API 服务器集成（/ 路由提供前端）
+- [x] **US-027**: ContextCoordinator 协调层 ✅ (2026-02-08)
+  - [x] 创建 backend/core/context_coordinator.py
+  - [x] 实现 prepare_messages() - 统一消息准备入口
+  - [x] 实现 prepare_messages_with_system_prompt() - 确保系统提示在第一位
+  - [x] 增强 ContextManager.clean_langchain_messages() - 清理 LangChain 格式消息
+  - [x] 重构 BAAgent.call_model() - 移除重复的文件清理代码
+  - [x] BAAgent.invoke() 添加 session_id 和 file_context 参数支持
+  - [x] 简化 BAAgentService.query() - 移除分散的上下文构建代码
+  - [x] 24 个新测试通过
+  - [x] 文档更新 (context-management.md v1.5.0, response-flow.md v2.8.0, architecture.md v2.2.0, api.md v2.3.0)
 - [ ] **US-022**: IM Bot 集成 (企业微信/钉钉)
 - [ ] **US-023**: Excel 插件
 - [ ] **US-024**: 日志与监控系统
@@ -227,7 +237,7 @@
   - Phase 1: 5/5 (100%)
   - Phase 2: 9/9 (100%) ✅
   - Phase 3: 4/4 (100%) ✅ 完成
-  - Phase 4: 1/7 (14.3%)
+  - Phase 4: 2/7 (28.6%)
   - 基础设施: 1/1 (100%)
   - 记忆管理: 2/2 (100%) ✅
 - **进行中**: 0 (0%)
@@ -255,6 +265,8 @@
 - ✅ US-017: 报告生成 Skill (19 测试通过)
 - ✅ US-018: 数据可视化 Skill (29 测试通过)
 - ✅ US-021: API 服务增强 (26 测试通过)
+- ✅ US-FE-01: Web 前端测试控制台 (10 测试通过)
+- ✅ US-027: ContextCoordinator 协调层 (24 测试通过)
 - ✅ US-005-MEM-01: 三层记忆文件结构
 - ✅ US-005-MEM-02: Hooks 系统实现与优化 (5个脚本，-54%)
 - ✅ US-INFRA-01: 统一工具输出格式系统 (42 测试通过)
