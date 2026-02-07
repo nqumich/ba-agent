@@ -1943,6 +1943,828 @@ class TestFileStoreIntegration:
 
 ---
 
+## 11. Python 中间结果存储设计（新增）
+
+### 11.1 需求分析
+
+#### 11.1.1 场景示例
+
+```python
+# 用户执行的复杂 Python 代码
+import pandas as pd
+import numpy as np
+from scipy import stats
+
+# 步骤 1: 加载数据
+df = pd.read_csv('sales_data.csv')
+
+# 步骤 2: 数据清洗
+df_clean = df.dropna()
+df_clean['date'] = pd.to_datetime(df_clean['date'])
+
+# 步骤 3: 计算指标
+daily_gmv = df_clean.groupby('date')['gmv'].sum()
+
+# 步骤 4: 异常检测
+mean = daily_gmv.mean()
+std = daily_gmv.std()
+anomalies = daily_gmv[abs(daily_gmv - mean) > 2 * std]
+
+# 步骤 5: 生成图表
+import matplotlib.pyplot as plt
+plt.figure(figsize=(12, 6))
+plt.plot(daily_gmv.index, daily_gmv.values)
+plt.axhline(mean + 2*std, color='r', linestyle='--')
+plt.savefig('gmv_trend.png')
+
+# 步骤 6: 详细分析
+analysis = {
+    'total_gmv': df_clean['gmv'].sum(),
+    'anomaly_count': len(anomalies),
+    'trend': 'increasing'
+}
+```
+
+**问题**:
+- 如果步骤 6 失败，前面的计算全部丢失
+- 无法查看中间结果（如 daily_gmv, anomalies）
+- 无法从某个检查点恢复重新计算
+- 调试困难，无法知道每个步骤的状态
+
+#### 11.1.2 中间结果需求
+
+| 需求 | 说明 | 优先级 |
+|------|------|--------|
+| **变量快照** | 保存关键变量的状态 | P0 |
+| **DataFrame 存储** | 保存中间 DataFrame | P0 |
+| **图表保存** | 自动保存 matplotlib/plotly 图表 | P0 |
+| **检查点机制** | 支持从中间步骤恢复 | P1 |
+| **调试支持** | 查看每个步骤的输出 | P1 |
+| **结果复用** | 后续步骤可引用前面的结果 | P1 |
+
+### 11.2 设计方案：CheckpointStore
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Python 中间结果存储                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  用户代码执行                                                                │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │                    PythonSandbox（增强）                                 │  │
+│  │  ┌──────────────────────────────────────────────────────────────────┐   │  │
+│  │  │              中间结果捕获器（CheckpointCapture）                   │   │  │
+│  │  │  • 自动检测变量赋值                                             │   │  │
+│  │  │  • 检测 DataFrame 操作                                          │   │  │
+│  │  │  • 检测图表保存操作                                             │   │  │
+│  │  │  • 检测 checkpoint() 调用                                      │   │  │
+│  │  └──────────────────────────────────────────────────────────────────┘   │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │                      CheckpointStore                                   │  │
+│  │  • save_variable(name, value)     # 保存变量                           │  │
+│  │  • save_dataframe(df, name)       # 保存 DataFrame                   │  │
+│  │  • save_chart(fig, name)          # 保存图表                         │  │
+│  │  • create_checkpoint(name)        # 创建检查点                       │  │
+│  │  • restore_checkpoint(name)        # 恢复检查点                       │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │                         TempStore                                       │  │
+│  │  checkpoint_{session_id}/                                          │  │
+│  │    ├── variable_{name}.pkl           # 变量序列化                       │  │
+│  │    ├── dataframe_{name}.parquet      # DataFrame                       │  │
+│  │    ├── chart_{name}.png              # 图表                           │  │
+│  │    └── checkpoint_{name}.json       # 检查点元数据                   │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 11.3 实现设计
+
+#### 11.3.1 CheckpointCapture - 中间结果捕获器
+
+**文件**: `backend/filestore/checkpoint.py`
+
+```python
+import ast
+import pickle
+import inspect
+from typing import Any, Dict, List, Optional
+from pathlib import Path
+
+
+class CheckpointCapture:
+    """
+    Python 代码中间结果捕获器
+
+    功能:
+    1. 通过 AST 分析自动检测关键变量
+    2. 拦截特定函数调用（plt.savefig, df.to_*）
+    3. 提供显式 checkpoint() 函数
+    4. 自动序列化并存储中间结果
+    """
+
+    def __init__(self, session_id: str, checkpoint_store: "CheckpointStore"):
+        self.session_id = session_id
+        self.store = checkpoint_store
+        self.checkpoints: Dict[str, Checkpoint] = {}
+        self.current_step = 0
+
+    def capture_execution(
+        self,
+        code: str,
+        sandbox: "DockerSandbox",
+        enable_auto_capture: bool = True
+    ) -> ExecutionResult:
+        """
+        执行代码并捕获中间结果
+
+        Args:
+            code: Python 代码
+            sandbox: Docker 沙盒实例
+            enable_auto_capture: 是否启用自动捕获
+
+        Returns:
+            ExecutionResult:
+                - output: 执行输出
+                - checkpoints: 检查点列表
+                - intermediate_files: 中间文件列表
+        """
+
+        # 1. 预处理代码：注入捕获逻辑
+        instrumented_code = self._instrument_code(code, enable_auto_capture)
+
+        # 2. 执行代码
+        result = sandbox.execute(instrumented_code)
+
+        # 3. 提取捕获的检查点
+        checkpoints = self._extract_checkpoints(result)
+
+        # 4. 收集中间文件引用
+        file_refs = self._collect_file_refs(result)
+
+        return ExecutionResult(
+            output=result['stdout'],
+            error=result.get('stderr'),
+            checkpoints=checkpoints,
+            file_refs=file_refs,
+            success=result['exit_code'] == 0
+        )
+
+    def _instrument_code(self, code: str, enable_auto: bool) -> str:
+        """
+        注入代码以支持中间结果捕获
+
+        策略:
+        1. 添加 checkpoint() 函数
+        2. 包装特定函数调用（plt.savefig, df.to_csv 等）
+        3. 注入变量追踪
+        """
+
+        if not enable_auto:
+            return code
+
+        # 生成注入代码
+        preamble = self._generate_preamble()
+        postamble = self._generate_postamble()
+
+        return f"{preamble}\n\n{code}\n\n{postamble}"
+
+    def _generate_preamble(self) -> str:
+        """生成代码前导（导入和工具函数）"""
+
+        return """
+# ========== 中间结果捕获工具 ==========
+import sys
+import json
+import pickle
+
+# 全局存储
+_CHECKPOINT_DATA = {}
+
+def checkpoint(name: str, variables: list = None):
+    '''创建检查点'''
+    global _CHECKPOINT_DATA
+
+    # 获取指定变量
+    if variables is None:
+        # 获取所有局部变量（排除内置模块）
+        import inspect
+        frame = inspect.currentframe()
+        caller_locals = {k: v for k, v in frame.f_back.f_locals.items()
+                        if not k.startswith('_') and k not in ['code', 'inspect']}
+    else:
+        frame = inspect.currentframe()
+        caller_locals = {k: frame.f_back.f_locals[k] for k in variables}
+
+    _CHECKPOINT_DATA[name] = {
+        'variables': caller_locals,
+        'step': len(_CHECKPOINT_DATA) + 1
+    }
+
+    return f"Checkpoint '{name}' created with {len(caller_locals)} variables"
+
+def save_var(name: str, value):
+    '''保存单个变量'''
+    global _CHECKPOINT_DATA
+    if '__saved_vars__' not in _CHECKPOINT_DATA:
+        _CHECKPOINT_DATA['__saved_vars__'] = {}
+    _CHECKPOINT_DATA['__saved_vars__'][name] = value
+
+def save_df(df, name: str, format: str = 'parquet'):
+    '''保存 DataFrame'''
+    global _CHECKPOINT_DATA
+    if '__saved_dfs__' not in _CHECKPOINT_DATA:
+        _CHECKPOINT_DATA['__saved_dfs__'] = {}
+
+    # 序列化
+    if format == 'parquet':
+        _CHECKPOINT_DATA['__saved_dfs__'][name] = {
+            'format': 'parquet',
+            'data': df.to_dict(orient='records')  # 简化：实际用 parquet
+        }
+    elif format == 'csv':
+        _CHECKPOINT_DATA['__saved_dfs__'][name] = {
+            'format': 'csv',
+            'data': df.to_csv(index=False)
+        }
+
+def save_chart(fig, name: str):
+    '''保存图表'''
+    global _CHECKPOINT_DATA
+    if '__saved_charts__' not in _CHECKPOINT_DATA:
+        _CHECKPOINT_DATA['__saved_charts__'] = {}
+
+    # 获取图像数据
+    import io
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    _CHECKPOINT_DATA['__saved_charts__'][name] = {
+        'format': 'png',
+        'data': buf.getvalue()
+    }
+
+# ========== Hook 常用函数 ==========
+_original_savefig = None
+
+def _hook_savefig(*args, **kwargs):
+    '''Hook matplotlib.pyplot.savefig'''
+    import matplotlib.pyplot as plt
+    global _CHECKPOINT_DATA
+
+    # 调用原始函数
+    result = _original_savefig(*args, **kwargs)
+
+    # 记录保存的文件
+    if args and hasattr(args[0], 'endswith') and args[0].endswith('.png'):
+        filename = Path(args[0]).stem
+        save_chart(plt.gcf(), filename)
+
+    return result
+
+# 安装 hook
+import matplotlib.pyplot
+_original_savefig = matplotlib.pyplot.savefig
+matplotlib.pyplot.savefig = _hook_savefig
+
+"""
+
+    def _generate_postamble(self) -> str:
+        """生成代码后记（提取和序列化检查点）"""
+
+        return """
+# ========== 提取中间结果 ==========
+import json
+
+# 导出检查点数据
+if '_CHECKPOINT_DATA' in dir():
+    print(f"\\n__CHECKPOINT__:{json.dumps(_CHECKPOINT_DATA, indent=2, default=str)}")
+"""
+```
+
+#### 11.3.2 CheckpointStore 实现
+
+**文件**: `backend/filestore/stores/checkpoint_store.py`
+
+```python
+import pickle
+import json
+import hashlib
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from datetime import datetime
+
+from backend.models.filestore import FileRef, FileCategory
+from backend.filestore.base import BaseStore
+
+
+class CheckpointStore(BaseStore):
+    """
+    检查点和中间结果存储
+
+    特性:
+    - 保存变量快照
+    - 保存 DataFrame
+    - 保存图表
+    - 支持检查点恢复
+    """
+
+    def __init__(self, storage_dir: Path):
+        super().__init__(storage_dir)
+        self.checkpoints_dir = storage_dir / "checkpoints"
+        self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
+
+    def create_checkpoint(
+        self,
+        session_id: str,
+        checkpoint_name: str,
+        variables: Dict[str, Any],
+        metadata: Optional[Dict] = None
+    ) -> CheckpointRef:
+        """
+        创建检查点
+
+        Args:
+            session_id: 会话 ID
+            checkpoint_name: 检查点名称
+            variables: 变量字典
+            metadata: 元数据
+
+        Returns:
+            CheckpointRef: 检查点引用
+        """
+        checkpoint_id = f"checkpoint_{session_id}_{checkpoint_name}"
+        checkpoint_dir = self.checkpoints_dir / session_id
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        # 序列化变量
+        serializable_vars = {}
+        file_refs = []
+
+        for name, value in variables.items():
+            try:
+                # 处理不同类型的变量
+                if self._is_dataframe(value):
+                    # DataFrame: 保存为 parquet
+                    df_ref = self._save_dataframe(value, checkpoint_dir, name)
+                    serializable_vars[name] = {'type': 'dataframe', 'ref': df_ref}
+                    file_refs.append(df_ref)
+
+                elif self._is_chart(value):
+                    # 图表: 保存为 PNG
+                    chart_ref = self._save_chart(value, checkpoint_dir, name)
+                    serializable_vars[name] = {'type': 'chart', 'ref': chart_ref}
+                    file_refs.append(chart_ref)
+
+                elif self._is_serializable(value):
+                    # 可序列化对象
+                    serializable_vars[name] = {
+                        'type': 'serializable',
+                        'data': self._serialize_value(value)
+                    }
+
+            except Exception as e:
+                serializable_vars[name] = {'type': 'error', 'error': str(e)}
+
+        # 保存检查点元数据
+        checkpoint_metadata = {
+            'checkpoint_id': checkpoint_id,
+            'session_id': session_id,
+            'name': checkpoint_name,
+            'created_at': datetime.now().isoformat(),
+            'variables': serializable_vars,
+            'metadata': metadata or {}
+        }
+
+        metadata_file = checkpoint_dir / f"{checkpoint_name}.json"
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(checkpoint_metadata, f, indent=2, default=str)
+
+        return CheckpointRef(
+            checkpoint_id=checkpoint_id,
+            session_id=session_id,
+            name=checkpoint_name,
+            variables=list(variables.keys()),
+            file_refs=file_refs,
+            metadata=checkpoint_metadata
+        )
+
+    def restore_checkpoint(
+        self,
+        checkpoint_ref: CheckpointRef
+    ) -> Dict[str, Any]:
+        """
+        恢复检查点
+
+        Args:
+            checkpoint_ref: 检查点引用
+
+        Returns:
+            变量字典（尽可能恢复原始对象）
+        """
+        checkpoint_dir = self.checkpoints_dir / checkpoint_ref.session_id
+        metadata_file = checkpoint_dir / f"{checkpoint_ref.name}.json"
+
+        if not metadata_file.exists():
+            raise ValueError(f"Checkpoint not found: {checkpoint_ref.checkpoint_id}")
+
+        # 读取元数据
+        with open(metadata_file, 'r') as f:
+            metadata = json.load(f)
+
+        restored_vars = {}
+
+        # 恢复变量
+        for name, var_info in metadata['variables'].items():
+            try:
+                if var_info['type'] == 'dataframe':
+                    # 从文件恢复 DataFrame
+                    restored_vars[name] = self._load_dataframe(var_info['ref'], checkpoint_dir)
+
+                elif var_info['type'] == 'chart':
+                    # 图表暂不支持恢复（只返回引用）
+                    restored_vars[name] = var_info['ref']
+
+                elif var_info['type'] == 'serializable':
+                    # 反序列化对象
+                    restored_vars[name] = self._deserialize_value(var_info['data'])
+
+                else:
+                    restored_vars[name] = None
+
+            except Exception as e:
+                restored_vars[name] = None
+
+        return restored_vars
+
+    def _is_dataframe(self, obj: Any) -> bool:
+        """检查是否是 DataFrame"""
+        try:
+            import pandas as pd
+            return isinstance(obj, pd.DataFrame)
+        except ImportError:
+            return False
+
+    def _is_chart(self, obj: Any) -> bool:
+        """检查是否是图表对象"""
+        try:
+            import matplotlib.figure
+            return isinstance(obj, matplotlib.figure.Figure)
+        except ImportError:
+            return False
+
+    def _is_serializable(self, obj: Any) -> bool:
+        """检查是否可序列化"""
+        try:
+            pickle.dumps(obj)
+            return True
+        except Exception:
+            return False
+
+    def _save_dataframe(
+        self,
+        df: "pd.DataFrame",
+        checkpoint_dir: Path,
+        name: str
+    ) -> FileRef:
+        """保存 DataFrame"""
+        # 使用 parquet 格式（高效）
+        file_path = checkpoint_dir / f"df_{name}.parquet"
+
+        try:
+            import pandas as pd
+            df.to_parquet(file_path, index=False)
+
+            # 计算哈希
+            content_hash = hashlib.md5(file_path.read_bytes()).hexdigest()
+
+            return FileRef(
+                file_id=f"df_{name}",
+                category=FileCategory.TEMP,
+                size_bytes=file_path.stat().st_size,
+                hash=content_hash,
+                metadata={
+                    'type': 'dataframe',
+                    'format': 'parquet',
+                    'rows': len(df),
+                    'columns': list(df.columns)
+                }
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to save DataFrame: {e}")
+
+    def _save_chart(
+        self,
+        fig,
+        checkpoint_dir: Path,
+        name: str
+    ) -> FileRef:
+        """保存图表"""
+        file_path = checkpoint_dir / f"chart_{name}.png"
+
+        try:
+            fig.savefig(file_path, format='png', bbox_inches='tight')
+
+            content_hash = hashlib.md5(file_path.read_bytes()).hexdigest()
+
+            return FileRef(
+                file_id=f"chart_{name}",
+                category=FileCategory.CHART,
+                size_bytes=file_path.stat().st_size,
+                hash=content_hash,
+                metadata={
+                    'type': 'chart',
+                    'format': 'png'
+                }
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to save chart: {e}")
+
+    def _load_dataframe(self, file_ref: FileRef, checkpoint_dir: Path) -> Any:
+        """加载 DataFrame"""
+        try:
+            import pandas as pd
+            file_path = checkpoint_dir / f"{file_ref.file_id}.parquet"
+            return pd.read_parquet(file_path)
+        except Exception as e:
+            raise ValueError(f"Failed to load DataFrame: {e}")
+
+    def _serialize_value(self, value: Any) -> str:
+        """序列化值"""
+        return pickle.dumps(value).hex()
+
+    def _deserialize_value(self, hex_str: str) -> Any:
+        """反序列化值"""
+        return pickle.loads(bytes.fromhex(hex_str))
+
+    def list_checkpoints(self, session_id: str) -> List[CheckpointRef]:
+        """列出会话的所有检查点"""
+        checkpoint_dir = self.checkpoints_dir / session_id
+
+        if not checkpoint_dir.exists():
+            return []
+
+        checkpoints = []
+        for metadata_file in checkpoint_dir.glob("*.json"):
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+
+            # 获取文件引用
+            file_refs = []
+            for var_name, var_info in metadata.get('variables', {}).items():
+                if 'ref' in var_info:
+                    file_refs.append(FileRef(
+                        file_id=var_info['ref'].split(':')[1],
+                        category=FileCategory(var_info['ref'].split(':')[0])
+                    ))
+
+            checkpoints.append(CheckpointRef(
+                checkpoint_id=metadata['checkpoint_id'],
+                session_id=metadata['session_id'],
+                name=metadata['name'],
+                variables=list(metadata.get('variables', {}).keys()),
+                file_refs=file_refs,
+                metadata=metadata
+            ))
+
+        return sorted(checkpoints, key=lambda x: x.created_at)
+
+    def delete_session_checkpoints(self, session_id: str) -> int:
+        """删除会话的所有检查点"""
+        checkpoint_dir = self.checkpoints_dir / session_id
+
+        if not checkpoint_dir.exists():
+            return 0
+
+        import shutil
+        shutil.rmtree(checkpoint_dir)
+        return 1
+```
+
+#### 11.3.3 增强的 PythonSandbox
+
+**修改**: `tools/python_sandbox.py`
+
+```python
+from backend.filestore.checkpoint import CheckpointCapture
+from backend.filestore.file_store import FileStore
+
+
+class PythonSandbox:
+    """Python 沙盒（增强版：支持中间结果捕获）"""
+
+    def __init__(self, ...):
+        # 现有初始化
+        ...
+
+        # 新增: CheckpointCapture
+        self.file_store = FileStore() if file_store is None else file_store
+
+    def execute_with_checkpoints(
+        self,
+        code: str,
+        session_id: str,
+        enable_checkpoints: bool = True,
+        checkpoint_interval: int = 0  # 0 = 仅在 checkpoint() 调用时
+    ) -> PythonExecutionResult:
+        """
+        执行 Python 代码并捕获中间结果
+
+        Args:
+            code: Python 代码
+            session_id: 会话 ID
+            enable_checkpoints: 是否启用检查点
+            checkpoint_interval: 自动检查点间隔（0 = 手动）
+
+        Returns:
+            PythonExecutionResult:
+                - output: 标准输出
+                - checkpoints: 检查点列表
+                - file_refs: 生成的文件引用
+        """
+
+        # 创建检查点捕获器
+        capture = CheckpointCapture(
+            session_id=session_id,
+            checkpoint_store=self.file_store.checkpoints
+        )
+
+        # 执行代码并捕获
+        exec_result = capture.capture_execution(
+            code=code,
+            sandbox=self,
+            enable_auto_capture=enable_checkpoints
+        )
+
+        # 转换为 ToolExecutionResult
+        return ToolExecutionResult(
+            tool_call_id=...,
+            observation=self._format_output_with_checkpoints(exec_result),
+            output_level=OutputLevel.STANDARD,
+            tool_name="run_python",
+            file_refs=exec_result.file_refs,
+            metadata={
+                'checkpoints': exec_result.checkpoints
+            }
+        )
+
+    def _format_output_with_checkpoints(self, result: ExecutionResult) -> str:
+        """格式化输出（包含检查点信息）"""
+        output = result.output
+
+        if result.checkpoints:
+            output += f"\n\n{len(result.checkpoints)} checkpoints created:\n"
+            for cp in result.checkpoints:
+                output += f"  - {cp.name} ({len(cp.variables)} variables)\n"
+
+        if result.file_refs:
+            output += f"\n{len(result.file_refs)} files saved:\n"
+            for ref in result.file_refs:
+                output += f"  - {ref.category.value}:{ref.file_id}\n"
+
+        return output
+```
+
+### 11.4 用户 API 示例
+
+#### 11.4.1 手动检查点
+
+```python
+# 用户代码
+import pandas as pd
+import numpy as np
+
+# 步骤 1
+df = pd.read_csv('sales_data.csv')
+
+# 创建检查点
+checkpoint('step1_loaded')
+
+# 步骤 2
+df_clean = df.dropna()
+
+# 创建检查点
+checkpoint('step2_cleaned')
+
+# 步骤 3
+result = df_clean.groupby('date').agg({'gmv': 'sum'})
+
+# 最终结果
+print(f"Total GMV: {result['gmv'].sum()}")
+```
+
+#### 11.4.2 自动捕获模式
+
+```python
+# 启用自动捕获
+result = run_python(
+    code=complex_analysis_code,
+    session_id="session_123",
+    enable_checkpoints=True
+)
+
+# 结果包含:
+# - output: 执行输出
+# - checkpoints: 自动创建的检查点列表
+# - file_refs: 保存的 DataFrame 和图表
+
+# 获取检查点
+checkpoints = file_store.checkpoints.list_checkpoints("session_123")
+
+# 恢复某个检查点
+restored_vars = file_store.checkpoints.restore_checkpoint(checkpoints[0])
+```
+
+#### 11.4.3 中间结果查询
+
+```python
+# 查询会话的所有中间结果
+checkpoints = file_store.checkpoints.list_checkpoints("session_123")
+
+for cp in checkpoints:
+    print(f"Checkpoint: {cp.name}")
+    print(f"  Variables: {', '.join(cp.variables)}")
+
+    # 查看保存的文件
+    for ref in cp.file_refs:
+        if ref.category == FileCategory.TEMP and ref.metadata.get('type') == 'dataframe':
+            df = file_store.checkpoints._load_dataframe(ref)
+            print(f"  DataFrame: {df.shape}")
+```
+
+### 11.5 与工具集成
+
+#### 11.5.1 run_python 工具增强
+
+**新的工具描述**:
+
+```python
+run_python_tool = StructuredTool.from_function(
+    func=run_python_impl,
+    name="run_python",
+    description="""
+执行安全的 Python 代码（Docker 隔离环境）。
+
+支持的数据分析库：
+- pandas: 数据处理和分析
+- numpy: 数值计算
+- scipy: 科学计算
+- statsmodels: 统计建模
+- matplotlib/seaborn/plotly: 数据可视化
+
+中间结果功能：
+- enable_checkpoints: 启用自动检查点捕获
+- checkpoint_interval: 自动检查点间隔（0=手动）
+- save_var(): 保存单个变量
+- save_df(): 保存 DataFrame
+- save_chart(): 保存图表
+- checkpoint(): 创建检查点
+
+使用示例：
+- run_python(code="df = pd.read_csv('data.csv'); checkpoint('loaded')")
+- run_python(code="df = analyze(); save_df(df, 'result')", enable_checkpoints=True)
+- run_python(code="plt.plot(data); plt.savefig('chart.png')", enable_checkpoints=True)
+
+返回：
+- 标准输出
+- 检查点列表（如果启用）
+- 文件引用列表（保存的 DataFrame、图表）
+    """.strip(),
+    args_schema=PythonCodeInput,
+)
+```
+
+### 11.6 实现计划调整
+
+#### 新增任务
+
+| 任务 | 预估时间 | 依赖 |
+|------|----------|------|
+| **Phase 2.5: 中间结果存储** | | |
+| 2.5.1 CheckpointCapture 实现 | 4 小时 | Phase 1 |
+| 2.5.2 CheckpointStore 实现 | 5 小时 | Phase 1 |
+| 2.5.3 增强 PythonSandbox | 4 小时 | Phase 1, 2.5.1, 2.5.2 |
+| 2.5.4 单元测试 | 3 小时 | 2.5.1-2.5.3 |
+| **新增子任务** | **16 小时** | |
+
+#### 更新后的时间估算
+
+| 版本 | 总时间 | 说明 |
+|------|--------|------|
+| **原计划** | 65 小时 | ~8 个工作日 |
+| **增加中间结果存储** | +16 小时 | |
+| **调整后总计** | **81 小时** | **~10 个工作日** |
+| **并行开发** | **6-7 个工作日** | |
+
+---
+
 ## 11. 附录
 
 ### 11.1 相关文档
@@ -1956,6 +2778,7 @@ class TestFileStoreIntegration:
 - `backend/pipeline/storage/__init__.py` - 现有 DataStorage
 - `backend/memory/flush.py` - MemoryFlush 实现
 - `backend/memory/search.py` - MemorySearch 实现
+- `tools/python_sandbox.py` - Python 沙盒（需增强）
 
 ### 11.3 技术参考
 
@@ -1963,10 +2786,12 @@ class TestFileStoreIntegration:
 - Pydantic 模型验证
 - SQLite FTS5 全文搜索
 - 文件系统安全最佳实践
+- Matplotlib 图表保存
+- Pandas DataFrame 序列化
 
 ---
 
-**文档版本**: v1.0
+**文档版本**: v1.1（新增中间结果存储）
 **创建日期**: 2026-02-06
 **状态**: 待评审
 
