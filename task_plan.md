@@ -144,10 +144,22 @@
   - [x] _is_model_invocation_disabled(): 检查 LLM 调用禁用
   - [x] _apply_context_modifier(): 总是设置 current_skill
   - [x] 5 个 Context Modifier 应用测试全部通过
-- [ ] **US-015**: 示例 Skill - 异动检测
-- [ ] **US-016**: 示例 Skill - 归因分析
-- [ ] **US-017**: 示例 Skill - 报告生成
-- [ ] **US-018**: 示例 Skill - 数据可视化
+- [x] **US-015**: 示例 Skill - 异动检测 ✅
+  - [x] 实现 skills/anomaly_detection/main.py (487 行)
+  - [x] 3 种检测方法: statistical (3-sigma), historical (同比/环比), ai (Claude)
+  - [x] 23 个测试通过
+- [x] **US-016**: 示例 Skill - 归因分析 ✅
+  - [x] 实现 skills/attribution/main.py (534 行)
+  - [x] 3 种归因方法: contribution, correlation, ai
+  - [x] 19 个测试通过
+- [x] **US-017**: 示例 Skill - 报告生成 ✅
+  - [x] 实现 skills/report_gen/main.py (623 行)
+  - [x] 4 种报告类型: daily, weekly, monthly, custom
+  - [x] 19 个测试通过
+- [x] **US-018**: 示例 Skill - 数据可视化 ✅
+  - [x] 实现 skills/visualization/main.py (724 行)
+  - [x] 5 种图表类型: line, bar, pie, scatter, heatmap
+  - [x] 29 个测试通过
 
 ---
 
@@ -155,7 +167,12 @@
 
 - [ ] **US-019**: Agent System Prompt 与工具集成
 - [ ] **US-020**: 知识库初始化
-- [ ] **US-021**: API 服务实现 (FastAPI)
+- [x] **US-021**: API 服务实现 (FastAPI) ✅
+  - [x] JWT 认证系统（登录、登出、令牌刷新）
+  - [x] 速率限制中间件（令牌桶算法）
+  - [x] 增强错误处理（自定义异常类）
+  - [x] 请求/响应日志中间件
+  - [x] 26 个测试通过
 - [ ] **US-022**: IM Bot 集成 (企业微信/钉钉)
 - [ ] **US-023**: Excel 插件
 - [ ] **US-024**: 日志与监控系统
@@ -198,15 +215,15 @@
 ## 📊 进度统计
 
 - **总任务数**: 29 (新增 US-014-ARCH-01, US-014-ARCH-02)
-- **已完成**: 19 (65.5%)
+- **已完成**: 24 (82.8%)
   - Phase 1: 5/5 (100%)
   - Phase 2: 9/9 (100%) ✅
-  - Phase 3: 3/4 (75%) ✅ 新增
-  - Phase 4: 0/7 (0%)
+  - Phase 3: 4/4 (100%) ✅ 完成
+  - Phase 4: 1/7 (14.3%)
   - 基础设施: 1/1 (100%)
   - 记忆管理: 2/2 (100%) ✅
-- **进行中**: 1 (3.4%) - US-INFRA-02: 信息管道设计
-- **待开始**: 9 (31.0%)
+- **进行中**: 0 (0%)
+- **待开始**: 5 (17.2%)
 
 **已完成的 User Story**:
 - ✅ US-001: 项目初始化与目录结构创建
@@ -225,11 +242,24 @@
 - ✅ US-014: Skills 配置系统
 - ✅ US-014-ARCH-01: Skills 系统架构重构 (Anthropic Agent Skills, 132 测试通过)
 - ✅ US-014-ARCH-02: Context Modifier 完全实现 (5 测试通过)
+- ✅ US-015: 异动检测 Skill (23 测试通过)
+- ✅ US-016: 归因分析 Skill (19 测试通过)
+- ✅ US-017: 报告生成 Skill (19 测试通过)
+- ✅ US-018: 数据可视化 Skill (29 测试通过)
+- ✅ US-021: API 服务增强 (26 测试通过)
 - ✅ US-005-MEM-01: 三层记忆文件结构
 - ✅ US-005-MEM-02: Hooks 系统实现与优化 (5个脚本，-54%)
 - ✅ US-INFRA-01: 统一工具输出格式系统 (42 测试通过)
 
-**测试统计**: 746 passed, 1 skipped
+**测试统计**: 1016 passed, 1 skipped
+
+**最新完成**: FileStore 占位符实现 (2026-02-07)
+- ReportStore: 285 行
+- ChartStore: 290 行
+- CacheStore: 342 行
+- TempStore: 298 行
+
+**下一任务**: US-022 - IM Bot 集成 (企业微信/钉钉)
 
 **Pipeline v2.1.0 完成** (2026-02-06):
 - [x] Phase 1: 核心模型定义 (ToolExecutionResult, OutputLevel, ToolCachePolicy)
@@ -493,4 +523,4 @@
 
 ---
 
-**最后更新**: 2026-02-06 Pipeline v2.1.0 完成与 Phase 7 移除工作
+**最后更新**: 2026-02-07 - US-021 API 服务增强完成

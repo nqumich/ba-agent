@@ -17,6 +17,17 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture
+def auth_headers(client):
+    """获取认证头"""
+    response = client.post("/api/v1/auth/login", json={
+        "username": "admin",
+        "password": "admin123"
+    })
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 class TestHealthEndpoint:
     """测试健康检查端点"""
 
@@ -78,30 +89,30 @@ class TestAgentEndpoints:
 class TestFilesEndpoints:
     """测试文件管理端点"""
 
-    def test_list_files_empty(self, client):
+    def test_list_files_empty(self, client, auth_headers):
         """测试列出文件（空列表）"""
-        response = client.get("/api/v1/files")
+        response = client.get("/api/v1/files", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
 
-    def test_upload_file_invalid_format(self, client):
+    def test_upload_file_invalid_format(self, client, auth_headers):
         """测试上传不支持的文件格式"""
         # 创建一个临时文件
         content = b"test content"
         files = {"file": ("test.txt", content, "text/plain")}
 
-        response = client.post("/api/v1/files/upload", files=files)
+        response = client.post("/api/v1/files/upload", files=files, headers=auth_headers)
         # 应该返回错误（不支持 .txt）
         assert response.status_code in [400, 413]
 
-    def test_upload_file_too_large(self, client):
+    def test_upload_file_too_large(self, client, auth_headers):
         """测试上传过大文件"""
         # 创建一个超过 50MB 的模拟文件
         large_content = b"x" * (51 * 1024 * 1024)
         files = {"file": ("large.xlsx", large_content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
 
-        response = client.post("/api/v1/files/upload", files=files)
+        response = client.post("/api/v1/files/upload", files=files, headers=auth_headers)
         # 应该返回 413（文件过大）
         assert response.status_code == 413
 

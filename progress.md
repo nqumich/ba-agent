@@ -10,8 +10,8 @@
 ### 最新测试统计 (2026-02-07)
 
 ```
-总计: 894 个测试
-✅ 通过: 894 (100%)
+总计: 1016 个测试
+✅ 通过: 1016 (100%)
 ⏭️  跳过: 1 (MCP 相关)
 ❌ 失败: 0
 ```
@@ -27,6 +27,11 @@
 | FileStore 系统 | 100+ | ✅ |
 | 存储配置 | 14 | ✅ |
 | API 路由 | 10 | ✅ |
+| **API 认证与授权** | **26** | ✅ |
+| **可视化 Skill** | **29** | ✅ |
+| **异动检测 Skill** | **23** | ✅ |
+| **归因分析 Skill** | **19** | ✅ |
+| **报告生成 Skill** | **19** | ✅ |
 
 ---
 
@@ -80,9 +85,150 @@
 - 内置/外部 Skills 统一管理
 - 10 个 API 路由测试通过
 
+### 数据可视化 Skill 实现 (2026-02-07) ✅
+- **US-018**: 完整实现 visualization/main.py (724 行)
+- 支持 5 种图表类型: line, bar, pie, scatter, heatmap
+- 支持 4 种主题: default, dark, macarons, vintage
+- 图表类型自动推荐
+- LLM 增强 (Claude 优化图表配置)
+- ECharts 配置验证
+- HTML 导出功能
+- 29 个测试通过
+
+### 核心业务 Skills 完整实现 (2026-02-07) ✅
+**三大核心 Skills 全部完成**:
+
+**US-015: 异动检测 Skill** (487 行)
+- 3 种检测方法: statistical (3-sigma), historical (同比/环比), ai (Claude)
+- 异动严重程度评估: low, medium, high
+- Z-score 计算和变化率分析
+- 格式化报告输出
+- 23 个测试通过
+
+**US-016: 归因分析 Skill** (534 行)
+- 3 种归因方法: contribution (贡献度), correlation (相关性), ai (Claude)
+- 维度下钻分析
+- 贡献度百分比计算
+- 影响程度评估
+- 可操作建议生成
+- 19 个测试通过
+
+**US-017: 报告生成 Skill** (623 行)
+- 4 种报告类型: daily, weekly, monthly, custom
+- 2 种输出格式: markdown, html
+- 指标聚合和增长率计算
+- AI 内容增强
+- 报告保存功能
+- 19 个测试通过
+
+### API 服务增强 (2026-02-07) ✅
+**US-021: API 服务完善**
+
+**JWT 认证系统** (`backend/api/auth.py`):
+- JWT 令牌创建和验证（访问令牌 + 刷新令牌）
+- 用户认证（sha256_crypt 密码哈希）
+- 基于角色和权限的访问控制
+- 登录、登出、令牌刷新、用户信息端点
+
+**速率限制中间件** (`backend/api/middleware/rate_limit.py`):
+- 令牌桶算法实现
+- IP 级别和用户级别限制
+- 可配置的排除路径（健康检查、登录等）
+- 速率限制响应头
+
+**增强错误处理** (`backend/api/errors.py`):
+- 自定义异常类（APIException、ValidationException 等）
+- 统一错误响应格式
+- 请求/响应日志中间件（BaseHTTPMiddleware）
+
+**API 集成** (`backend/api/main.py`):
+- 集成认证路由、速率限制、日志中间件
+- 异常处理器
+- 版本更新至 2.2.0
+
+**受保护的路由** (`backend/api/routes/files.py`):
+- 所有文件管理端点添加了认证要求
+
+**测试覆盖**: 26 个认证、速率限制、错误处理测试通过
+
 ---
 
 ## 最新更新
+
+### 2026-02-07 - FileStore 占位符实现完成 ✅
+**Task #117: FileStore 完整实现**
+
+实现了所有占位符存储，从 PlaceholderStore 迁移到完整的 IndexableStore 实现：
+
+**ReportStore** (`backend/filestore/stores/report_store.py`, 285 行):
+- 支持多种报告格式（markdown、html、json）
+- 按会话隔离存储
+- 7 天 TTL 自动清理
+- 按报告类型查询（daily/weekly/monthly/custom）
+
+**ChartStore** (`backend/filestore/stores/chart_store.py`, 290 行):
+- 支持多种图表格式（html、json、png）
+- 图表配置索引（ECharts 配置存储）
+- 7 天 TTL 自动清理
+- 按图表类型查询（line/bar/pie/scatter/heatmap）
+
+**CacheStore** (`backend/filestore/stores/cache_store.py`, 342 行):
+- 基于键的快速查找（get_by_key）
+- 可配置 TTL（默认 1 小时）
+- 缓存命中率统计（hits/misses/hit_rate）
+- 按会话清理（clear_session）
+
+**TempStore** (`backend/filestore/stores/temp_store.py`, 298 行):
+- 短 TTL（默认 24 小时）
+- 按会话隔离
+- 自动清理过期文件
+- 会话级别清理（clear_session）
+
+**测试覆盖**: 44 个 FileStore 测试全部通过 ✅
+
+### 2026-02-07 - API 服务增强 (US-021) ✅
+**Task #116: API 服务完善**
+
+新增功能:
+- **JWT 认证系统** (`backend/api/auth.py`)
+  - 用户登录/登出（username/password 认证）
+  - 访问令牌 + 刷新令牌机制
+  - 基于角色和权限的访问控制（RBAC）
+  - 密码哈希（sha256_crypt）
+
+- **速率限制中间件** (`backend/api/middleware/rate_limit.py`)
+  - 令牌桶算法实现
+  - IP 级别限制（默认 60/分钟）
+  - 用户级别限制（默认 120/分钟）
+  - 可配置的排除路径
+
+- **增强错误处理** (`backend/api/errors.py`)
+  - 自定义异常类（APIException、ValidationException、NotFoundException 等）
+  - 统一错误响应格式
+  - 请求/响应日志中间件（处理时间跟踪）
+
+- **受保护的 API 端点**
+  - 所有文件管理端点现在需要认证
+  - 使用 `Authorization: Bearer <token>` 头访问
+
+**API 使用示例**:
+```bash
+# 登录获取令牌
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin123"}'
+
+# 使用令牌访问受保护端点
+curl http://localhost:8000/api/v1/files \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**环境变量配置**:
+- `BA_JWT_SECRET_KEY`: JWT 密钥（生产环境必须修改）
+- `BA_JWT_EXPIRE_MINUTES`: 访问令牌过期时间（默认 60 分钟）
+- `BA_JWT_REFRESH_DAYS`: 刷新令牌过期时间（默认 7 天）
+- `BA_RATE_LIMIT_IP_PER_MINUTE`: IP 速率限制（默认 60）
+- `BA_RATE_LIMIT_USER_PER_MINUTE`: 用户速率限制（默认 120）
 
 ### 2026-02-07 - API 和 Skills 系统完整集成
 **Task #115: API 和 Skills 系统完整集成**
@@ -139,14 +285,20 @@
 ### 健康检查
 - `GET /api/v1/health` - 健康检查
 
-### 文件管理
+### 认证授权
+- `POST /api/v1/auth/login` - 用户登录（获取访问令牌 + 刷新令牌）
+- `POST /api/v1/auth/refresh` - 刷新访问令牌
+- `GET /api/v1/auth/me` - 获取当前用户信息
+- `POST /api/v1/auth/logout` - 用户登出
+
+### 文件管理（需要认证）
 - `POST /api/v1/files/upload` - 上传文件
 - `GET /api/v1/files` - 列出文件
 - `GET /api/v1/files/{file_id}/metadata` - 获取文件元数据
 - `GET /api/v1/files/{file_id}/download` - 下载文件
 - `DELETE /api/v1/files/{file_id}` - 删除文件
 
-### Agent 交互
+### Agent 交互（需要认证）
 - `POST /api/v1/agent/query` - Agent 查询
 - `POST /api/v1/agent/conversation/start` - 开始新对话
 - `GET /api/v1/agent/conversation/{id}/history` - 获取对话历史
@@ -168,41 +320,54 @@
 
 ## 下一任务
 
-### 优先级 P1 (核心功能)
+### ✅ 优先级 P1 (核心功能) - 已全部完成!
 
-- [ ] **US-015**: 示例 Skill - 异动检测
-  - 实现 skills/anomaly_detection/main.py
-  - 支持多种检测方法 (阈值、Z-score、IQR)
-  - 可视化异动结果
+- [x] **US-015**: 异动检测 Skill ✅
+  - ✅ 实现 skills/anomaly_detection/main.py (487 行)
+  - ✅ 3 种检测方法: statistical (3-sigma), historical (同比/环比), ai (Claude)
+  - ✅ 异动严重程度评估
+  - ✅ 格式化报告输出
+  - 23 个测试通过
 
-- [ ] **US-016**: 示例 Skill - 归因分析
-  - 实现 skills/attribution/main.py
-  - 支持多维度归因
-  - 生成归因报告
+- [x] **US-016**: 归因分析 Skill ✅
+  - ✅ 实现 skills/attribution/main.py (534 行)
+  - ✅ 3 种归因方法: contribution, correlation, ai
+  - ✅ 维度下钻分析
+  - ✅ 影响程度评估
+  - 19 个测试通过
 
-- [ ] **US-017**: 示例 Skill - 报告生成
-  - 实现 skills/report_gen/main.py
-  - 支持多种报告格式
-  - 支持图表嵌入
+- [x] **US-017**: 报告生成 Skill ✅
+  - ✅ 实现 skills/report_gen/main.py (623 行)
+  - ✅ 4 种报告类型: daily, weekly, monthly, custom
+  - ✅ 2 种输出格式: markdown, html
+  - ✅ AI 内容增强
+  - 19 个测试通过
 
-- [ ] **US-018**: 示例 Skill - 数据可视化
-  - 实现 skills/visualization/main.py
-  - 生成 ECharts 代码
-  - 交互式图表
+- [x] **US-018**: 数据可视化 Skill ✅
+  - ✅ 实现 skills/visualization/main.py (724 行)
+  - ✅ 5 种图表类型 (line/bar/pie/scatter/heatmap)
+  - ✅ 4 种主题 (default/dark/macarons/vintage)
+  - ✅ LLM 增强和 HTML 导出
+  - 29 个测试通过
 
 ### 优先级 P2 (集成与部署)
 
-- [ ] **US-021**: API 服务完善
-  - 添加认证/授权 (JWT)
-  - 添加速率限制
-  - 完善错误处理
+- [x] **US-021**: API 服务完善 ✅
+  - ✅ JWT 认证系统（登录、登出、令牌刷新）
+  - ✅ 速率限制中间件（令牌桶算法）
+  - ✅ 增强错误处理（自定义异常类）
+  - ✅ 请求/响应日志中间件
+  - 26 个测试通过
 
 - [ ] **US-022**: IM Bot 集成
   - 企业微信 Webhook
   - 钉钉 Bot
 
+- [ ] **US-023**: Excel 插件
+
 ### 优先级 P3 (质量保证)
 
+- [ ] **US-024**: 日志与监控系统
 - [ ] **US-025**: 单元测试与覆盖率提升
 - [ ] **US-026**: 文档完善
 
@@ -210,21 +375,37 @@
 
 ## 技术债务
 
-### 可优化的部分
+### ✅ 已完成
 
-1. **Skills 实现待完成**
-   - anomaly_detection/main.py - 只有 SKILL.md，无实现
-   - attribution/main.py - 只有 SKILL.md，无实现
-   - report_gen/main.py - 只有 SKILL.md，无实现
-   - visualization/main.py - 只有 SKILL.md，无实现
+1. **Skills 核心实现** (2026-02-07) ✅
+   - ~~anomaly_detection/main.py - 只有 SKILL.md，无实现~~ ✅ 已完成 (487 行, 23 测试)
+   - ~~attribution/main.py - 只有 SKILL.md，无实现~~ ✅ 已完成 (534 行, 19 测试)
+   - ~~report_gen/main.py - 只有 SKILL.md，无实现~~ ✅ 已完成 (623 行, 19 测试)
+   - ~~visualization/main.py - 只有 SKILL.md，无实现~~ ✅ 已完成 (724 行, 29 测试)
 
-2. **Memory Search 泛化**
+2. **API 服务增强** (2026-02-07) ✅
+   - ~~JWT 认证系统~~ ✅ 已完成
+   - ~~速率限制中间件~~ ✅ 已完成
+   - ~~增强错误处理~~ ✅ 已完成
+
+3. **FileStore 占位符实现** (2026-02-07) ✅
+   - ~~report_store 占位符~~ ✅ 已完成 (285 行, 完整报告存储)
+   - ~~chart_store 占位符~~ ✅ 已完成 (290 行, 图表存储)
+   - ~~cache_store 占位符~~ ✅ 已完成 (342 行, 缓存存储 + TTL)
+   - ~~temp_store 占位符~~ ✅ 已完成 (298 行, 临时文件存储)
+
+### 待优化 (非阻塞性)
+
+1. **Memory Search 泛化**
    - 当前实现有较多定制化逻辑
    - 可考虑抽象为通用搜索框架
+   - **优先级**: P3 (可在后续迭代中优化)
 
-3. **FileStore 占位符实现**
-   - report_store, chart_store, cache_store, temp_store 仍为占位符
+2. **API 文档完善**
+   - 已创建基础 API 文档 (docs/api.md)
+   - 可考虑添加更多示例和用例
+   - **优先级**: P3
 
 ---
 
-**最后更新**: 2026-02-07
+**最后更新**: 2026-02-07 - US-021 API 服务增强完成

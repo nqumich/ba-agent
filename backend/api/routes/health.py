@@ -5,7 +5,7 @@
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def health_check():
     """
     return HealthStatus(
         status="healthy",
-        timestamp=datetime.utcnow().isoformat() + "Z",
+        timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         version="2.1.0",
         uptime_seconds=time.time() - _start_time
     )

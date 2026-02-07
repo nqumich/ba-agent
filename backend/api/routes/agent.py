@@ -99,13 +99,13 @@ async def start_conversation(
     """
     try:
         import uuid
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         conversation_id = f"conv_{uuid.uuid4().hex[:12]}"
 
         result = {
             "conversation_id": conversation_id,
-            "created_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "user_id": user_id or "anonymous",
             "session_id": session_id or "default",
             "status": "active"

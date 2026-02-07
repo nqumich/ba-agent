@@ -1,6 +1,6 @@
 # BA-Agent 开发指南
 
-> **Version**: v2.1.0
+> **Version**: v2.2.0
 > **Last Updated**: 2026-02-07
 
 完整的开发指南，包括项目结构、测试、贡献流程等。
@@ -13,13 +13,14 @@
 - [项目结构](#项目结构)
 - [环境搭建](#环境搭建)
 - [测试](#测试)
+- [API 服务](#api-服务)
 - [贡献指南](#贡献指南)
 
 ---
 
 ## 开发状态
 
-### 总体进度: ~75%
+### 总体进度: ~85%
 
 | Phase | 状态 | 说明 |
 |-------|------|------|
@@ -29,8 +30,8 @@
 | **Pipeline v2.1** | ✅ 完成 | 完整的 Pipeline 系统 |
 | **文件系统** | ✅ 完成 | FileStore 统一管理 |
 | **记忆系统** | ✅ 完成 | 记忆存储 + 文件引用 |
-| **Skill 业务逻辑** | ⏳ 待实现 | 4 个 Skill 核心逻辑 |
-| **FastAPI 服务** | ⏳ 待实现 | REST API 服务 |
+| **Skill 业务逻辑** | ✅ 完成 | 4 个 Skill 核心逻辑 |
+| **FastAPI 服务** | ✅ 完成 | REST API + JWT 认证 |
 | **IM Bot 集成** | ⏳ 待实现 | 钉钉/企业微信 |
 | **Excel 插件** | ⏳ 待实现 | Office.js 侧边栏 |
 
@@ -259,8 +260,8 @@ pytest --cov=backend --cov-report=html
 ### 测试状态
 
 ```
-总计: 839 个测试
-✅ 通过: 839 (100%)
+总计: 1016 个测试
+✅ 通过: 1016 (100%)
 ⏭️  跳过: 1 (MCP 相关)
 ❌ 失败: 0
 ```
@@ -284,6 +285,98 @@ class TestMemoryFlush:
         flush.add_message("user", "Hello")
         assert flush.message_count == 1
 ```
+
+---
+
+## API 服务
+
+### 启动 API 服务
+
+```bash
+# 开发模式（自动重载）
+uvicorn backend.api.main:app --reload --port 8000
+
+# 生产模式
+uvicorn backend.api.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+### API 端点
+
+#### 认证端点
+
+```bash
+# 登录（获取访问令牌）
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin123"}'
+
+# 响应示例
+{
+  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+  "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "user": {
+    "user_id": "u_001",
+    "username": "admin",
+    "role": "admin",
+    "permissions": ["read", "write", "delete", "admin"]
+  }
+}
+
+# 刷新令牌
+curl -X POST http://localhost:8000/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token": "<refresh_token>"}'
+
+# 获取当前用户信息
+curl http://localhost:8000/api/v1/auth/me \
+  -H "Authorization: Bearer <access_token>"
+
+# 登出
+curl -X POST http://localhost:8000/api/v1/auth/logout \
+  -H "Authorization: Bearer <access_token>"
+```
+
+#### 受保护的端点示例
+
+```bash
+# 文件管理（需要认证）
+# 上传文件
+curl -X POST http://localhost:8000/api/v1/files/upload \
+  -H "Authorization: Bearer <access_token>" \
+  -F "file=@data.xlsx"
+
+# 列出文件
+curl http://localhost:8000/api/v1/files \
+  -H "Authorization: Bearer <access_token>"
+
+# Agent 查询
+curl -X POST http://localhost:8000/api/v1/agent/query \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "分析今天的销售数据"}'
+```
+
+### 环境变量配置
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `BA_JWT_SECRET_KEY` | JWT 密钥（生产环境必须修改） | ba-agent-secret-key-change-in-production |
+| `BA_JWT_EXPIRE_MINUTES` | 访问令牌过期时间（分钟） | 60 |
+| `BA_JWT_REFRESH_DAYS` | 刷新令牌过期时间（天） | 7 |
+| `BA_RATE_LIMIT_IP_PER_MINUTE` | IP 速率限制（每分钟） | 60 |
+| `BA_RATE_LIMIT_USER_PER_MINUTE` | 用户速率限制（每分钟） | 120 |
+| `BA_RATE_LIMIT_BURST` | 突发流量缓冲 | 10 |
+
+### 默认用户
+
+| 用户名 | 密码 | 角色 | 权限 |
+|--------|------|------|------|
+| admin | admin123 | admin | read, write, delete, admin |
+| user | user123 | user | read, write |
+
+**注意**: 生产环境必须修改默认密码！
 
 ---
 

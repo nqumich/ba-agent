@@ -4,7 +4,7 @@
 处理文件上传、下载、元数据查询等
 """
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
@@ -15,6 +15,7 @@ import io
 from backend.filestore import FileStore, get_file_store
 from backend.models.filestore import FileRef, FileCategory
 from backend.api.services.excel_processor import create_excel_validator
+from backend.api.auth import get_current_user, User
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,8 @@ class FileListResponse(BaseModel):
 async def upload_file(
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
-    user_id: Optional[str] = Form(None)
+    user_id: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user)
 ):
     """
     上传文件
@@ -134,7 +136,10 @@ async def upload_file(
 
 
 @router.get("/{file_id}/metadata", response_model=FileMetadataResponse)
-async def get_file_metadata(file_id: str):
+async def get_file_metadata(
+    file_id: str,
+    current_user: User = Depends(get_current_user)
+):
     """
     获取文件元数据
     """
@@ -166,7 +171,10 @@ async def get_file_metadata(file_id: str):
 
 
 @router.get("/{file_id}/download")
-async def download_file(file_id: str):
+async def download_file(
+    file_id: str,
+    current_user: User = Depends(get_current_user)
+):
     """
     下载文件
     """
@@ -202,7 +210,8 @@ async def download_file(file_id: str):
 async def list_files(
     category: Optional[str] = None,
     session_id: Optional[str] = None,
-    limit: int = 100
+    limit: int = 100,
+    current_user: User = Depends(get_current_user)
 ):
     """
     列出文件
@@ -261,7 +270,10 @@ async def list_files(
 
 
 @router.delete("/{file_id}")
-async def delete_file(file_id: str):
+async def delete_file(
+    file_id: str,
+    current_user: User = Depends(get_current_user)
+):
     """
     删除文件
     """
