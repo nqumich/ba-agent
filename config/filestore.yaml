@@ -2,7 +2,13 @@
 
 filestore:
   # 存储根目录
-  base_dir: "/var/lib/ba-agent"
+  # 支持环境变量 BA_STORAGE_DIR 覆盖
+  # 默认使用用户本地目录:
+  #   - macOS:     ~/Library/Application Support/ba-agent
+  #   - Windows:   %APPDATA%/ba-agent
+  #   - Linux:     ~/.local/share/ba-agent (遵循 XDG)
+  #   - 开发环境:  ./.ba-agent/storage (相对项目目录)
+  base_dir: "~/.local/share/ba-agent"  # 将在运行时解析为实际路径
 
   # 全局限制
   max_total_size_gb: 10

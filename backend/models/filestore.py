@@ -4,12 +4,41 @@
 定义统一文件存储管理系统的核心模型
 """
 
+import os
+import platform
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
 from pathlib import Path
 from enum import Enum
 from .base import TimestampMixin, MetadataMixin
+
+
+def _get_default_storage_dir() -> Path:
+    """
+    获取默认的存储目录（跨平台）
+
+    Returns:
+        默认存储目录路径
+    """
+    # 检查环境变量
+    env_dir = os.getenv("BA_STORAGE_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+
+    # 根据平台选择用户本地目录
+    system = platform.system()
+
+    if system == "Darwin":  # macOS
+        base = Path.home() / "Library" / "Application Support" / "ba-agent"
+    elif system == "Windows":
+        appdata = os.getenv("APPDATA", "")
+        base = Path(appdata) / "ba-agent" if appdata else Path.home() / ".ba-agent"
+    else:  # Linux 及其他
+        xdg_data = os.getenv("XDG_DATA_HOME")
+        base = Path(xdg_data) / "ba-agent" if xdg_data else Path.home() / ".local" / "share" / "ba-agent"
+
+    return base
 
 
 class FileCategory(str, Enum):
@@ -325,8 +354,8 @@ class FileStoreConfig(BaseModel):
     """文件系统配置"""
 
     base_dir: Path = Field(
-        default=Path("/var/lib/ba-agent"),
-        description="存储根目录"
+        default_factory=lambda: _get_default_storage_dir(),
+        description="存储根目录（跨平台）"
     )
     max_total_size_gb: int = Field(
         default=10,
@@ -374,7 +403,7 @@ class FileStoreConfig(BaseModel):
         arbitrary_types_allowed = True
         json_schema_extra = {
             "example": {
-                "base_dir": "/var/lib/ba-agent",
+                "base_dir": "~/.local/share/ba-agent",
                 "max_total_size_gb": 10,
                 "cleanup_interval_hours": 1,
                 "cleanup_threshold_percent": 90.0

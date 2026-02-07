@@ -14,6 +14,7 @@ Design v2.0.1:
 import hashlib
 import json
 import os
+import platform
 import time
 import uuid
 from datetime import datetime
@@ -21,6 +22,34 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel
+
+
+def _get_default_storage_dir() -> Path:
+    """
+    获取默认的存储目录（跨平台）
+
+    Returns:
+        默认存储目录路径
+    """
+    # 检查环境变量
+    env_dir = os.getenv("BA_STORAGE_DIR")
+    if env_dir:
+        base = Path(env_dir).expanduser().resolve()
+        return base / "artifacts"
+
+    # 根据平台选择用户本地目录
+    system = platform.system()
+
+    if system == "Darwin":  # macOS
+        base = Path.home() / "Library" / "Application Support" / "ba-agent"
+    elif system == "Windows":
+        appdata = os.getenv("APPDATA", "")
+        base = Path(appdata) / "ba-agent" if appdata else Path.home() / ".ba-agent"
+    else:  # Linux 及其他
+        xdg_data = os.getenv("XDG_DATA_HOME")
+        base = Path(xdg_data) / "ba-agent" if xdg_data else Path.home() / ".local" / "share" / "ba-agent"
+
+    return base / "artifacts"
 
 
 class ArtifactMetadata(BaseModel):
@@ -55,7 +84,7 @@ class DataStorage:
     """
 
     # Default configuration
-    DEFAULT_STORAGE_DIR = Path("/var/lib/ba-agent/artifacts")
+    DEFAULT_STORAGE_DIR = _get_default_storage_dir()
     DEFAULT_MAX_AGE_HOURS = 24
     DEFAULT_MAX_SIZE_MB = 1000
 
@@ -73,7 +102,7 @@ class DataStorage:
         Initialize data storage.
 
         Args:
-            storage_dir: Directory for artifact storage (default: /var/lib/ba-agent/artifacts)
+            storage_dir: Directory for artifact storage (default: user local directory)
             max_age_hours: Maximum age of artifacts before cleanup (hours)
             max_size_mb: Maximum total storage size before cleanup (MB)
         """

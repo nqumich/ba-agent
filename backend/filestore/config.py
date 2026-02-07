@@ -2,10 +2,12 @@
 文件系统配置加载器
 
 从 YAML 文件加载文件系统配置
+支持跨平台存储路径
 """
 
+import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 
 try:
     import yaml
@@ -14,6 +16,13 @@ except ImportError:
     YAML_AVAILABLE = False
 
 from backend.models.filestore import FileStoreConfig
+
+# 导入存储配置模块
+try:
+    from backend.storage.config import get_storage_dir
+    STORAGE_MODULE_AVAILABLE = True
+except ImportError:
+    STORAGE_MODULE_AVAILABLE = False
 
 
 class FileStoreConfigLoader:
@@ -65,8 +74,20 @@ class FileStoreConfigLoader:
 
         config_data = data['filestore']
 
-        # 转换路径
-        base_dir = Path(config_data.get('base_dir', '/var/lib/ba-agent'))
+        # 转换路径 - 支持环境变量和 ~ 展开
+        base_dir_str = config_data.get('base_dir', '~/.local/share/ba-agent')
+
+        # 检查环境变量
+        env_dir = os.getenv("BA_STORAGE_DIR")
+        if env_dir:
+            base_dir_str = env_dir
+
+        # 展开路径
+        base_dir = Path(base_dir_str).expanduser().resolve()
+
+        # 如果使用存储配置模块，让它处理默认路径
+        if STORAGE_MODULE_AVAILABLE and base_dir_str == "~/.local/share/ba-agent":
+            base_dir = get_storage_dir()
 
         # 提取 TTL 配置
         ttl_config = {}
@@ -93,7 +114,22 @@ class FileStoreConfigLoader:
     @classmethod
     def _get_default_config(cls) -> FileStoreConfig:
         """获取默认配置"""
-        return FileStoreConfig()
+        # 使用跨平台默认目录
+        if STORAGE_MODULE_AVAILABLE:
+            base_dir = get_storage_dir()
+        else:
+            # 回退方案
+            import platform
+            if platform.system() == "Darwin":  # macOS
+                base_dir = Path.home() / "Library" / "Application Support" / "ba-agent"
+            elif platform.system() == "Windows":
+                appdata = os.getenv("APPDATA", "")
+                base_dir = Path(appdata) / "ba-agent" if appdata else Path.home() / ".ba-agent"
+            else:  # Linux
+                xdg_data = os.getenv("XDG_DATA_HOME")
+                base_dir = Path(xdg_data) / "ba-agent" if xdg_data else Path.home() / ".local" / "share" / "ba-agent"
+
+        return FileStoreConfig(base_dir=base_dir)
 
     @classmethod
     def save_default_config(cls, output_path: Optional[Path] = None) -> None:
@@ -110,9 +146,15 @@ class FileStoreConfigLoader:
             output_path = cls.DEFAULT_CONFIG_PATH
 
         # 创建默认配置
+        # 使用跨平台默认路径
+        if STORAGE_MODULE_AVAILABLE:
+            default_base_dir = str(get_storage_dir())
+        else:
+            default_base_dir = '~/.local/share/ba-agent'  # 将在运行时解析
+
         default_config = {
             'filestore': {
-                'base_dir': '/var/lib/ba-agent',
+                'base_dir': default_base_dir,
                 'max_total_size_gb': 10,
                 'cleanup_interval_hours': 1,
                 'cleanup_threshold_percent': 90,
