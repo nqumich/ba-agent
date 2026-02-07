@@ -607,7 +607,7 @@ class BAAgentService:
                 # 添加推荐问题
                 if structured_response.action.recommended_questions:
                     questions_html = '<br>'.join(
-                        f'<button class="recommended-question" style="display: block; width: 100%; text-align: left; padding: 10px; margin: 6px 0; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; transition: all 0.2s;" onclick="document.getElementById(\\'agent-query\\').value=this.textContent;document.getElementById(\\'agent-query\\').focus();">💡 {q}</button>'
+                        f'<button class="recommended-question" style="display: block; width: 100%; text-align: left; padding: 10px; margin: 6px 0; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; cursor: pointer; transition: all 0.2s;" onclick="document.getElementById(\'agent-query\').value=this.textContent;document.getElementById(\'agent-query\').focus();">💡 {q}</button>'
                         for q in structured_response.action.recommended_questions
                     )
                     display_parts.append(f"""
