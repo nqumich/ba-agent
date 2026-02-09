@@ -46,6 +46,10 @@ export default defineConfig(async () => {
   return {
     server: {
       proxy: {
+       "/api": {
+         target: "http://localhost:8000",
+         changeOrigin: true,
+       },
        "/websso": {
          target: process.env.NODE_ENV === "prod"? "https://nocode.sankuai.com": "https://nocode.ee.test.sankuai.com",
          changeOrigin: true,

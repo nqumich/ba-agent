@@ -15,7 +15,9 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Base
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnableConfig
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, END
 # TODO: LangGraph V2.0 迁移 - create_react_agent 将移至 langchain.agents
@@ -151,26 +153,57 @@ class BAAgent:
             hooks_enabled=True,
         )
 
-    def _init_llm(self) -> ChatAnthropic:
+    def _init_llm(self) -> BaseChatModel:
         """
-        初始化 Claude LLM
+        根据配置的 provider 初始化 LLM（Anthropic 或 OpenAI 兼容）。
 
         Returns:
-            ChatAnthropic 实例
+            BaseChatModel 实例（ChatAnthropic 或 ChatOpenAI）
         """
-        # 获取 API 密钥
+        provider = (self.app_config.llm.provider or "anthropic").strip().lower()
+
+        if provider == "openai":
+            return self._init_llm_openai()
+        return self._init_llm_anthropic()
+
+    def _init_llm_openai(self) -> ChatOpenAI:
+        """初始化 OpenAI 兼容 LLM（如美团 AIGC 网关）。"""
+        api_key = (
+            os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("BA_OPENAI_API_KEY")
+            or self.app_config.llm.api_key
+        )
+        if not api_key or not str(api_key).strip():
+            raise ValueError(
+                "OPENAI API 未配置。请设置 OPENAI_API_KEY 或 BA_OPENAI_API_KEY 环境变量。"
+            )
+        base_url = (
+            os.environ.get("OPENAI_BASE_URL")
+            or os.environ.get("OPENAI_API_BASE")
+            or self.app_config.llm.base_url
+        )
+        kwargs = {
+            "model": self.config.model,
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
+            "api_key": api_key.strip(),
+            "request_timeout": self.app_config.llm.timeout,
+        }
+        if base_url and str(base_url).strip():
+            kwargs["base_url"] = str(base_url).strip().rstrip("/")
+        return ChatOpenAI(**kwargs)
+
+    def _init_llm_anthropic(self) -> ChatAnthropic:
+        """初始化 Anthropic Claude LLM。"""
         api_key = self._get_api_key()
         if not api_key:
             raise ValueError(
                 "ANTHROPIC_API_KEY not found. "
                 "Please set ANTHROPIC_API_KEY environment variable or BA_ANTHROPIC_API_KEY."
             )
-
-        # 获取自定义 API 端点（可选）
-        # 优先级: 1. 环境变量 ANTHROPIC_BASE_URL 2. 配置文件中的 base_url
         base_url = os.environ.get("ANTHROPIC_BASE_URL") or self.app_config.llm.base_url
-
-        # 创建 ChatAnthropic 实例
+        if base_url and base_url.rstrip("/").endswith("/v1/messages"):
+            base_url = base_url.rstrip("/").rsplit("/v1/messages", 1)[0].rstrip("/") or base_url
         llm_kwargs = {
             "model": self.config.model,
             "temperature": self.config.temperature,
@@ -178,14 +211,9 @@ class BAAgent:
             "api_key": api_key,
             "timeout": self.app_config.llm.timeout,
         }
-
-        # 如果有自定义 base_url，添加到参数中
         if base_url:
             llm_kwargs["base_url"] = base_url
-
-        llm = ChatAnthropic(**llm_kwargs)
-
-        return llm
+        return ChatAnthropic(**llm_kwargs)
 
     def _get_api_key(self) -> str:
         """
@@ -937,10 +965,18 @@ class BAAgent:
             }
 
         except Exception as e:
+            logger.exception("invoke failed")
+            err = str(e)
+            if "NoneType" in err and "iterable" in err:
+                err = (
+                    "API 返回格式与当前 SDK 不兼容（常见于第三方代理如 LingYi）。"
+                    "请尝试：1) 使用官方 Anthropic API（不设置 ANTHROPIC_BASE_URL）；"
+                    "2) 或将 ANTHROPIC_BASE_URL 设为仅域名根，如 https://api.lingyaai.cn。"
+                )
             return {
                 "conversation_id": conversation_id,
                 "user_id": user_id,
-                "response": f"抱歉，处理过程中出现错误: {str(e)}",
+                "response": f"抱歉，处理过程中出现错误: {err}",
                 "success": False,
                 "error": str(e),
                 "timestamp": datetime.now().isoformat(),

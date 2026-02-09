@@ -5,27 +5,65 @@ import { Input } from "@/components/ui/input";
 import { Send, Paperclip, Mic, ArrowLeft } from "lucide-react";
 import { motion } from 'framer-motion';
 
-export function ChatInterface({ initialPrompt, onBack }) {
-  const [messages, setMessages] = useState([
-    { role: 'user', content: initialPrompt }
-  ]);
-  const [inputValue, setInputValue] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const scrollRef = useRef(null);
+const API_BASE = import.meta.env.VITE_API_BASE || '';
 
-  // 模拟 AI 回复
-  useEffect(() => {
-    if (isLoading) {
-      const timer = setTimeout(() => {
-        setMessages(prev => [...prev, { 
-          role: 'ai', 
-          content: '好的，我已经收到了您的需求。正在为您调取相关数据并进行分析，请稍候...' 
-        }]);
-        setIsLoading(false);
-      }, 1500);
-      return () => clearTimeout(timer);
+export function ChatInterface({ initialPrompt, onBack }) {
+  const [messages, setMessages] = useState(
+    initialPrompt ? [{ role: 'user', content: initialPrompt }] : []
+  );
+  const [inputValue, setInputValue] = useState("");
+  const [isLoading, setIsLoading] = useState(!!initialPrompt);
+  const [conversationId, setConversationId] = useState(null);
+  const scrollRef = useRef(null);
+  const initialSentRef = useRef(false);
+
+  // 发送消息到后端并更新会话（相对路径 /api 会由 Vite 代理到 localhost:8000）
+  const sendToBackend = async (text) => {
+    try {
+      const url = API_BASE ? `${API_BASE.replace(/\/$/, '')}/api/v1/chat` : '/api/v1/chat';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          conversation_id: conversationId || undefined,
+        }),
+      });
+      const raw = await res.text();
+      let data = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (_) {
+        data = {};
+      }
+      if (!res.ok) {
+        const msg = data.detail || data.response || (raw && raw.slice(0, 300)) || res.statusText;
+        const statusHint = `(HTTP ${res.status})`;
+        throw new Error(`${statusHint} ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`);
+      }
+      setConversationId(data.conversation_id);
+      setMessages(prev => [...prev, { role: 'ai', content: data.response ?? '（无回复内容）' }]);
+    } catch (err) {
+      const isNetwork = err.message.includes('fetch') || err.message.includes('Failed') || err.message.includes('Network');
+      const hint = isNetwork || err.message.includes('500') || err.message.includes('502')
+        ? '请确认后端已启动：在项目根目录执行 ./venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000'
+        : '';
+      setMessages(prev => [...prev, {
+        role: 'ai',
+        content: `请求失败：${err.message}${hint ? ' ' + hint : ''}`,
+      }]);
+    } finally {
+      setIsLoading(false);
     }
-  }, [isLoading]);
+  };
+
+  // 进入对话时若有 initialPrompt，则请求首条回复（仅执行一次）
+  useEffect(() => {
+    if (initialPrompt && !initialSentRef.current) {
+      initialSentRef.current = true;
+      sendToBackend(initialPrompt);
+    }
+  }, [initialPrompt]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -35,10 +73,12 @@ export function ChatInterface({ initialPrompt, onBack }) {
   }, [messages]);
 
   const handleSend = () => {
-    if (!inputValue.trim()) return;
-    setMessages(prev => [...prev, { role: 'user', content: inputValue }]);
+    const text = inputValue.trim();
+    if (!text) return;
+    setMessages(prev => [...prev, { role: 'user', content: text }]);
     setInputValue("");
     setIsLoading(true);
+    sendToBackend(text);
   };
 
   return (
@@ -122,7 +162,7 @@ export function ChatInterface({ initialPrompt, onBack }) {
                         size="icon" 
                         className="bg-blue-600 hover:bg-blue-700 text-white h-9 w-9 rounded-full ml-1 shrink-0 shadow-sm"
                         onClick={handleSend}
-                        disabled={!inputValue.trim()}
+                        disabled={!inputValue.trim() || isLoading}
                     >
                         <Send className="h-4 w-4" />
                     </Button>
