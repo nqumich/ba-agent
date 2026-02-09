@@ -13,6 +13,9 @@ from tools.web_search import (
     web_search_tool,
 )
 
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
+
 
 class TestWebSearchInput:
     """测试 WebSearchInput 模型"""
@@ -126,8 +129,9 @@ class TestWebSearchImpl:
     def test_basic_search(self):
         """测试基本搜索"""
         result = web_search_impl(query="Python 数据分析")
-        assert "Python 数据分析" in result
-        assert "搜索结果" in result
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert "Python 数据分析" in result.observation
 
     def test_search_with_custom_max_results(self):
         """测试自定义最大结果数"""
@@ -135,9 +139,10 @@ class TestWebSearchImpl:
             query="测试",
             max_results=5
         )
-        # 应该只返回较少的结果
-        lines = result.strip().split('\n')
-        assert len(lines) <= 5
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        # 检查观察结果中包含结果数量信息
+        assert "result_count" in result.observation.lower() or "结果" in result.observation
 
     def test_search_with_domain_filter(self):
         """测试带域名过滤的搜索"""
@@ -145,7 +150,8 @@ class TestWebSearchImpl:
             query="测试",
             domain_filter="wikipedia.org"
         )
-        assert result is not None
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
 
 class TestWebSearchTool:
@@ -169,7 +175,9 @@ class TestWebSearchTool:
             "recency": "oneWeek",
             "max_results": 5,
         })
-        assert "测试搜索" in result
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert "测试搜索" in result.observation
 
 
 # 集成测试已移至 test_web_search_integration.py

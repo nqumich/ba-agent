@@ -15,6 +15,9 @@ from tools.python_sandbox import (
 )
 from backend.docker.sandbox import reset_sandbox, DockerSandbox
 
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
+
 
 class TestPythonCodeInput:
     """测试 PythonCodeInput 模型"""
@@ -176,7 +179,9 @@ class TestRunPythonImpl:
         result = run_python_impl("print('Hello from Python')", timeout=60)
 
         # 验证
-        assert 'Hello from Python' in result
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert 'Hello from Python' in result.observation
         mock_sandbox.execute_python.assert_called_once()
 
     @patch('tools.python_sandbox.get_sandbox')
@@ -204,8 +209,9 @@ class TestRunPythonImpl:
         result = run_python_impl("print(undefined)", timeout=60)
 
         # 验证
-        assert "代码执行失败" in result
-        assert "NameError" in result
+        assert isinstance(result, ToolExecutionResult)
+        assert not result.success
+        assert "NameError" in result.observation
 
     @patch('tools.python_sandbox.get_sandbox')
     @patch('tools.python_sandbox.get_config')
@@ -232,7 +238,9 @@ class TestRunPythonImpl:
         result = run_python_impl("x = 1", timeout=60)
 
         # 验证
-        assert result == "代码执行成功，无输出"
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert "代码执行成功" in result.observation
 
 
 class TestRunPythonTool:
@@ -278,7 +286,9 @@ class TestRunPythonTool:
             "timeout": 60
         })
 
-        assert "42" in result
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert "42" in result.observation
 
         # 验证 sandbox.execute_python 被调用
         mock_sandbox.execute_python.assert_called_once()
@@ -318,7 +328,9 @@ class TestPythonSandboxIntegration:
     def test_real_docker_simple_print(self):
         """测试简单 print 语句"""
         result = run_python_impl("print('Hello from Docker Python')", timeout=30)
-        assert "Hello from Docker Python" in result
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert "Hello from Docker Python" in result.observation
 
     @pytest.mark.slow
     @pytest.mark.docker

@@ -32,6 +32,20 @@ from .flush import (
     MemoryFlushConfig,
     MemoryFlush
 )
+from .flush_enhanced import (
+    FileRefDetector,
+    EnhancedMemoryFlush,
+    create_enhanced_memory_flush
+)
+from .search_enhanced import (
+    FileRefIndex,
+    FileRefSearchResult,
+    FileRefMemorySearcher,
+    enhance_search_results_with_file_refs,
+    format_search_results_with_file_refs,
+    get_file_ref_index,
+    create_file_ref_searcher
+)
 
 __all__ = [
     "ensure_memory_index_schema",
@@ -55,4 +69,16 @@ __all__ = [
     "MemoryExtractor",
     "MemoryFlushConfig",
     "MemoryFlush",
+    # Enhanced flush with file reference support
+    "FileRefDetector",
+    "EnhancedMemoryFlush",
+    "create_enhanced_memory_flush",
+    # Enhanced search with file reference support
+    "FileRefIndex",
+    "FileRefSearchResult",
+    "FileRefMemorySearcher",
+    "enhance_search_results_with_file_refs",
+    "format_search_results_with_file_refs",
+    "get_file_ref_index",
+    "create_file_ref_searcher",
 ]

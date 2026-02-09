@@ -110,9 +110,18 @@ class TestBAAgent:
         """测试 invoke 方法（不实际调用 LLM）"""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-123")
 
-        # Mock LLM 响应
+        # Mock LLM 响应 - 使用结构化 JSON 格式
+        structured_response = '''{
+    "task_analysis": "测试分析",
+    "execution_plan": "R1: 返回测试响应",
+    "current_round": 1,
+    "action": {
+        "type": "complete",
+        "content": "测试响应"
+    }
+}'''
         mock_llm = MagicMock()
-        mock_llm.invoke.return_value = AIMessage(content="测试响应")
+        mock_llm.invoke.return_value = AIMessage(content=structured_response)
         mock_chat_anthropic.return_value = mock_llm
 
         agent = BAAgent()
@@ -120,13 +129,14 @@ class TestBAAgent:
         # Mock agent
         agent.agent = MagicMock()
         agent.agent.invoke.return_value = {
-            "messages": [AIMessage(content="测试响应")]
+            "messages": [AIMessage(content=structured_response)]
         }
 
         result = agent.invoke("你好")
 
         assert result["success"] is True
-        assert result["response"] == "测试响应"
+        # 响应现在包含 HTML 格式化内容
+        assert "测试响应" in result["response"]
         assert "conversation_id" in result
 
     def test_extract_response_from_ai_message(self, monkeypatch):
@@ -135,22 +145,29 @@ class TestBAAgent:
 
         agent = BAAgent()
 
-        # 测试字符串内容
+        # 测试字符串内容（非结构化）- 现在会被格式化为 HTML
         result1 = agent._extract_response({
             "messages": [AIMessage(content="测试响应")]
         })
-        assert result1 == "测试响应"
+        # 非结构化响应也会被包装成 HTML
+        assert "测试响应" in result1
 
-        # 测试列表内容（多模态）
+        # 测试结构化 JSON 响应
+        structured_response = '''{
+    "task_analysis": "测试分析",
+    "execution_plan": "R1: 返回测试",
+    "current_round": 1,
+    "action": {
+        "type": "complete",
+        "content": "结构化响应"
+    }
+}'''
         result2 = agent._extract_response({
-            "messages": [
-                AIMessage(content=[
-                    {"type": "text", "text": "第一部分"},
-                    {"type": "text", "text": "第二部分"},
-                ])
-            ]
+            "messages": [AIMessage(content=structured_response)]
         })
-        assert result2 == "第一部分\n第二部分"
+        # 应该返回包含 HTML 格式化内容
+        assert "结构化响应" in result2
+        assert "task-analysis" in result2
 
     def test_extract_response_empty(self, monkeypatch):
         """测试提取空响应"""

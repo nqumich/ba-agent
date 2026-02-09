@@ -79,6 +79,28 @@ EOF
             echo ""
         } >> "$MEMORY_FILE"
 
+        # 显示会话结束检查清单
+        CHECKLIST_FILE="$HOME/.ba-agent-dev/SESSION_CHECKLIST.md"
+        if [ -f "$CHECKLIST_FILE" ]; then
+            mkdir -p .claude
+            {
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "📋 会话结束检查清单"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo ""
+                head -50 "$CHECKLIST_FILE"
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo ""
+                echo "💡 快速检查命令:"
+                echo "  pytest -q --tb=no              # 运行测试"
+                echo "  git status                     # 查看变更"
+                echo "  cat ~/.ba-agent-dev/SESSION_CHECKLIST.md  # 查看完整清单"
+                echo ""
+            } > .claude/stop-message.txt
+        fi
+
         # 检查 task_plan.md 完成度
         if [ -f "task_plan.md" ]; then
             UNDONE=$(grep -c "^\- \[ \]" task_plan.md 2>/dev/null || echo "0")
@@ -105,9 +127,9 @@ EOF
                     echo "建议: 请继续完成未完成的任务，或更新 task_plan.md 调整计划。"
                 } >> "$MEMORY_FILE"
 
-                # 同时输出到 stop-message.txt 供 Claude CLI 显示
-                mkdir -p .claude
+                # 同时追加到 stop-message.txt
                 {
+                    echo ""
                     echo "# 任务完成度检查"
                     echo ""
                     echo "总任务数: $TOTAL"
@@ -116,15 +138,23 @@ EOF
                     echo "完成度: ${PERCENT}%"
                     echo ""
                     echo "## 未完成的任务:"
-                    grep "^\- \[ \]" task_plan.md
+                    grep "^\- \[ \]" task_plan.md | head -10
+                    if [ $(grep -c "^\- \[ \]" task_plan.md) -gt 10 ]; then
+                        echo ""
+                        echo "... (还有 $((UNDONE - 10)) 个未完成任务)"
+                    fi
                     echo ""
                     echo "---"
                     echo ""
-                    echo "建议: 请继续完成未完成的任务，或更新 task_plan.md 调整计划。"
-                } > .claude/stop-message.txt
+                } >> .claude/stop-message.txt
 
                 python3 -c "import json; print(json.dumps({'saved': True, 'file': '$MEMORY_FILE', 'warning': '$UNDONE tasks remaining'}, ensure_ascii=False))"
             else
+                {
+                    echo ""
+                    echo "✅ 所有任务已完成！"
+                    echo ""
+                } >> .claude/stop-message.txt
                 python3 -c "import json; print(json.dumps({'saved': True, 'file': '$MEMORY_FILE', 'message': 'All tasks completed!'}, ensure_ascii=False))"
             fi
         else

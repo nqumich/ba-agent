@@ -1,0 +1,112 @@
+# BA-Agent 文件系统配置
+
+filestore:
+  # 存储根目录
+  # 支持环境变量 BA_STORAGE_DIR 覆盖
+  # 默认使用用户本地目录:
+  #   - macOS:     ~/Library/Application Support/ba-agent
+  #   - Windows:   %APPDATA%/ba-agent
+  #   - Linux:     ~/.local/share/ba-agent (遵循 XDG)
+  #   - 开发环境:  ./.ba-agent/storage (相对项目目录)
+  base_dir: "~/.local/share/ba-agent"  # 将在运行时解析为实际路径
+
+  # 全局限制
+  max_total_size_gb: 10
+  cleanup_interval_hours: 1
+  cleanup_threshold_percent: 90
+
+  # 各类别配置
+  categories:
+    artifact:
+      dir: "artifacts"
+      max_size_mb: 100
+      ttl_hours: 24
+      compression: false
+
+    upload:
+      dir: "uploads"
+      max_size_mb: 50
+      ttl_hours: 168  # 7 days
+      allowed_types:
+        - xlsx
+        - xls
+        - csv
+        - json
+        - txt
+        - pdf
+        - png
+        - jpg
+      max_file_size_mb: 50
+
+    report:
+      dir: "reports"
+      max_size_mb: 50
+      ttl_hours: 720  # 30 days
+      formats:
+        - pdf
+        - docx
+        - xlsx
+        - html
+
+    chart:
+      dir: "charts"
+      max_size_mb: 10
+      ttl_hours: 168  # 7 days
+      formats:
+        - png
+        - svg
+        - html
+
+    cache:
+      dir: "cache"
+      max_size_mb: 10
+      ttl_hours: 1
+
+    temp:
+      dir: "temp"
+      max_size_mb: 50
+      ttl_hours: 0  # 立即清理
+
+    memory:
+      dir: "memory"
+      ttl_hours: 8760  # 永久（不清理）
+      layers:
+        daily:
+          dir: "daily"
+          format: "markdown"
+        context:
+          dir: "context"
+          files:
+            - CLAUDE.md
+            - MEMORY.md
+            - USER.md
+        knowledge:
+          dir: "knowledge"
+          categories:
+            - world
+            - experience
+            - opinions
+
+    checkpoint:
+      dir: "temp/checkpoints"
+      ttl_hours: 24
+      max_checkpoints_per_session: 100
+
+  # 安全配置
+  security:
+    enable_virus_scan: false
+    max_path_depth: 10
+    allowed_symlinks: false
+    sanitize_filenames: true
+
+  # 索引配置
+  index:
+    enable_fts: false
+    enable_vector: false
+    vector_dimension: 1536
+
+  # 监控配置
+  monitoring:
+    enabled: true
+    check_interval_seconds: 3600  # 1 hour
+    alert_threshold_percent: 90

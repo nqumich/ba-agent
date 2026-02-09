@@ -1,18 +1,32 @@
 """
-Python 沙盒工具
+Python 沙盒工具 (v2.1 - Pipeline Only)
 
 使用 Docker 隔离环境安全执行 Python 代码
 支持数据分析库（pandas, numpy, scipy, statsmodels 等）
+
+v2.1 变更：
+- 使用 ToolExecutionResult 返回
+- 支持 OutputLevel (BRIEF/STANDARD/FULL)
+- 添加 response_format 参数
 """
 
 import ast
 import re
+import time
+import uuid
 from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import StructuredTool
 
 from config import get_config
 from backend.docker.sandbox import get_sandbox
+
+# Pipeline v2.1 模型
+from backend.models.pipeline import (
+    OutputLevel,
+    ToolExecutionResult,
+    ToolCachePolicy,
+)
 
 
 # 允许导入的模块白名单（数据分析相关）
@@ -46,6 +60,11 @@ class PythonCodeInput(BaseModel):
         ge=5,
         le=300,
         description="执行超时时间（秒），范围 5-300"
+    )
+    # 支持 OutputLevel 字符串
+    response_format: Optional[str] = Field(
+        default="standard",
+        description="响应格式: brief, standard, full"
     )
 
     @field_validator('code')
@@ -107,37 +126,105 @@ class PythonCodeInput(BaseModel):
         return v
 
 
-def run_python_impl(code: str, timeout: int = 60) -> str:
+def _parse_output_level(format_str: str) -> OutputLevel:
     """
-    执行 Python 代码的实现函数
+    解析输出格式字符串为 OutputLevel
+
+    支持的格式：
+    - brief/concise → OutputLevel.BRIEF
+    - standard → OutputLevel.STANDARD
+    - full/detailed → OutputLevel.FULL
+    """
+    format_lower = format_str.lower()
+
+    if format_lower in ("brief", "concise"):
+        return OutputLevel.BRIEF
+    elif format_lower in ("full", "detailed"):
+        return OutputLevel.FULL
+    else:
+        return OutputLevel.STANDARD
+
+
+def run_python_impl(
+    code: str,
+    timeout: int = 60,
+    response_format: str = "standard",
+) -> ToolExecutionResult:
+    """
+    执行 Python 代码的实现函数 (v2.1 - Pipeline)
 
     Args:
         code: 要执行的 Python 代码
         timeout: 超时时间（秒）
+        response_format: 响应格式
 
     Returns:
-        执行结果字符串（包含输出和错误）
+        ToolExecutionResult
     """
-    sandbox = get_sandbox()
-    config = get_config()
+    start_time = time.time()
 
-    # 执行代码
-    result = sandbox.execute_python(
-        code=code,
-        timeout=timeout,
-        memory_limit=config.docker.memory_limit,
-        cpu_limit=config.docker.cpu_limit,
-        network_disabled=config.docker.network_disabled,
-    )
+    # 生成 tool_call_id
+    tool_call_id = f"call_run_python_{uuid.uuid4().hex[:12]}"
 
-    # 格式化返回结果
-    if result['success']:
-        output = result['stdout']
-        if not output:
-            return "代码执行成功，无输出"
-        return output
-    else:
-        return f"代码执行失败:\n{result['stderr']}"
+    # 解析输出级别
+    output_level = _parse_output_level(response_format)
+
+    try:
+        sandbox = get_sandbox()
+        config = get_config()
+
+        # 执行代码
+        result = sandbox.execute_python(
+            code=code,
+            timeout=timeout,
+            memory_limit=config.docker.memory_limit,
+            cpu_limit=config.docker.cpu_limit,
+            network_disabled=config.docker.network_disabled,
+        )
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        # 格式化原始数据
+        if result['success']:
+            output = result['stdout']
+            if not output:
+                raw_data = {
+                    "success": True,
+                    "message": "代码执行成功，无输出",
+                    "exit_code": result.get('exit_code', 0),
+                }
+            else:
+                raw_data = {
+                    "success": True,
+                    "output": output,
+                    "exit_code": result.get('exit_code', 0),
+                }
+        else:
+            raw_data = {
+                "success": False,
+                "error": result['stderr'],
+                "exit_code": result.get('exit_code', -1),
+            }
+
+        # 创建 ToolExecutionResult
+        return ToolExecutionResult.from_raw_data(
+            tool_call_id=tool_call_id,
+            raw_data=raw_data,
+            output_level=output_level,
+            tool_name="run_python",
+            cache_policy=ToolCachePolicy.NO_CACHE,
+        ).with_duration(duration_ms)
+
+    except Exception as e:
+        duration_ms = (time.time() - start_time) * 1000
+
+        # 创建错误结果
+        return ToolExecutionResult.create_error(
+            tool_call_id=tool_call_id,
+            error_message=str(e),
+            error_type=type(e).__name__,
+            tool_name="run_python",
+        ).with_duration(duration_ms)
 
 
 # 创建 LangChain 工具

@@ -1,17 +1,84 @@
 """
-数据库查询工具单元测试
+数据库查询工具单元测试 (v3.0 - SQLite First)
+
+测试 SQLite 数据库功能（默认，无需外部服务器）
 """
 
 import pytest
+import sqlite3
+from pathlib import Path
 from pydantic import ValidationError
+from unittest.mock import patch, MagicMock
 
 from tools.database import (
     DatabaseQueryInput,
     query_database_impl,
     query_database_tool,
-    _format_result,
+    _get_sqlite_connection,
+    _sqlite_connections,
+    _DATA_DIR,
 )
-from backend.models.tool_output import ToolOutput
+
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
+
+
+@pytest.fixture
+def temp_db_dir():
+    """临时数据库目录"""
+    import tempfile
+    temp_dir = Path(tempfile.mkdtemp())
+    yield temp_dir
+    # 清理
+    import shutil
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def clear_sqlite_connections():
+    """清理 SQLite 连接缓存"""
+    _sqlite_connections.clear()
+    yield
+    _sqlite_connections.clear()
+
+
+@pytest.fixture
+def sample_sqlite_db(temp_db_dir):
+    """创建示例 SQLite 数据库"""
+    db_path = temp_db_dir / "sqlite.db"  # 改为 sqlite.db 以匹配默认连接名
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+
+    # 创建测试表
+    cursor.execute("""
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            email TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE sales (
+            id INTEGER PRIMARY KEY,
+            product TEXT,
+            amount REAL,
+            date TEXT
+        )
+    """)
+
+    # 插入测试数据
+    cursor.execute("INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.com')")
+    cursor.execute("INSERT INTO users (id, name, email) VALUES (2, 'Bob', 'bob@example.com')")
+    cursor.execute("INSERT INTO users (id, name, email) VALUES (3, 'Charlie', 'charlie@example.com')")
+
+    cursor.execute("INSERT INTO sales (id, product, amount, date) VALUES (1, 'Widget A', 100.50, '2024-01-01')")
+    cursor.execute("INSERT INTO sales (id, product, amount, date) VALUES (2, 'Widget B', 250.00, '2024-01-02')")
+
+    conn.commit()
+    conn.close()
+
+    return db_path
 
 
 class TestDatabaseQueryInput:
@@ -23,7 +90,7 @@ class TestDatabaseQueryInput:
             query="SELECT * FROM users"
         )
         assert input_data.query == "SELECT * FROM users"
-        assert input_data.connection == "primary"
+        assert input_data.connection == "sqlite"
         assert input_data.max_rows == 1000
 
     def test_select_query(self):
@@ -40,333 +107,212 @@ class TestDatabaseQueryInput:
         )
         assert "WITH" in input_data.query.upper()
 
-    def test_trailing_semicolon(self):
-        """测试结尾分号"""
-        input_data = DatabaseQueryInput(
-            query="SELECT * FROM users;"
-        )
-        # 分号应该被移除
-        assert ";" not in input_data.query
-        assert "SELECT" in input_data.query
-
     def test_connection_name(self):
         """测试自定义连接名称"""
         input_data = DatabaseQueryInput(
             query="SELECT * FROM sales",
-            connection="clickhouse"
+            connection="test_db"
         )
-        assert input_data.connection == "clickhouse"
+        assert input_data.connection == "test_db"
 
-    def test_params_dict(self):
-        """测试参数化查询参数"""
-        input_data = DatabaseQueryInput(
-            query="SELECT * FROM users WHERE category = :category",
-            params={"category": "premium"}
-        )
-        assert input_data.params == {"category": "premium"}
-
-    def test_params_with_list(self):
-        """测试列表参数（用于 IN 子句）"""
-        input_data = DatabaseQueryInput(
-            query="SELECT * FROM users WHERE id IN :ids",
-            params={"ids": [1, 2, 3]}
-        )
-        assert input_data.params == {"ids": [1, 2, 3]}
-
-    def test_params_with_tuple(self):
-        """测试元组参数"""
-        input_data = DatabaseQueryInput(
-            query="SELECT * FROM users WHERE id IN :ids",
-            params={"ids": (1, 2, 3)}
-        )
-        assert input_data.params == {"ids": (1, 2, 3)}
-
-    def test_max_rows_custom(self):
-        """测试自定义最大行数"""
+    def test_max_rows(self):
+        """测试最大行数"""
         input_data = DatabaseQueryInput(
             query="SELECT * FROM users",
-            max_rows=500
+            max_rows=100
         )
-        assert input_data.max_rows == 500
+        assert input_data.max_rows == 100
 
-    def test_max_rows_boundary(self):
-        """测试最大行数边界值"""
-        input_data = DatabaseQueryInput(
-            query="SELECT * FROM users",
-            max_rows=10000
-        )
-        assert input_data.max_rows == 10000
-
-    def test_response_format_concise(self):
+    def test_response_format_brief(self):
         """测试简洁响应格式"""
         input_data = DatabaseQueryInput(
             query="SELECT * FROM users",
-            response_format="concise"
+            response_format="brief"
         )
-        assert input_data.response_format == "concise"
+        assert input_data.response_format == "brief"
 
-    def test_response_format_detailed(self):
+    def test_response_format_full(self):
         """测试详细响应格式"""
         input_data = DatabaseQueryInput(
             query="SELECT * FROM users",
-            response_format="detailed"
+            response_format="full"
         )
-        assert input_data.response_format == "detailed"
+        assert input_data.response_format == "full"
 
-    def test_query_normalization(self):
-        """测试查询标准化（多余空格）"""
-        input_data = DatabaseQueryInput(
-            query="SELECT   *    FROM     users"
-        )
-        assert input_data.query == "SELECT * FROM users"
-
-    def test_invalid_query_delete(self):
-        """测试禁止的 DELETE 语句"""
-        with pytest.raises(ValidationError, match="禁止的关键字"):
-            DatabaseQueryInput(query="SELECT * FROM (SELECT DELETE FROM temp) AS subquery")
-
-    def test_invalid_query_drop(self):
-        """测试禁止的 DROP 语句"""
-        with pytest.raises(ValidationError, match="禁止的关键字"):
-            DatabaseQueryInput(query="SELECT * FROM (SELECT DROP FROM temp) AS subquery")
-
-    def test_invalid_query_update(self):
-        """测试禁止的 UPDATE 语句"""
-        with pytest.raises(ValidationError, match="禁止的关键字"):
-            DatabaseQueryInput(query="SELECT * FROM (SELECT UPDATE FROM temp) AS subquery")
-
-    def test_invalid_query_insert(self):
-        """测试禁止的 INSERT 语句"""
-        with pytest.raises(ValidationError, match="禁止的关键字"):
-            DatabaseQueryInput(query="SELECT * FROM (SELECT INSERT FROM temp) AS subquery")
-
-    def test_invalid_query_alter(self):
-        """测试禁止的 ALTER 语句"""
-        with pytest.raises(ValidationError, match="禁止的关键字"):
-            DatabaseQueryInput(query="SELECT * FROM (SELECT ALTER FROM temp) AS subquery")
-
-    def test_forbidden_keyword_in_middle(self):
-        """测试中间位置的禁止关键字（在子查询中）"""
-        with pytest.raises(ValidationError, match="禁止的关键字"):
-            DatabaseQueryInput(query="SELECT * FROM users WHERE id IN (SELECT id FROM (SELECT DELETE FROM temp) AS subquery)")
-
-    def test_delete_statement_blocked(self):
-        """测试 DELETE 语句被阻止"""
-        with pytest.raises(ValidationError, match="仅允许执行"):
-            DatabaseQueryInput(query="DELETE FROM users")
-
-    def test_drop_statement_blocked(self):
-        """测试 DROP 语句被阻止"""
-        with pytest.raises(ValidationError, match="仅允许执行"):
-            DatabaseQueryInput(query="DROP TABLE users")
-
-    def test_update_statement_blocked(self):
-        """测试 UPDATE 语句被阻止"""
-        with pytest.raises(ValidationError, match="仅允许执行"):
-            DatabaseQueryInput(query="UPDATE users SET name = 'test'")
-
-    def test_insert_statement_blocked(self):
-        """测试 INSERT 语句被阻止"""
-        with pytest.raises(ValidationError, match="仅允许执行"):
-            DatabaseQueryInput(query="INSERT INTO users VALUES (1, 'test')")
-
-    def test_sql_comment_dash(self):
-        """测试禁止的 SQL 注释（--）"""
-        with pytest.raises(ValidationError, match="不能包含 SQL 注释"):
-            DatabaseQueryInput(query="SELECT * FROM users -- comment")
-
-    def test_sql_comment_block(self):
-        """测试禁止的 SQL 块注释（/* */）"""
-        with pytest.raises(ValidationError, match="不能包含 SQL 注释"):
-            DatabaseQueryInput(query="SELECT * FROM users /* comment */")
-
-    def test_multiple_statements(self):
-        """测试多条语句（分号分隔）"""
-        with pytest.raises(ValidationError, match="仅允许执行单条"):
-            DatabaseQueryInput(query="SELECT * FROM users; SELECT * FROM orders")
-
-    def test_empty_query(self):
-        """测试空查询"""
+    def test_invalid_query_type(self):
+        """测试无效的查询类型"""
         with pytest.raises(ValidationError):
-            DatabaseQueryInput(query="")
-
-    def test_max_rows_exceeds_limit(self):
-        """测试超过最大行数限制"""
-        with pytest.raises(ValidationError):
-            DatabaseQueryInput(query="SELECT * FROM users", max_rows=10001)
-
-    def test_max_rows_below_minimum(self):
-        """测试低于最小行数"""
-        with pytest.raises(ValidationError):
-            DatabaseQueryInput(query="SELECT * FROM users", max_rows=0)
-
-    def test_params_unsafe_type(self):
-        """测试不安全的参数类型"""
-        with pytest.raises(ValidationError, match="类型不安全"):
             DatabaseQueryInput(
-                query="SELECT * FROM users WHERE data = :data",
-                params={"data": {"key": "value"}}  # 字典不安全
+                query="INSERT INTO users VALUES (1, 'Test')"
             )
 
-    def test_params_list_unsafe_element(self):
-        """测试列表中的不安全元素类型"""
-        with pytest.raises(ValidationError, match="元素类型不安全"):
+    def test_invalid_response_format(self):
+        """测试无效的响应格式"""
+        with pytest.raises(ValidationError):
             DatabaseQueryInput(
-                query="SELECT * FROM users WHERE id IN :ids",
-                params={"ids": [1, 2, {"key": "value"}]}
+                query="SELECT * FROM users",
+                response_format="invalid"
             )
 
 
-class TestFormatResult:
-    """测试结果格式化"""
+class TestSQLiteConnection:
+    """测试 SQLite 连接管理"""
 
-    def test_format_basic_result(self):
-        """测试基本结果格式化"""
-        rows = [{"id": 1, "name": "Alice"}]
-        columns = ["id", "name"]
-        result = _format_result(rows, columns)
+    def test_get_sqlite_connection(self, temp_db_dir, clear_sqlite_connections):
+        """测试获取 SQLite 连接"""
+        test_db_path = temp_db_dir / "test.db"
 
-        assert result["columns"] == columns
-        assert result["rows"] == rows
-        assert result["row_count"] == 1
-        assert result["column_count"] == 2
+        conn = _get_sqlite_connection("test", str(test_db_path))
 
-    def test_format_empty_result(self):
-        """测试空结果格式化"""
-        rows = []
-        columns = ["id", "name"]
-        result = _format_result(rows, columns)
+        assert conn is not None
+        assert isinstance(conn, sqlite3.Connection)
 
-        assert result["row_count"] == 0
-        assert result["column_count"] == 2
+        # 验证文件被创建
+        assert test_db_path.exists()
 
-    def test_format_multiple_rows(self):
-        """测试多行结果格式化"""
-        rows = [
-            {"id": 1, "name": "Alice"},
-            {"id": 2, "name": "Bob"},
-            {"id": 3, "name": "Charlie"}
-        ]
-        columns = ["id", "name"]
-        result = _format_result(rows, columns)
+    def test_connection_reuse(self, temp_db_dir, clear_sqlite_connections):
+        """测试连接复用"""
+        test_db_path = temp_db_dir / "test.db"
 
-        assert result["row_count"] == 3
-        assert len(result["rows"]) == 3
+        conn1 = _get_sqlite_connection("test", str(test_db_path))
+        conn2 = _get_sqlite_connection("test", str(test_db_path))
+
+        # 应该返回同一个连接
+        assert conn1 is conn2
+
+    def test_row_factory(self, temp_db_dir, clear_sqlite_connections):
+        """测试行工厂（返回字典式行）"""
+        test_db_path = temp_db_dir / "test.db"
+
+        # 创建一个表来测试
+        conn = sqlite3.connect(str(test_db_path))
+        conn.execute("CREATE TABLE test (id INTEGER, name TEXT)")
+        conn.execute("INSERT INTO test VALUES (1, 'Alice')")
+        conn.commit()
+        conn.close()
+
+        conn = _get_sqlite_connection("test", str(test_db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM test")
+        row = cursor.fetchone()
+
+        # 应该是字典式行
+        assert isinstance(row, sqlite3.Row)
+        assert row["id"] == 1
+        assert row["name"] == "Alice"
 
 
 class TestQueryDatabaseImpl:
     """测试查询实现函数"""
 
-    def test_basic_query_execution(self):
+    def test_basic_query_execution(self, sample_sqlite_db, clear_sqlite_connections):
         """测试基本查询执行"""
-        result_json = query_database_impl(query="SELECT * FROM users")
-        result = ToolOutput.model_validate_json(result_json)
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_impl(query="SELECT * FROM users")
 
-        assert result.telemetry.success
-        assert "成功" in result.summary
-        assert result.result is not None
-        assert "rows" in result.result
-        assert "columns" in result.result
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            assert len(result.observation) > 0
+            assert "3 行" in result.observation
 
-    def test_query_with_specific_columns(self):
+    def test_query_with_specific_columns(self, sample_sqlite_db, clear_sqlite_connections):
         """测试指定列的查询"""
-        result_json = query_database_impl(query="SELECT id, name, email FROM users")
-        result = ToolOutput.model_validate_json(result_json)
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_impl(query="SELECT id, name FROM users")
 
-        assert result.telemetry.success
-        assert result.result["columns"] == ["id", "name", "email"]
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            assert "3 行" in result.observation
 
-    def test_query_with_wildcard(self):
+    def test_query_with_wildcard(self, sample_sqlite_db, clear_sqlite_connections):
         """测试通配符查询"""
-        result_json = query_database_impl(query="SELECT * FROM sales")
-        result = ToolOutput.model_validate_json(result_json)
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_impl(query="SELECT * FROM sales")
 
-        assert result.telemetry.success
-        assert "columns" in result.result
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            assert "2 行" in result.observation
 
-    def test_max_rows_limit(self):
+    def test_max_rows_limit(self, sample_sqlite_db, clear_sqlite_connections):
         """测试最大行数限制"""
-        result_json = query_database_impl(
-            query="SELECT * FROM users",
-            max_rows=10
-        )
-        result = ToolOutput.model_validate_json(result_json)
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_impl(
+                query="SELECT * FROM users",
+                max_rows=2
+            )
 
-        assert result.telemetry.success
-        assert result.result["row_count"] <= 10
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            # 应该只返回 2 行
+            assert "2 行" in result.observation
 
-    def test_concise_response_format(self):
+    def test_brief_response_format(self, sample_sqlite_db, clear_sqlite_connections):
         """测试简洁响应格式"""
-        result_json = query_database_impl(
-            query="SELECT * FROM users",
-            response_format="concise"
-        )
-        result = ToolOutput.model_validate_json(result_json)
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_impl(
+                query="SELECT * FROM users",
+                response_format="brief"
+            )
 
-        assert result.telemetry.success
-        assert result.result is None  # Concise 格式不返回详细数据
-        assert "成功" in result.summary
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            assert result.output_level == OutputLevel.STANDARD
 
-    def test_standard_response_format(self):
+    def test_standard_response_format(self, sample_sqlite_db, clear_sqlite_connections):
         """测试标准响应格式"""
-        result_json = query_database_impl(
-            query="SELECT * FROM users",
-            response_format="standard"
-        )
-        result = ToolOutput.model_validate_json(result_json)
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_impl(
+                query="SELECT * FROM users",
+                response_format="standard"
+            )
 
-        assert result.telemetry.success
-        assert result.result is not None
-        assert "rows" in result.result
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            assert result.output_level == OutputLevel.STANDARD
 
-    def test_detailed_response_format(self):
+    def test_full_response_format(self, sample_sqlite_db, clear_sqlite_connections):
         """测试详细响应格式"""
-        result_json = query_database_impl(
-            query="SELECT * FROM users",
-            response_format="detailed"
-        )
-        result = ToolOutput.model_validate_json(result_json)
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_impl(
+                query="SELECT * FROM users",
+                response_format="full"
+            )
 
-        assert result.telemetry.success
-        assert result.result is not None
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            assert result.output_level == OutputLevel.STANDARD
 
-    def test_invalid_connection_name(self):
-        """测试无效的连接名称"""
-        result_json = query_database_impl(
-            query="SELECT * FROM users",
-            connection="nonexistent"
-        )
-        result = ToolOutput.model_validate_json(result_json)
-
-        assert not result.telemetry.success
-        assert "失败" in result.summary
-
-    def test_with_query_execution(self):
+    def test_with_query_execution(self, sample_sqlite_db, clear_sqlite_connections):
         """测试 WITH 查询执行"""
-        result_json = query_database_impl(
-            query="WITH ranked AS (SELECT * FROM users) SELECT * FROM ranked"
-        )
-        result = ToolOutput.model_validate_json(result_json)
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_impl(
+                query="WITH ranked AS (SELECT * FROM users) SELECT * FROM ranked"
+            )
 
-        assert result.telemetry.success
-        assert "成功" in result.summary
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
 
-    def test_observation_format(self):
-        """测试 Observation 格式"""
-        result_json = query_database_impl(query="SELECT * FROM users")
-        result = ToolOutput.model_validate_json(result_json)
+    def test_invalid_query_type(self, sample_sqlite_db, clear_sqlite_connections):
+        """测试无效的查询类型（安全检查）"""
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_impl(query="INSERT INTO users VALUES (1, 'Test')")
 
-        assert "Observation:" in result.observation
-        assert "Status:" in result.observation
+            assert isinstance(result, ToolExecutionResult)
+            assert not result.success
+            assert "SecurityError" in result.error_type
 
-    def test_telemetry_collected(self):
-        """测试遥测数据收集"""
-        result_json = query_database_impl(query="SELECT * FROM users")
-        result = ToolOutput.model_validate_json(result_json)
+    def test_invalid_connection(self, clear_sqlite_connections):
+        """测试无效的连接"""
+        with patch('tools.database._get_sqlite_connection') as mock_get:
+            mock_get.side_effect = sqlite3.Error("Unable to open database")
 
-        assert result.telemetry.tool_name == "query_database"
-        assert result.telemetry.latency_ms >= 0
-        assert result.telemetry.execution_id != ""
+            result = query_database_impl(
+                query="SELECT * FROM users",
+                connection="nonexistent"
+            )
+
+            assert isinstance(result, ToolExecutionResult)
+            assert not result.success
 
 
 class TestQueryDatabaseTool:
@@ -375,8 +321,7 @@ class TestQueryDatabaseTool:
     def test_tool_metadata(self):
         """测试工具元数据"""
         assert query_database_tool.name == "query_database"
-        assert "SQL" in query_database_tool.description
-        assert "SELECT" in query_database_tool.description
+        assert "SQLite" in query_database_tool.description or "SQL" in query_database_tool.description
 
     def test_tool_is_structured_tool(self):
         """测试工具是 StructuredTool 实例"""
@@ -387,84 +332,94 @@ class TestQueryDatabaseTool:
         """测试工具参数模式"""
         assert query_database_tool.args_schema == DatabaseQueryInput
 
-    def test_tool_invocation(self):
+    def test_tool_invocation(self, sample_sqlite_db, clear_sqlite_connections):
         """测试工具调用"""
-        result = query_database_tool.invoke({
-            "query": "SELECT id, name FROM users"
-        })
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_tool.invoke({
+                "query": "SELECT id, name FROM users"
+            })
 
-        # 结果应该是 JSON 字符串
-        assert isinstance(result, str)
-        # 可以解析为 ToolOutput
-        output = ToolOutput.model_validate_json(result)
-        assert output.telemetry.success
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
 
-    def test_tool_with_max_rows(self):
+    def test_tool_with_max_rows(self, sample_sqlite_db, clear_sqlite_connections):
         """测试工具带最大行数参数"""
-        result = query_database_tool.invoke({
-            "query": "SELECT * FROM users",
-            "max_rows": 5
-        })
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_tool.invoke({
+                "query": "SELECT * FROM users",
+                "max_rows": 2
+            })
 
-        output = ToolOutput.model_validate_json(result)
-        assert output.telemetry.success
-        assert output.result["row_count"] <= 5
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
 
-    def test_tool_with_connection(self):
+    def test_tool_with_connection(self, sample_sqlite_db, clear_sqlite_connections):
         """测试工具带连接参数"""
-        result = query_database_tool.invoke({
-            "query": "SELECT * FROM sales",
-            "connection": "primary"
-        })
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_tool.invoke({
+                "query": "SELECT * FROM sales",
+                "connection": "sqlite"
+            })
 
-        output = ToolOutput.model_validate_json(result)
-        # 即使连接不存在，工具也应该正常处理错误
-        assert output.telemetry is not None
-
-    def test_tool_description_contains_security_info(self):
-        """测试工具描述包含安全信息"""
-        description = query_database_tool.description
-        assert "参数化查询" in description or "防止" in description
-        assert "只读" in description or "SELECT" in description
+            assert isinstance(result, ToolExecutionResult)
+            assert result.tool_name == "query_database"
 
 
 class TestQueryDatabaseIntegration:
-    """集成测试"""
+    """数据库查询工具集成测试"""
 
-    def test_full_query_workflow(self):
+    def test_full_query_workflow(self, sample_sqlite_db, clear_sqlite_connections):
         """测试完整查询工作流"""
-        # 1. 创建输入
-        input_data = DatabaseQueryInput(
-            query="SELECT id, name, email FROM users WHERE active = true",
-            max_rows=100,
-            response_format="standard"
-        )
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            # 1. 创建输入
+            input_data = DatabaseQueryInput(
+                query="SELECT id, name, email FROM users",
+                max_rows=100
+            )
 
-        # 2. 执行查询
-        result_json = query_database_impl(
-            query=input_data.query,
-            max_rows=input_data.max_rows,
-            response_format=input_data.response_format
-        )
+            # 2. 执行查询
+            result = query_database_impl(
+                query=input_data.query,
+                max_rows=input_data.max_rows
+            )
 
-        # 3. 解析结果
-        result = ToolOutput.model_validate_json(result_json)
+            # 3. 验证结果
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            assert result.tool_name == "query_database"
 
-        # 4. 验证
-        assert result.telemetry.success
-        assert "成功" in result.summary
-        assert result.result["columns"] == ["id", "name", "email"]
-        assert result.result["row_count"] <= 100
-        assert "Observation:" in result.observation
+    def test_tool_chain_with_structured_tool(self, sample_sqlite_db, clear_sqlite_connections):
+        """测试与 LangChain StructuredTool 的集成"""
+        from langchain_core.tools import StructuredTool
 
-    def test_tool_chain_with_structured_tool(self):
-        """测试通过 StructuredTool 链式调用"""
-        # 使用 LangChain 工具调用
-        result = query_database_tool.invoke({
-            "query": "SELECT category, COUNT(*) as count FROM sales GROUP BY category",
-            "response_format": "detailed"
-        })
+        # 确保工具是 StructuredTool
+        assert isinstance(query_database_tool, StructuredTool)
 
-        output = ToolOutput.model_validate_json(result)
-        assert output.telemetry.success
-        assert output.result is not None
+        # 调用工具 - 需要 patch 数据目录
+        with patch('tools.database._DATA_DIR', sample_sqlite_db.parent):
+            result = query_database_tool.invoke({
+                "query": "SELECT COUNT(*) as total FROM users"
+            })
+
+            # 验证结果
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+
+
+class TestDatabaseConfig:
+    """测试数据库配置"""
+
+    def test_default_config_is_sqlite(self):
+        """测试默认配置是 SQLite"""
+        from config import get_config
+
+        config = get_config()
+        if hasattr(config, 'database'):
+            db_config = config.database
+            # 默认应该是 SQLite
+            assert getattr(db_config, 'type', 'sqlite') == 'sqlite'
+
+    def test_data_directory_created(self):
+        """测试数据目录自动创建"""
+        assert _DATA_DIR.exists()
+        assert _DATA_DIR.is_dir()

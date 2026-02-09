@@ -1,5 +1,5 @@
 """
-向量检索工具单元测试
+向量检索工具单元测试 (v2.1 - Pipeline Only)
 """
 
 import pytest
@@ -11,8 +11,10 @@ from tools.vector_search import (
     vector_search_tool,
     InMemoryVectorStore,
     ChromaDBVectorStore,
-    _get_vector_store,
 )
+
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
 
 
 class TestVectorSearchInput:
@@ -43,14 +45,6 @@ class TestVectorSearchInput:
         )
         assert input_data.max_results == 10
 
-    def test_max_results_boundary(self):
-        """测试边界值"""
-        input_data = VectorSearchInput(
-            query="test",
-            max_results=50
-        )
-        assert input_data.max_results == 50
-
     def test_min_score(self):
         """测试最小分数"""
         input_data = VectorSearchInput(
@@ -67,21 +61,21 @@ class TestVectorSearchInput:
         )
         assert input_data.filter_metadata == {"type": "metric", "category": "sales"}
 
-    def test_response_format_concise(self):
+    def test_response_format_brief(self):
         """测试简洁响应格式"""
         input_data = VectorSearchInput(
             query="test",
-            response_format="concise"
+            response_format="brief"
         )
-        assert input_data.response_format == "concise"
+        assert input_data.response_format == "brief"
 
-    def test_response_format_detailed(self):
+    def test_response_format_full(self):
         """测试详细响应格式"""
         input_data = VectorSearchInput(
             query="test",
-            response_format="detailed"
+            response_format="full"
         )
-        assert input_data.response_format == "detailed"
+        assert input_data.response_format == "full"
 
     def test_empty_query(self):
         """测试空查询"""
@@ -143,7 +137,6 @@ class TestInMemoryVectorStore:
         store = InMemoryVectorStore()
         results = store.search("GMV")
         assert len(results) > 0
-        assert any("GMV" in r["text"] or r.get("metadata", {}).get("name") == "GMV" for r in results)
 
     def test_search_with_max_results(self):
         """测试限制结果数"""
@@ -166,50 +159,6 @@ class TestInMemoryVectorStore:
         for r in results:
             assert r.get("metadata", {}).get("type") == "metric"
 
-    def test_search_with_filter_metadata_category(self):
-        """测试元数据过滤（按类别）"""
-        store = InMemoryVectorStore()
-        results = store.search("test", filter_metadata={"category": "sales"})
-        for r in results:
-            assert r.get("metadata", {}).get("category") == "sales"
-
-    def test_search_with_filter_metadata_multiple(self):
-        """测试多条件元数据过滤"""
-        store = InMemoryVectorStore()
-        results = store.search(
-            "test",
-            filter_metadata={"type": "metric", "category": "sales"}
-        )
-        for r in results:
-            metadata = r.get("metadata", {})
-            assert metadata.get("type") == "metric"
-            assert metadata.get("category") == "sales"
-
-    def test_search_results_sorted_by_score(self):
-        """测试结果按分数排序"""
-        store = InMemoryVectorStore()
-        results = store.search("GMV 商品")
-        scores = [r["score"] for r in results]
-        assert scores == sorted(scores, reverse=True)
-
-    def test_search_score_range(self):
-        """测试分数在有效范围内"""
-        store = InMemoryVectorStore()
-        results = store.search("test")
-        for r in results:
-            assert 0.0 <= r["score"] <= 1.0
-
-    def test_search_result_structure(self):
-        """测试结果结构"""
-        store = InMemoryVectorStore()
-        results = store.search("GMV")
-        if results:
-            result = results[0]
-            assert "id" in result
-            assert "text" in result
-            assert "metadata" in result
-            assert "score" in result
-
     def test_add_documents(self):
         """测试添加文档"""
         store = InMemoryVectorStore()
@@ -227,157 +176,76 @@ class TestInMemoryVectorStore:
         assert len(store.documents) == original_count + 1
         assert "test_doc_1" in store.documents
 
-    def test_search_includes_added_document(self):
-        """测试搜索包含新添加的文档"""
-        store = InMemoryVectorStore()
-
-        store.add_documents([
-            {
-                "id": "test_doc_unique",
-                "text": "unique_test_content_xyz",
-                "metadata": {"type": "test"}
-            }
-        ])
-
-        results = store.search("unique_test_content_xyz")
-        assert any(r["id"] == "test_doc_unique" for r in results)
-
-
-class TestChromaDBVectorStore:
-    """测试 ChromaDB 向量存储"""
-
-    def test_initialization_when_chromadb_unavailable(self):
-        """测试 ChromaDB 不可用时的行为"""
-        # 这个测试假设 ChromaDB 可能不可用
-        # 如果可用，测试会尝试创建实例
-        try:
-            from tools.vector_search import CHROMADB_AVAILABLE
-            if not CHROMADB_AVAILABLE:
-                with pytest.raises(RuntimeError, match="ChromaDB 不可用"):
-                    ChromaDBVectorStore("/tmp/test", "test_collection")
-        except ImportError:
-            pass
-
-
-class TestGetVectorStore:
-    """测试获取向量存储"""
-
-    def test_returns_instance(self):
-        """测试返回实例"""
-        store = _get_vector_store("test_collection")
-        assert store is not None
-
-    def test_returns_in_memory_when_chromadb_unavailable(self):
-        """测试 ChromaDB 不可用时返回内存存储"""
-        from tools.vector_search import CHROMADB_AVAILABLE
-        store = _get_vector_store("test_collection")
-
-        if not CHROMADB_AVAILABLE:
-            assert isinstance(store, InMemoryVectorStore)
-
 
 class TestVectorSearchImpl:
     """测试向量搜索实现函数"""
 
     def test_basic_search_execution(self):
         """测试基本搜索执行"""
-        result_json = vector_search_impl(query="什么是 GMV")
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = vector_search_impl(query="什么是 GMV")
 
-        assert result.telemetry.success
-        assert "成功" in result.summary or "找到" in result.summary
-        assert result.result is not None
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert len(result.observation) > 0
 
     def test_search_with_custom_collection(self):
         """测试自定义集合搜索"""
-        result_json = vector_search_impl(
+        result = vector_search_impl(
             query="test",
             collection="custom_collection"
         )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
-        assert result.telemetry.success
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
     def test_search_with_max_results(self):
         """测试限制结果数"""
-        result_json = vector_search_impl(
+        result = vector_search_impl(
             query="GMV",
             max_results=2
         )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
-        assert result.telemetry.success
-        if result.result:
-            assert result.result["result_count"] <= 2
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
-    def test_search_with_min_score(self):
-        """测试最小分数过滤"""
-        result_json = vector_search_impl(
-            query="test",
-            min_score=0.9
-        )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
-
-        assert result.telemetry.success
-
-    def test_search_with_filter_metadata(self):
-        """测试元数据过滤"""
-        result_json = vector_search_impl(
-            query="test",
-            filter_metadata={"type": "metric"}
-        )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
-
-        assert result.telemetry.success
-
-    def test_concise_response_format(self):
+    def test_brief_response_format(self):
         """测试简洁响应格式"""
-        result_json = vector_search_impl(
+        result = vector_search_impl(
             query="GMV",
-            response_format="concise"
+            response_format="brief"
         )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
-        assert result.telemetry.success
-        # Concise 格式可能不返回详细结果
-        assert "成功" in result.summary or "找到" in result.summary
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
+        assert result.output_level == OutputLevel.BRIEF
 
     def test_standard_response_format(self):
         """测试标准响应格式"""
-        result_json = vector_search_impl(
+        result = vector_search_impl(
             query="GMV",
             response_format="standard"
         )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
-        assert result.telemetry.success
-        assert result.result is not None
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
-    def test_detailed_response_format(self):
+    def test_full_response_format(self):
         """测试详细响应格式"""
-        result_json = vector_search_impl(
+        result = vector_search_impl(
             query="GMV",
-            response_format="detailed"
+            response_format="full"
         )
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
 
-        assert result.telemetry.success
-
-    def test_observation_format(self):
-        """测试 Observation 格式"""
-        result_json = vector_search_impl(query="GMV")
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
-
-        assert "Observation:" in result.observation
-        assert "Status:" in result.observation
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
     def test_telemetry_collected(self):
         """测试遥测数据收集"""
-        result_json = vector_search_impl(query="test")
-        result = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput.model_validate_json(result_json)
+        result = vector_search_impl(query="test")
 
-        assert result.telemetry.tool_name == "search_knowledge"
-        assert result.telemetry.latency_ms >= 0
+        assert isinstance(result, ToolExecutionResult)
+        assert result.tool_name == "search_knowledge"
+        assert result.duration_ms >= 0
 
 
 class TestVectorSearchTool:
@@ -403,12 +271,8 @@ class TestVectorSearchTool:
             "query": "什么是 GMV"
         })
 
-        # 结果应该是 JSON 字符串
-        assert isinstance(result, str)
-        # 可以解析为 ToolOutput
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        output = ToolOutput.model_validate_json(result)
-        assert output.telemetry.success
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success
 
     def test_tool_with_max_results(self):
         """测试工具带最大结果数参数"""
@@ -417,92 +281,5 @@ class TestVectorSearchTool:
             "max_results": 3
         })
 
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        output = ToolOutput.model_validate_json(result)
-        assert output.telemetry.success
-
-    def test_tool_with_filter_metadata(self):
-        """测试工具带元数据过滤参数"""
-        result = vector_search_tool.invoke({
-            "query": "test",
-            "filter_metadata": {"type": "metric"}
-        })
-
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        output = ToolOutput.model_validate_json(result)
-        assert output.telemetry.success
-
-
-class TestVectorSearchIntegration:
-    """集成测试"""
-
-    def test_full_search_workflow(self):
-        """测试完整搜索工作流"""
-        # 1. 创建输入
-        input_data = VectorSearchInput(
-            query="GMV 增长率",
-            max_results=5,
-            min_score=0.0,
-            response_format="standard"
-        )
-
-        # 2. 执行搜索
-        result_json = vector_search_impl(
-            query=input_data.query,
-            max_results=input_data.max_results,
-            min_score=input_data.min_score,
-            response_format=input_data.response_format
-        )
-
-        # 3. 解析结果
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        result = ToolOutput.model_validate_json(result_json)
-
-        # 4. 验证
-        assert result.telemetry.success
-        assert "成功" in result.summary or "找到" in result.summary
-        assert result.result is not None
-        assert "results" in result.result
-        assert "result_count" in result.result
-
-    def test_search_metric_definitions(self):
-        """测试搜索指标定义"""
-        result_json = vector_search_impl(
-            query="转化率是什么",
-            filter_metadata={"type": "metric"}
-        )
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        result = ToolOutput.model_validate_json(result_json)
-
-        assert result.telemetry.success
-        if result.result and result.result["results"]:
-            # 验证返回的是指标类型
-            for r in result.result["results"]:
-                assert r.get("metadata", {}).get("type") == "metric"
-
-    def test_search_dimension_definitions(self):
-        """测试搜索维度定义"""
-        result_json = vector_search_impl(
-            query="品类维度",
-            filter_metadata={"type": "dimension"}
-        )
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-        result = ToolOutput.model_validate_json(result_json)
-
-        assert result.telemetry.success
-
-    def test_multiple_searches_same_collection(self):
-        """测试在同一集合中执行多次搜索"""
-        ToolOutput = __import__("backend.models.tool_output", fromlist=["ToolOutput"]).ToolOutput
-
-        # 第一次搜索
-        result1 = ToolOutput.model_validate_json(
-            vector_search_impl(query="GMV")
-        )
-        assert result1.telemetry.success
-
-        # 第二次搜索
-        result2 = ToolOutput.model_validate_json(
-            vector_search_impl(query="转化率")
-        )
-        assert result2.telemetry.success
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success

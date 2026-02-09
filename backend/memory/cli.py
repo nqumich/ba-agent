@@ -2,6 +2,8 @@
 BA-Agent Memory CLI
 
 命令行工具用于管理记忆系统索引和搜索
+
+支持索引轮换：自动管理多个索引文件
 """
 
 import json
@@ -17,6 +19,11 @@ from .index import (
     get_index_db_path,
     DEFAULT_INDEX_PATH,
     ensure_memory_index_schema,
+)
+from .index_rotation import (
+    get_rotation_manager,
+    get_current_index_path,
+    get_all_index_paths,
 )
 from .vector_search import HybridSearchEngine
 from .embedding import create_embedding_provider
@@ -35,12 +42,13 @@ def memory():
 
 @memory.command()
 @click.option("--memory-dir", type=click.Path(exists=True), default="./memory", help="记忆目录路径")
-@click.option("--index-path", type=click.Path(), default=None, help="索引文件路径（默认使用记忆目录下的 .index）")
+@click.option("--index-path", type=click.Path(), default=None, help="索引文件路径（默认使用轮换管理器自动管理）")
 @click.option("--force", is_flag=True, help="强制重建索引，即使已存在")
 def index(memory_dir: str, index_path: Optional[str], force: bool):
     """重建记忆索引
 
     扫描 memory 目录下的所有文件并重建搜索索引
+    支持索引轮换：自动管理多个索引文件
     """
     memory_path = Path(memory_dir)
     if not memory_path.exists():
@@ -51,7 +59,8 @@ def index(memory_dir: str, index_path: Optional[str], force: bool):
     if index_path:
         idx_path = Path(index_path)
     else:
-        idx_path = memory_path / ".index" / "memory.db"
+        # 使用轮换管理器获取当前索引路径
+        idx_path = get_current_index_path()
 
     click.echo(f"📁 记忆目录: {memory_path}")
     click.echo(f"🗂️  索引路径: {idx_path}")
@@ -203,46 +212,59 @@ def search(query: str, max_results: int, min_score: float, source: str, hybrid: 
 
 @memory.command()
 def status():
-    """查看索引状态"""
-    index_path = get_index_db_path()
+    """查看索引状态
 
-    if not index_path.exists():
-        click.echo(f"❌ 索引不存在: {index_path}")
-        click.echo("\n请先运行: ba-agent memory index")
-        return
-
+    显示所有索引文件的统计信息
+    """
     try:
-        db = open_index_db(index_path)
+        # 获取轮换管理器
+        manager = get_rotation_manager()
+        stats = manager.get_index_stats()
 
-        # 统计信息
-        cursor = db.execute("SELECT COUNT(*) FROM files")
-        file_count = cursor.fetchone()[0]
+        if stats["total_files"] == 0:
+            click.echo(f"❌ 索引不存在")
+            click.echo("\n请先运行: ba-agent memory index")
+            return
 
-        cursor = db.execute("SELECT COUNT(*) FROM chunks")
-        chunk_count = cursor.fetchone()[0]
+        click.echo(f"📊 索引状态\n")
 
-        cursor = db.execute("SELECT COUNT(DISTINCT source) FROM chunks")
-        source_count = cursor.fetchone()[0]
+        total_files = 0
+        total_chunks = 0
+        total_vectors = 0
 
-        # 检查向量表
-        cursor = db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
-        )
-        has_vectors = cursor.fetchone() is not None
+        for file_info in stats["files"]:
+            click.echo(f"   📄 {file_info['name']}")
+            click.echo(f"      大小: {file_info['size_mb']:.2f} MB")
+            click.echo(f"      分块数: {file_info['chunks_count']}")
 
-        vector_count = 0
-        if has_vectors:
-            cursor = db.execute("SELECT COUNT(*) FROM chunks_vec")
-            vector_count = cursor.fetchone()[0]
+            # 获取向量数
+            try:
+                index_path = Path("memory/.index") / file_info["name"]
+                db = open_index_db(index_path)
+                cursor = db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
+                )
+                has_vectors = cursor.fetchone() is not None
 
-        db.close()
+                if has_vectors:
+                    cursor = db.execute("SELECT COUNT(*) FROM chunks_vec")
+                    vector_count = cursor.fetchone()[0]
+                    total_vectors += vector_count
+                    click.echo(f"      向量数: {vector_count}")
 
-        click.echo(f"📊 索引状态: {index_path}\n")
-        click.echo(f"   文件数: {file_count}")
-        click.echo(f"   分块数: {chunk_count}")
-        click.echo(f"   来源数: {source_count}")
-        click.echo(f"   向量数: {vector_count}")
-        click.echo(f"   混合搜索: {'✅ 启用' if has_vectors and vector_count > 0 else '❌ 未启用'}")
+                db.close()
+            except Exception:
+                pass
+
+            total_files += 1
+            total_chunks += file_info['chunks_count']
+            click.echo("")
+
+        click.echo(f"   📊 总计:")
+        click.echo(f"      索引文件: {total_files}")
+        click.echo(f"      总大小: {stats['total_size_mb']:.2f} MB")
+        click.echo(f"      总分块: {total_chunks}")
+        click.echo(f"      总向量: {total_vectors}")
 
     except Exception as e:
         click.echo(f"❌ 查询失败: {e}", err=True)

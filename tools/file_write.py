@@ -1,16 +1,30 @@
 """
-文件写入工具
+文件写入工具 (v2.1 - Pipeline Only)
 
 让 Agent 可以写入任意文件
+
+v2.1 变更：
+- 使用 ToolExecutionResult 返回
+- 支持 OutputLevel (BRIEF/STANDARD/FULL)
+- 添加 response_format 参数
 """
 
 import os
+import time
+import uuid
 from pathlib import Path
 from typing import Optional, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from langchain_core.tools import StructuredTool
+
+# Pipeline v2.1 模型
+from backend.models.pipeline import (
+    OutputLevel,
+    ToolExecutionResult,
+    ToolCachePolicy,
+)
 
 
 # 工作目录限制
@@ -42,6 +56,11 @@ class FileWriteInput(BaseModel):
     separator: str = Field(
         default="\n\n---\n\n",
         description="追加/前置模式下的分隔符"
+    )
+    # 支持 OutputLevel 字符串
+    response_format: Optional[str] = Field(
+        default="standard",
+        description="响应格式: brief, standard, full"
     )
 
     @field_validator('content')
@@ -84,15 +103,35 @@ class FileWriteInput(BaseModel):
         return v
 
 
+def _parse_output_level(format_str: str) -> OutputLevel:
+    """
+    解析输出格式字符串为 OutputLevel
+
+    支持的格式：
+    - brief/concise → OutputLevel.BRIEF
+    - standard → OutputLevel.STANDARD
+    - full/detailed → OutputLevel.FULL
+    """
+    format_lower = format_str.lower()
+
+    if format_lower in ("brief", "concise"):
+        return OutputLevel.BRIEF
+    elif format_lower in ("full", "detailed"):
+        return OutputLevel.FULL
+    else:
+        return OutputLevel.STANDARD
+
+
 def file_write(
     content: str,
     file_path: str,
     mode: Literal["append", "overwrite", "prepend"] = "append",
     create_dirs: bool = True,
-    separator: str = "\n\n---\n\n"
-) -> str:
+    separator: str = "\n\n---\n\n",
+    response_format: str = "standard",
+) -> ToolExecutionResult:
     """
-    写入文件
+    写入文件 (v2.1 - Pipeline)
 
     Args:
         content: 要写入的内容
@@ -100,22 +139,31 @@ def file_write(
         mode: 写入模式
         create_dirs: 是否自动创建目录
         separator: 分隔符（用于 append/prepend）
+        response_format: 响应格式
 
     Returns:
-        操作结果消息
+        ToolExecutionResult
 
     Examples:
         >>> file_write("Hello World", "data/greeting.md")
         >>> file_write("# 新笔记\\n内容", "memory/notes.md", mode="append")
     """
-    # 解析目标路径
-    target_path = Path(".").resolve() / file_path
+    start_time = time.time()
 
-    # 确保目录存在
-    if create_dirs:
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+    # 生成 tool_call_id
+    tool_call_id = f"call_file_write_{uuid.uuid4().hex[:12]}"
+
+    # 解析输出级别
+    output_level = _parse_output_level(response_format)
 
     try:
+        # 解析目标路径
+        target_path = Path(".").resolve() / file_path
+
+        # 确保目录存在
+        if create_dirs:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+
         if mode == "overwrite":
             # 覆盖模式
             with open(target_path, 'w', encoding='utf-8') as f:
@@ -147,20 +195,56 @@ def file_write(
             action = "前置到"
 
         else:
-            return f"❌ 不支持的写入模式: {mode}"
+            raw_data = {
+                "success": False,
+                "error": f"不支持的写入模式: {mode}",
+                "file_path": file_path,
+            }
+            duration_ms = (time.time() - start_time) * 1000
+            return ToolExecutionResult.from_raw_data(
+                tool_call_id=tool_call_id,
+                raw_data=raw_data,
+                output_level=output_level,
+                tool_name="file_write",
+                cache_policy=ToolCachePolicy.NO_CACHE,
+            ).with_duration(duration_ms)
 
         # 统计信息
         char_count = len(content)
         line_count = len(content.split('\n'))
 
-        return (
-            f"✅ 成功{action} {file_path}\n\n"
-            f"统计: {char_count} 字符, {line_count} 行\n"
-            f"内容预览:\n{content[:100]}{'...' if len(content) > 100 else ''}"
-        )
+        raw_data = {
+            "success": True,
+            "action": action,
+            "file_path": file_path,
+            "full_path": str(target_path),
+            "char_count": char_count,
+            "line_count": line_count,
+            "mode": mode,
+            "content_preview": content[:100] + ('...' if len(content) > 100 else ''),
+        }
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        # 创建 ToolExecutionResult
+        return ToolExecutionResult.from_raw_data(
+            tool_call_id=tool_call_id,
+            raw_data=raw_data,
+            output_level=output_level,
+            tool_name="file_write",
+            cache_policy=ToolCachePolicy.NO_CACHE,
+        ).with_duration(duration_ms)
 
     except Exception as e:
-        return f"❌ 写入文件失败: {e}\n\n目标文件: {target_path}"
+        duration_ms = (time.time() - start_time) * 1000
+
+        # 创建错误结果
+        return ToolExecutionResult.create_error(
+            tool_call_id=tool_call_id,
+            error_message=str(e),
+            error_type=type(e).__name__,
+            tool_name="file_write",
+        ).with_duration(duration_ms)
 
 
 # 创建工具

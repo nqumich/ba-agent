@@ -1,5 +1,5 @@
 """
-Web 搜索工具集成测试
+Web 搜索工具集成测试 (v2.1 - Pipeline Only)
 
 测试真实的 MCP 服务器集成
 """
@@ -10,6 +10,9 @@ import json
 import pytest
 
 from tools.web_search import WebSearchInput, web_search_impl
+
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
 
 
 class MCPServerManager:
@@ -185,4 +188,6 @@ class TestWebSearchSimple:
             max_results=5
         )
         assert result is not None
-        assert isinstance(result, str)
+        # v2.1: result 是 ToolExecutionResult
+        assert isinstance(result, ToolExecutionResult)
+        assert result.success

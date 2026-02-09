@@ -144,10 +144,22 @@
   - [x] _is_model_invocation_disabled(): 检查 LLM 调用禁用
   - [x] _apply_context_modifier(): 总是设置 current_skill
   - [x] 5 个 Context Modifier 应用测试全部通过
-- [ ] **US-015**: 示例 Skill - 异动检测
-- [ ] **US-016**: 示例 Skill - 归因分析
-- [ ] **US-017**: 示例 Skill - 报告生成
-- [ ] **US-018**: 示例 Skill - 数据可视化
+- [x] **US-015**: 示例 Skill - 异动检测 ✅
+  - [x] 实现 skills/anomaly_detection/main.py (487 行)
+  - [x] 3 种检测方法: statistical (3-sigma), historical (同比/环比), ai (Claude)
+  - [x] 23 个测试通过
+- [x] **US-016**: 示例 Skill - 归因分析 ✅
+  - [x] 实现 skills/attribution/main.py (534 行)
+  - [x] 3 种归因方法: contribution, correlation, ai
+  - [x] 19 个测试通过
+- [x] **US-017**: 示例 Skill - 报告生成 ✅
+  - [x] 实现 skills/report_gen/main.py (623 行)
+  - [x] 4 种报告类型: daily, weekly, monthly, custom
+  - [x] 19 个测试通过
+- [x] **US-018**: 示例 Skill - 数据可视化 ✅
+  - [x] 实现 skills/visualization/main.py (724 行)
+  - [x] 5 种图表类型: line, bar, pie, scatter, heatmap
+  - [x] 29 个测试通过
 
 ---
 
@@ -155,7 +167,30 @@
 
 - [ ] **US-019**: Agent System Prompt 与工具集成
 - [ ] **US-020**: 知识库初始化
-- [ ] **US-021**: API 服务实现 (FastAPI)
+- [x] **US-021**: API 服务实现 (FastAPI) ✅
+  - [x] JWT 认证系统（登录、登出、令牌刷新）
+  - [x] 速率限制中间件（令牌桶算法）
+  - [x] 增强错误处理（自定义异常类）
+  - [x] 请求/响应日志中间件
+  - [x] 26 个测试通过
+- [x] **US-FE-01**: Web 前端测试控制台 ✅
+  - [x] 单页应用 (SPA) 设计
+  - [x] JWT 登录/登出功能
+  - [x] Agent 对话界面
+  - [x] 文件管理界面（上传/下载/删除）
+  - [x] Skills 管理界面
+  - [x] 拖拽上传支持
+  - [x] API 服务器集成（/ 路由提供前端）
+- [x] **US-027**: ContextCoordinator 协调层 ✅ (2026-02-08)
+  - [x] 创建 backend/core/context_coordinator.py
+  - [x] 实现 prepare_messages() - 统一消息准备入口
+  - [x] 实现 prepare_messages_with_system_prompt() - 确保系统提示在第一位
+  - [x] 增强 ContextManager.clean_langchain_messages() - 清理 LangChain 格式消息
+  - [x] 重构 BAAgent.call_model() - 移除重复的文件清理代码
+  - [x] BAAgent.invoke() 添加 session_id 和 file_context 参数支持
+  - [x] 简化 BAAgentService.query() - 移除分散的上下文构建代码
+  - [x] 24 个新测试通过
+  - [x] 文档更新 (context-management.md v1.5.0, response-flow.md v2.8.0, architecture.md v2.2.0, api.md v2.3.0)
 - [ ] **US-022**: IM Bot 集成 (企业微信/钉钉)
 - [ ] **US-023**: Excel 插件
 - [ ] **US-024**: 日志与监控系统
@@ -198,15 +233,15 @@
 ## 📊 进度统计
 
 - **总任务数**: 29 (新增 US-014-ARCH-01, US-014-ARCH-02)
-- **已完成**: 19 (65.5%)
+- **已完成**: 24 (82.8%)
   - Phase 1: 5/5 (100%)
   - Phase 2: 9/9 (100%) ✅
-  - Phase 3: 3/4 (75%) ✅ 新增
-  - Phase 4: 0/7 (0%)
+  - Phase 3: 4/4 (100%) ✅ 完成
+  - Phase 4: 2/7 (28.6%)
   - 基础设施: 1/1 (100%)
   - 记忆管理: 2/2 (100%) ✅
-- **进行中**: 1 (3.4%) - US-INFRA-02: 信息管道设计
-- **待开始**: 9 (31.0%)
+- **进行中**: 0 (0%)
+- **待开始**: 5 (17.2%)
 
 **已完成的 User Story**:
 - ✅ US-001: 项目初始化与目录结构创建
@@ -225,11 +260,43 @@
 - ✅ US-014: Skills 配置系统
 - ✅ US-014-ARCH-01: Skills 系统架构重构 (Anthropic Agent Skills, 132 测试通过)
 - ✅ US-014-ARCH-02: Context Modifier 完全实现 (5 测试通过)
+- ✅ US-015: 异动检测 Skill (23 测试通过)
+- ✅ US-016: 归因分析 Skill (19 测试通过)
+- ✅ US-017: 报告生成 Skill (19 测试通过)
+- ✅ US-018: 数据可视化 Skill (29 测试通过)
+- ✅ US-021: API 服务增强 (26 测试通过)
+- ✅ US-FE-01: Web 前端测试控制台 (10 测试通过)
+- ✅ US-027: ContextCoordinator 协调层 (24 测试通过)
 - ✅ US-005-MEM-01: 三层记忆文件结构
 - ✅ US-005-MEM-02: Hooks 系统实现与优化 (5个脚本，-54%)
 - ✅ US-INFRA-01: 统一工具输出格式系统 (42 测试通过)
 
-**测试统计**: 631 passed, 6 skipped (+132 Skills, +5 Context Modifier, +13 memory_get, +42 ToolOutput)
+**测试统计**: 1016 passed, 1 skipped
+
+**最新完成**: FileStore 占位符实现 (2026-02-07)
+- ReportStore: 285 行
+- ChartStore: 290 行
+- CacheStore: 342 行
+- TempStore: 298 行
+
+**下一任务**: US-022 - IM Bot 集成 (企业微信/钉钉)
+
+**Pipeline v2.1.0 完成** (2026-02-06):
+- [x] Phase 1: 核心模型定义 (ToolExecutionResult, OutputLevel, ToolCachePolicy)
+- [x] Phase 2: Pipeline 组件实现 (TokenCounter, ContextManager, Cache, Storage, Timeout)
+- [x] Phase 3: 工具迁移 - 所有 8 个工具已迁移
+  - [x] database.py → ToolExecutionResult
+  - [x] vector_search.py → ToolExecutionResult
+  - [x] file_reader.py → ToolExecutionResult
+  - [x] execute_command.py → ToolExecutionResult
+  - [x] python_sandbox.py → ToolExecutionResult
+  - [x] web_search.py → ToolExecutionResult
+  - [x] web_reader.py → ToolExecutionResult
+  - [x] file_write.py → ToolExecutionResult
+- [x] Phase 4: BAAgent 集成 (DynamicTokenCounter, AdvancedContextManager)
+- [x] Phase 5: 测试更新 (所有测试已适配 ToolExecutionResult)
+- [x] Phase 6: 旧工具输出格式系统移除
+- [x] Phase 7: 删除旧模型文件 (compat.py, tool_output.py)
 
 **下一任务**: US-015 - 示例 Skill: 异动检测
 
@@ -367,6 +434,63 @@
 - ToolErrorType: is_retryable 属性
 - IdempotencyCache: 幂等性支持
 
+### Pipeline v2.1.0 完整实现 (US-INFRA-02, 2026-02-06)
+
+基于信息管道设计的完整 Pipeline 系统实现：
+
+**核心文件**:
+- `backend/models/pipeline/output_level.py` - OutputLevel 枚举 (BRIEF/STANDARD/FULL)
+- `backend/models/pipeline/cache_policy.py` - ToolCachePolicy (NO_CACHE/CACHEABLE/TTL_*)
+- `backend/models/pipeline/tool_result.py` - ToolExecutionResult（单一源模型）
+- `backend/models/pipeline/tool_request.py` - ToolInvocationRequest
+- `backend/pipeline/wrapper.py` - PipelineToolWrapper（LangChain 集成）
+- `backend/pipeline/cache/idempotency_cache.py` - IdempotencyCache（跨轮次缓存）
+- `backend/pipeline/token/token_counter.py` - DynamicTokenCounter（多模型支持）
+- `backend/pipeline/context/context_manager.py` - AdvancedContextManager（智能压缩）
+- `backend/pipeline/timeout/__init__.py` - ToolTimeoutHandler（同步超时）
+- `backend/pipeline/storage/__init__.py` - DataStorage（artifact 存储）
+
+**功能特性**:
+1. **OutputLevel**: BRIEF/STANDARD/FULL 三级输出控制
+2. **ToolCachePolicy**: NO_CACHE/CACHEABLE/TTL_*/ETERNAL 缓存策略
+3. **ToolExecutionResult**: 统一工具执行结果模型
+4. **IdempotencyCache**: 跨轮次语义缓存（排除 tool_call_id）
+5. **DynamicTokenCounter**: 多模型 Token 计数（OpenAI/Anthropic/fallback）
+6. **AdvancedContextManager**: 智能上下文压缩（优先级过滤 + LLM 摘要）
+7. **ToolTimeoutHandler**: 同步超时控制（线程池，非 asyncio）
+8. **DataStorage**: 安全 artifact 存储（ID 替代真实路径）
+
+**工具迁移** (Phase 3, 8/8 完成):
+- [x] database.py → ToolExecutionResult
+- [x] vector_search.py → ToolExecutionResult
+- [x] file_reader.py → ToolExecutionResult
+- [x] execute_command.py → ToolExecutionResult
+- [x] python_sandbox.py → ToolExecutionResult
+- [x] web_search.py → ToolExecutionResult
+- [x] web_reader.py → ToolExecutionResult
+- [x] file_write.py → ToolExecutionResult
+
+**Phase 7: 移除旧模型** (2026-02-06):
+- [x] 删除 `backend/models/compat.py`
+- [x] 删除 `backend/models/tool_output.py` (旧的 ToolOutput/ToolTelemetry)
+- [x] 删除 `tests/models/test_tool_output.py`
+- [x] 更新 `tools/base.py` 移除 old ResponseFormat/ToolOutput 引用
+- [x] 更新所有工具移除 use_pipeline 参数
+
+**测试覆盖**: 746 个测试全部通过
+
+**文档优化** (2026-02-05):
+- **简化版** (465 行): `information-pipeline-design.md` - 快速参考
+- **详细版** (3159 行): `information-pipeline-design-detailed.md` - 完整实现
+- 双文档结构：快速参考 + 完整实现
+
+**v1.8 修复** (2026-02-05):
+- Token Counter: Claude tokenizer 修正（15% safety margin）
+- DataFileManager: threading 替代 asyncio
+- LockManager: 引用计数锁管理
+- ToolErrorType: is_retryable 属性
+- IdempotencyCache: 幂等性支持
+
 ### 信息管道设计 v1.4 (US-INFRA-02, 2026-02-05) - 概念修正
 
 基于 Claude Code 和 Manus AI 的实际实现，修正了之前设计中三个概念混淆的问题：
@@ -419,4 +543,4 @@
 
 ---
 
-**最后更新**: 2026-02-05 信息管道设计 v1.6 (生产环境增强)
+**最后更新**: 2026-02-07 - US-021 API 服务增强完成

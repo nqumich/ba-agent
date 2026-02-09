@@ -8,6 +8,9 @@ import pytest
 
 from tools.file_write import file_write, FileWriteInput
 
+# Pipeline v2.1 模型
+from backend.models.pipeline import ToolExecutionResult, OutputLevel
+
 
 class TestFileWriteInput:
     """测试 FileWriteInput 输入验证"""
@@ -73,8 +76,11 @@ class TestFileWrite:
                 file_path="data/test.md"
             )
 
-            assert "成功写入到" in result or "成功追加到" in result
-            assert "data/test.md" in result
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            # STANDARD 格式显示 "action: 追加到" 等字段
+            assert "追加到" in result.observation
+            assert "data/test.md" in result.observation
 
             # 验证文件已创建
             file_path = tmp_path / "data" / "test.md"
@@ -97,6 +103,9 @@ class TestFileWrite:
 
             # 追加写入
             result = file_write("Second line", "data/test.md", mode="append")
+
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
 
             file_path = tmp_path / "data" / "test.md"
             content = file_path.read_text(encoding='utf-8')
@@ -139,7 +148,10 @@ class TestFileWrite:
             file_write("First", "data/test.md")
 
             # 前置写入
-            file_write("Second", "data/test.md", mode="prepend")
+            result = file_write("Second", "data/test.md", mode="prepend")
+
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
 
             file_path = tmp_path / "data" / "test.md"
             content = file_path.read_text(encoding='utf-8')
@@ -162,6 +174,9 @@ class TestFileWrite:
                 file_path="data/nested/deep/file.md",
                 create_dirs=True
             )
+
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
 
             file_path = tmp_path / "data" / "nested" / "deep" / "file.md"
             assert file_path.exists()
@@ -202,7 +217,9 @@ class TestFileWrite:
                 file_path="memory/notes.md"
             )
 
-            assert "memory/notes.md" in result or "notes.md" in result
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            assert "memory/notes.md" in result.observation or "notes.md" in result.observation
 
             file_path = tmp_path / "memory" / "notes.md"
             assert file_path.exists()
@@ -221,6 +238,9 @@ class TestFileWrite:
                 content="测试中文 🎉 Emoji αβγ",
                 file_path="data/unicode.md"
             )
+
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
 
             file_path = tmp_path / "data" / "unicode.md"
             content = file_path.read_text(encoding='utf-8')
@@ -245,7 +265,10 @@ class TestFileWrite:
                 file_path="data/long.md"
             )
 
-            assert "1000 行" in result
+            assert isinstance(result, ToolExecutionResult)
+            assert result.success
+            # STANDARD 格式显示 line_count: 1000
+            assert "1000" in result.observation
 
             file_path = tmp_path / "data" / "long.md"
             content = file_path.read_text(encoding='utf-8')

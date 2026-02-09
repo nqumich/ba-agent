@@ -20,9 +20,9 @@ from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, END
-# TODO: LangGraph V2.0 迁移 - create_react_agent 将移至 langchain.agents
-# 当前使用 langgraph.prebuilt.create_react_agent，等待稳定 API
-from langgraph.prebuilt import create_react_agent
+# LangGraph V2.0 迁移 - 使用新的 langchain.agents API
+# 使用别名避免与本地 create_agent 便捷函数冲突
+from langchain.agents import create_agent as langchain_create_agent
 
 import logging
 
@@ -46,8 +46,27 @@ from backend.skills import (
     create_skill_tool,
     SkillMessage,
     ContextModifier,
-    MessageType,
+    MessageType as SkillMessageType,  # 别名避免冲突
     MessageVisibility,
+)
+# NEW v2.1: Pipeline components integration
+from backend.pipeline import (
+    get_token_counter,
+    AdvancedContextManager,
+    CompressionMode,
+)
+# NEW: Context Coordinator integration
+from backend.core.context_coordinator import create_context_coordinator
+from backend.core.context_manager import create_context_manager
+
+# Monitoring integration
+from backend.monitoring import (
+    ExecutionTracer,
+    MetricsCollector,
+    SpanType,
+    SpanStatus,
+    get_trace_store,
+    get_metrics_store,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,14 +97,16 @@ class BAAgent:
         config: Optional[AgentConfigModel] = None,
         tools: Optional[List[BaseTool]] = None,
         system_prompt: Optional[str] = None,
+        use_default_tools: bool = True,
     ):
         """
         初始化 BA-Agent
 
         Args:
             config: Agent 配置，如果不提供则从全局配置加载
-            tools: 可用工具列表
+            tools: 可用工具列表（如果为 None 且 use_default_tools=True，则加载默认工具）
             system_prompt: 系统提示词，如果不提供则使用默认提示词
+            use_default_tools: 是否加载默认工具列表（默认 True）
         """
         # 加载配置
         self.config = config or self._load_default_config()
@@ -95,16 +116,29 @@ class BAAgent:
         self.llm = self._init_llm()
 
         # 初始化工具
-        self.tools = tools or []
+        # 只有在明确请求默认工具时才加载 (use_default_tools=True 且未提供 tools)
+        # tools=None 时的默认行为：只加载 skill_tool（在后面添加）
+        if tools is None:
+            self.tools = []
+        elif use_default_tools and len(tools) == 0:
+            # 空列表 + use_default_tools=True → 加载所有默认工具
+            self.tools = self._load_default_tools()
+        else:
+            self.tools = tools
 
         # 初始化系统提示词
         self.system_prompt = system_prompt or self._get_default_system_prompt()
 
-        # 创建 Agent
-        self.agent = self._create_agent()
-
         # 初始化检查点保存器（用于对话历史）
-        self.memory = MemorySaver()
+        # 使用全局共享的 MemorySaver（从 BAAgentService 获取）
+        # 如果没有提供，则创建新的
+        if hasattr(self, '_memory') and self._memory is not None:
+            self.memory = self._memory
+        else:
+            self.memory = MemorySaver()
+
+        # 创建 Agent（现在可以使用 self.memory）
+        self.agent = self._create_agent()
 
         # 初始化 Memory Flush
         self.memory_flush = self._init_memory_flush()
@@ -125,6 +159,22 @@ class BAAgent:
         if self.skill_tool:
             self.tools.append(self.skill_tool)
 
+        # NEW v2.1: 初始化 Pipeline 组件
+        self.token_counter = get_token_counter()
+
+        # 创建 AdvancedContextManager 实例 (使用配置和现有 LLM)
+        self.context_manager = AdvancedContextManager(
+            max_tokens=self.app_config.llm.max_tokens,
+            compression_mode=CompressionMode.EXTRACT,  # 智能压缩，非简单截断
+            llm_summarizer=self.llm,  # 复用现有 LLM 用于 SUMMARIZE 模式
+            token_counter=self.token_counter,  # 共享 token counter
+        )
+
+        # NEW: 初始化 Context Coordinator (统一文件清理和上下文准备)
+        # 使用基础 ContextManager，而不是 AdvancedContextManager
+        self._basic_context_manager = create_context_manager(file_store=None)
+        self._context_coordinator = create_context_coordinator(self._basic_context_manager)
+
         # Active skill context modifier tracking
         self._active_skill_context: Dict[str, Any] = {}
 
@@ -133,6 +183,11 @@ class BAAgent:
         self.compaction_count = 0
         # Memory Flush 状态追踪 (Clawdbot 风格)
         self.memory_flush_compaction_count: Optional[int] = None
+
+        # Monitoring: Execution tracer and metrics collector (lazy initialization)
+        self._tracer: Optional[ExecutionTracer] = None
+        self._metrics_collector: Optional[MetricsCollector] = None
+        self._monitoring_enabled: bool = True  # Can be controlled via config
 
     def _load_default_config(self) -> AgentConfigModel:
         """
@@ -152,6 +207,52 @@ class BAAgent:
             memory_enabled=app_config.memory.enabled,
             hooks_enabled=True,
         )
+
+    def _load_default_tools(self) -> List[BaseTool]:
+        """
+        加载默认工具列表
+
+        Returns:
+            默认工具列表
+        """
+        from tools import (
+            execute_command_tool,
+            run_python_tool,
+            web_search_tool,
+            web_reader_tool,
+            file_reader_tool,
+            file_write_tool,
+            query_database_tool,
+            vector_search_tool,
+        )
+        # 记忆搜索工具 (clawdbot 风格：Agent 主动调用)
+        from backend.memory.tools import (
+            memory_search_v2_tool,
+        )
+
+        default_tools = [
+            # 核心执行工具
+            execute_command_tool,      # 命令行执行
+            run_python_tool,            # Python 沙盒
+
+            # Web 工具
+            web_search_tool,            # Web 搜索
+            web_reader_tool,            # Web 读取
+
+            # 文件工具
+            file_reader_tool,           # 文件读取
+            file_write_tool,            # 文件写入
+
+            # 数据工具
+            query_database_tool,        # SQL 查询
+            vector_search_tool,         # 向量检索
+
+            # 记忆搜索工具 (clawdbot 风格：Agent 主动调用)
+            memory_search_v2_tool,      # 混合搜索 (FTS5 + Vector)
+        ]
+
+        logger.info(f"Loaded {len(default_tools)} default tools")
+        return default_tools
 
     def _init_llm(self) -> BaseChatModel:
         """
@@ -242,11 +343,12 @@ class BAAgent:
 
     def _get_default_system_prompt(self) -> str:
         """
-        获取默认系统提示词（包含 Skills 部分）
+        获取默认系统提示词（包含 Skills 部分和结构化响应格式）
 
         Returns:
             系统提示词
         """
+        # 基础业务提示词
         base_prompt = """# BA-Agent 系统提示词
 
 你是一个专业的商业分析助手 (BA-Agent)，面向非技术业务人员，专注于电商业务分析。
@@ -260,10 +362,20 @@ class BAAgent:
 
 ## 工作流程
 
-1. 理解用户需求（自然语言查询）
-2. 查询相关数据（使用 query_database 工具）
-3. 进行分析处理（调用相应 Skill）
-4. 生成结果报告（使用 invoke_skill 工具）
+1. 理解用户需求
+2. 判断是否需要调用工具（查询数据、执行代码等）
+3. 如需工具，调用相应工具获取结果
+4. 基于工具结果生成最终报告，**必须使用结构化 JSON 格式**
+
+## 可用工具
+
+- `query_database`: SQL 查询
+- `bac_code_agent`: Python 代码执行（数据分析）
+- `web_search`: 网络搜索
+- `web_reader`: 网页读取
+- `file_reader`: 文件读取
+- `file_write`: 文件写入
+- `execute_command`: 命令行执行
 
 ## 注意事项
 
@@ -289,12 +401,62 @@ class BAAgent:
 你会在此时收到专门的 Flush 指令，请专注于记忆提取工作。
 """
 
+        # 结构化响应格式（仅用于最终响应）
+        response_format_prompt = """
+
+## 最终响应格式要求（重要！）
+
+当调用工具完成后，你**必须**按照以下 JSON 格式返回最终响应：
+
+```json
+{
+    "task_analysis": "思维链：1. 识别意图; 2. 数据处理过程; 3. 关键发现",
+    "execution_plan": "R1: 数据获取; R2: 数据分析; R3: 报告生成(当前)",
+    "current_round": 当前轮次,
+    "action": {
+        "type": "complete",
+        "content": "最终报告内容（可包含 HTML/ECharts 代码）",
+        "recommended_questions": ["推荐问题1", "推荐问题2"],
+        "download_links": ["结果文件.xlsx"]
+    }
+}
+```
+
+### Content 格式说明
+
+**content 可以包含：**
+1. 纯文本分析结果
+2. HTML 代码（ECharts 图表）
+3. Markdown 格式
+
+**带图表的报告示例：**
+```json
+{
+    "action": {
+        "type": "complete",
+        "content": "销售数据分析完成：\\n\\n1. Q1销售额500万，同比增长15%\\n2. Q3增长最快\\n\\n<div class='chart-wrapper'><div id='chart-trend' style='width:100%;height:400px;'></div></div>\\n<script>(function(){const chart = echarts.init(document.getElementById('chart-trend'));chart.setOption({xAxis: {type: 'category', data: ['Q1','Q2','Q3','Q4']}, yAxis: {type: 'value'}, series: [{type: 'line', data: [500, 520, 580, 570]}]});})();</script>",
+        "recommended_questions": ["Q3增长原因？", "地区分布如何？"],
+        "download_links": ["analysis_result.xlsx"]
+    }
+}
+```
+
+### 重要规则
+
+1. **工具调用阶段**：使用 LangChain 原生工具调用机制，返回 tool_calls
+2. **最终响应**：必须返回上述 JSON 格式（包装在代码块中）
+3. **终止条件**：当工具调用完成、分析完成、或可以直接回答时，返回 JSON 响应
+"""
+
+        # 组合提示词
+        full_prompt = base_prompt + "\n" + response_format_prompt
+
         # 添加 Skills 部分（如果有）
         skills_section = self._build_skills_section()
         if skills_section:
-            return base_prompt + "\n\n" + skills_section
+            full_prompt = full_prompt + "\n\n" + skills_section
 
-        return base_prompt
+        return full_prompt
 
     def _init_memory_flush(self) -> Optional[MemoryFlush]:
         """
@@ -662,7 +824,12 @@ class BAAgent:
 
     def _get_total_tokens(self, result: Dict[str, Any]) -> int:
         """
-        从 Agent 结果中提取总 token 数
+        从 Agent 结果中提取总 token 数 (增强版 v2.1)
+
+        v2.1 改进:
+        - 优先使用 DynamicTokenCounter 进行精确计数
+        - 保留从 LLM 响应 metadata 提取的后备方案
+        - 支持调用前预计数和调用后验证
 
         Args:
             result: Agent 返回结果
@@ -672,7 +839,18 @@ class BAAgent:
         """
         total = 0
 
-        # 尝试从 response_metadata 中获取
+        # v2.1: 优先使用 DynamicTokenCounter
+        messages = result.get("messages", [])
+        if messages:
+            try:
+                # 使用新的 token_counter 精确计数
+                counted = self.token_counter.count_messages(messages)
+                if counted > 0:
+                    return counted
+            except Exception:
+                pass  # 降级到旧方法
+
+        # 后备方案：从 LLM 响应 metadata 中获取
         if "response_metadata" in result:
             metadata = result["response_metadata"]
             if "usage" in metadata:
@@ -680,8 +858,7 @@ class BAAgent:
                 total += usage.get("input_tokens", 0)
                 total += usage.get("output_tokens", 0)
 
-        # 尝试从 messages 中获取
-        messages = result.get("messages", [])
+        # 后备方案：从 messages 中的 usage_metadata 获取
         for msg in messages:
             if isinstance(msg, AIMessage):
                 if hasattr(msg, "usage_metadata"):
@@ -700,6 +877,9 @@ class BAAgent:
     def _should_run_memory_flush(self, current_tokens: int) -> bool:
         """
         判断是否应该运行 Memory Flush (Clawdbot 风格)
+
+        v2.1 改进:
+        - 使用 DynamicTokenCounter 进行更精确的 token 计算
 
         Args:
             current_tokens: 当前使用的 token 数
@@ -739,6 +919,10 @@ class BAAgent:
         """
         检查是否需要触发 Memory Flush
 
+        v2.1 改进:
+        - 使用 DynamicTokenCounter 精确计算消息 token
+        - 为后续压缩提供准确的 token 数据
+
         Args:
             conversation_id: 对话 ID
             messages: 消息列表
@@ -750,6 +934,12 @@ class BAAgent:
         if self.memory_flush is None:
             return None
 
+        # v2.1: 使用 DynamicTokenCounter 精确计算
+        try:
+            actual_tokens = self.token_counter.count_messages(messages)
+        except Exception:
+            actual_tokens = current_tokens  # 降级
+
         # 始终更新消息缓存（积累上下文）
         for msg in messages:
             if isinstance(msg, HumanMessage):
@@ -758,14 +948,14 @@ class BAAgent:
                 self.memory_flush.add_message("assistant", msg.content)
 
         # 检查是否应该运行 flush
-        if not self._should_run_memory_flush(current_tokens):
+        if not self._should_run_memory_flush(actual_tokens):
             return None
 
         # 记录当前 compaction_count
         self.memory_flush_compaction_count = self.compaction_count
 
         # 检查并触发 flush
-        result = self.memory_flush.check_and_flush(current_tokens)
+        result = self.memory_flush.check_and_flush(actual_tokens)
 
         if result["flushed"]:
             # 更新 compaction 计数
@@ -777,9 +967,26 @@ class BAAgent:
                 f"{result['memories_written']} memories written"
             )
 
-            # 执行对话压缩 - 清理旧消息，释放上下文空间
-            keep_recent = self.app_config.memory.flush.compaction_keep_recent if self.app_config.memory.flush.compaction_keep_recent else 10
-            self._compact_conversation(conversation_id, keep_recent)
+            # v2.1: 使用 AdvancedContextManager 执行智能压缩
+            # 获取当前状态以获取完整消息列表
+            config = {"configurable": {"thread_id": conversation_id}}
+            state = self.agent.get_state(config)
+            all_messages = list(state.messages.get("messages", [])) if state else []
+
+            if all_messages:
+                # 智能压缩到 50% 容量
+                target_tokens = int(self.app_config.llm.max_tokens * 0.5)
+                compressed = self.context_manager.compress(
+                    all_messages,
+                    target_tokens=target_tokens,
+                    mode=CompressionMode.EXTRACT,
+                )
+                self.agent.update_state(config, {"messages": compressed})
+
+                logger.info(
+                    f"Context compressed (v2.1): {len(all_messages)} -> {len(compressed)} messages, "
+                    f"tokens: {actual_tokens} -> {self.token_counter.count_messages(compressed)}"
+                )
 
             # 重置 token 计数
             self.session_tokens = 0
@@ -792,11 +999,17 @@ class BAAgent:
         keep_recent: int = 10
     ) -> bool:
         """
-        压缩对话历史 - 清理旧消息，只保留最近的消息
+        压缩对话历史 (v2.1: 使用 AdvancedContextManager)
+
+        v2.1 改进:
+        - 使用 AdvancedContextManager 智能压缩
+        - 按优先级保留消息 (CRITICAL/HIGH/MEDIUM/LOW)
+        - 保留系统消息和关键用户消息
+        - 代替原来的简单截断 (keep_recent=N)
 
         Args:
             conversation_id: 对话 ID
-            keep_recent: 保留最近的消息数量（默认 10 条）
+            keep_recent: 保留最近的消息数量 (降级选项，默认 10 条)
 
         Returns:
             是否成功压缩
@@ -809,21 +1022,26 @@ class BAAgent:
                 return False
 
             # 获取当前所有消息
-            all_messages = state.messages.get("messages", [])
+            all_messages = list(state.messages.get("messages", []))
 
             if len(all_messages) <= keep_recent:
                 # 消息数量不足，无需压缩
                 return False
 
-            # 只保留最近的消息
-            recent_messages = all_messages[-keep_recent:]
+            # v2.1: 使用 AdvancedContextManager 智能压缩
+            target_tokens = int(self.app_config.llm.max_tokens * 0.5)  # 压缩到 50%
+            compressed_messages = self.context_manager.compress(
+                all_messages,
+                target_tokens=target_tokens,
+                mode=CompressionMode.EXTRACT,  # 智能提取，非简单截断
+            )
 
-            # 更新状态（清空旧消息，只保留最近的）
-            self.agent.update_state(config, {"messages": recent_messages})
+            # 更新状态
+            self.agent.update_state(config, {"messages": compressed_messages})
 
             logger.info(
-                f"Conversation compacted: {len(all_messages)} -> {len(recent_messages)} "
-                f"messages (kept recent {keep_recent})"
+                f"Conversation compacted (v2.1): {len(all_messages)} -> {len(compressed_messages)} "
+                f"messages (target_tokens={target_tokens}, mode=EXTRACT)"
             )
 
             return True
@@ -834,29 +1052,257 @@ class BAAgent:
 
     def _create_agent(self):
         """
-        创建 LangGraph Agent
+        创建 LangGraph Agent（自定义版本，支持结构化响应）
 
-        使用 langgraph.prebuilt.create_react_agent
+        使用 LangGraph 的 StateGraph 构建自定义 Agent：
+        1. agent_node: LLM 决策节点（调用工具或返回结构化响应）
+        2. tool_node: 工具执行节点
+        3. 条件边：根据响应类型决定下一步
 
         Returns:
-            Agent 实例
+            Compiled LangGraph Agent
         """
-        # 创建 prompt template
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", self.system_prompt),
-                MessagesPlaceholder(variable_name="messages"),
-            ]
+        from langgraph.graph import END, StateGraph
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+        from langgraph.prebuilt import ToolNode
+        import json
+
+        # 创建工具节点
+        tool_node = ToolNode(self.tools)
+
+        # 定义 Agent 状态类型
+        # 使用 Annotated 指定 messages 字段应该使用追加模式（append）而不是替换模式
+        from typing import Annotated
+        from operator import add
+
+        class AgentState(TypedDict):
+            messages: Annotated[Sequence[BaseMessage], add]
+            next: str  # "agent" 或 "end"
+
+        def should_continue(state: AgentState) -> str:
+            """
+            决定下一步：继续调用工具还是结束
+
+            基于 LLM 的响应判断：
+            - 如果响应包含工具调用 → 调用工具
+            - 如果响应是结构化 JSON (type=complete) → 结束
+            """
+            messages = state["messages"]
+            last_message = messages[-1] if messages else None
+
+            if not last_message or not isinstance(last_message, AIMessage):
+                return "agent"
+
+            # 检查是否有工具调用（LangChain 原生机制）
+            if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                return "tools"
+
+            # 检查是否是结构化响应（type=complete）
+            content = last_message.content
+            if isinstance(content, str):
+                # 尝试解析 JSON
+                try:
+                    # 提取 JSON 代码块
+                    import re
+                    json_pattern = r'```json\s*\n(.*?)\n```'
+                    matches = re.findall(json_pattern, content, re.DOTALL)
+                    for match in matches:
+                        data = json.loads(match.strip())
+                        if data.get("action", {}).get("type") == "tool_call":
+                            # 需要调用工具 - 转换为 LangChain 工具调用
+                            return "convert_to_tool_call"
+                        elif data.get("action", {}).get("type") == "complete":
+                            # 完成，结束
+                            return "end"
+                except (json.JSONDecodeError, KeyError):
+                    pass
+
+            # 默认继续
+            return "end"
+
+        def convert_to_tool_call(state: AgentState) -> dict:
+            """
+            将结构化 JSON 响应转换为 LangChain 工具调用
+
+            当模型返回 type="tool_call" 的 JSON 时，转换为实际的工具调用
+            """
+            messages = list(state["messages"])
+            last_message = messages[-1]
+
+            if not isinstance(last_message, AIMessage):
+                return {"messages": messages}
+
+            content = last_message.content
+            if not isinstance(content, str):
+                return {"messages": messages}
+
+            try:
+                import re
+                json_pattern = r'```json\s*\n(.*?)\n```'
+                matches = re.findall(json_pattern, content, re.DOTALL)
+
+                for match in matches:
+                    data = json.loads(match.strip())
+                    action = data.get("action", {})
+
+                    if action.get("type") == "tool_call" and isinstance(action.get("content"), list):
+                        # 提取工具调用列表
+                        tool_calls_data = action["content"]
+
+                        # 构建 tool_calls 列表（LangChain 格式）
+                        tool_calls = []
+                        for tc_data in tool_calls_data:
+                            tool_calls.append({
+                                "name": tc_data["tool_name"],
+                                "args": tc_data["arguments"],
+                                "id": tc_data["tool_call_id"]
+                            })
+
+                        # 创建新的 AIMessage，包含工具调用
+                        new_message = AIMessage(
+                            content="",  # 工具调用时 content 为空
+                            tool_calls=tool_calls
+                        )
+
+                        # 替换最后一条消息
+                        messages[-1] = new_message
+                        return {"messages": messages}
+
+            except Exception as e:
+                logger = __import__('logging').getLogger(__name__)
+                logger.error(f"Failed to convert to tool call: {e}")
+
+            return {"messages": messages}
+
+        def call_model(state: AgentState) -> dict:
+            """
+            调用 LLM 进行决策
+
+            输入包含系统提示词和用户消息
+
+            重要：只返回新增的消息（AI 响应），而不是完整的消息列表
+            这样 LangGraph 会将其追加到现有状态，而不是替换
+
+            注意：文件内容清理通过 ContextCoordinator 统一处理
+            """
+            import time
+            llm_start = time.time()
+
+            messages = list(state["messages"])
+
+            # 使用 ContextCoordinator 清理大文件内容
+            # 这样确保文件清理逻辑统一在 ContextManager 中
+            messages = self._context_coordinator.prepare_messages(
+                messages,
+                session_id=getattr(self, '_current_session_id', None)
+            )
+
+            # 确保第一条消息是系统提示词
+            if not messages or not isinstance(messages[0], SystemMessage):
+                messages.insert(0, SystemMessage(content=self.system_prompt))
+
+            # Monitoring: Create LLM span
+            llm_span = None
+            tracer = getattr(self, '_tracer', None)
+            metrics = getattr(self, '_metrics_collector', None)
+
+            if tracer:
+                llm_span = tracer.create_span(
+                    name=f"llm_call:{self.config.model}",
+                    span_type=SpanType.LLM_CALL,
+                    attributes={
+                        "model": self.config.model,
+                        "message_count": len(messages),
+                    }
+                )
+
+            # 调用 LLM
+            try:
+                response = self.llm.invoke(messages)
+
+                # Calculate duration and tokens
+                llm_duration_ms = (time.time() - llm_start) * 1000
+
+                # Extract token usage from response
+                input_tokens = 0
+                output_tokens = 0
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata or {}
+                    input_tokens = usage.get('input_tokens', 0)
+                    output_tokens = usage.get('output_tokens', 0)
+                elif hasattr(response, 'response_metadata'):
+                    metadata = response.response_metadata or {}
+                    if 'usage' in metadata:
+                        usage = metadata['usage']
+                        input_tokens = usage.get('input_tokens', 0)
+                        output_tokens = usage.get('output_tokens', 0)
+
+                # Record metrics
+                if metrics:
+                    metrics.record_llm_call(
+                        model=self.config.model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        duration_ms=llm_duration_ms
+                    )
+
+                # Add event to span
+                if tracer and llm_span:
+                    tracer.add_event("llm_response", {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "duration_ms": llm_duration_ms,
+                    })
+                    tracer.end_span(llm_span, SpanStatus.SUCCESS)
+
+            except Exception as e:
+                if tracer and llm_span:
+                    tracer.add_event("llm_error", {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    })
+                    tracer.end_span(llm_span, SpanStatus.ERROR)
+
+                if metrics:
+                    metrics.record_error("LLMError", str(e))
+
+                raise
+
+            # 只返回新增的 AI 响应，让 LangGraph 追加到状态
+            return {"messages": [response]}
+
+        # 构建图
+        workflow = StateGraph(AgentState)
+
+        # 添加节点
+        workflow.add_node("agent", call_model)
+        workflow.add_node("tools", tool_node)
+        workflow.add_node("convert_to_tool_call", convert_to_tool_call)
+
+        # 设置入口点
+        workflow.set_entry_point("agent")
+
+        # 添加条件边
+        workflow.add_conditional_edges(
+            "agent",
+            should_continue,
+            {
+                "tools": "tools",
+                "convert_to_tool_call": "convert_to_tool_call",
+                "end": END
+            }
         )
 
-        # 使用 create_react_agent 创建 Agent
-        agent = create_react_agent(
-            self.llm,
-            self.tools,
-            prompt=prompt,
-        )
+        # 工具执行后回到 agent
+        workflow.add_edge("tools", "agent")
 
-        return agent
+        # 转换后回到 agent（会触发工具调用）
+        workflow.add_edge("convert_to_tool_call", "agent")
+
+        # 编译图，使用 checkpointer 保存对话历史
+        app = workflow.compile(checkpointer=self.memory)
+
+        return app
 
     def add_tool(self, tool: BaseTool) -> None:
         """
@@ -880,12 +1326,51 @@ class BAAgent:
         # 重新创建 Agent
         self.agent = self._create_agent()
 
+    def _get_tracer(self, conversation_id: str, session_id: Optional[str] = None) -> Optional[ExecutionTracer]:
+        """Get or create execution tracer for this conversation"""
+        if not self._monitoring_enabled:
+            return None
+        if self._tracer is None:
+            self._tracer = ExecutionTracer(conversation_id, session_id)
+        return self._tracer
+
+    def _get_metrics_collector(self, conversation_id: str, session_id: Optional[str] = None) -> Optional[MetricsCollector]:
+        """Get or create metrics collector for this conversation"""
+        if not self._monitoring_enabled:
+            return None
+        if self._metrics_collector is None:
+            self._metrics_collector = MetricsCollector(conversation_id, session_id)
+        return self._metrics_collector
+
+    def _finalize_monitoring(self) -> None:
+        """Finalize and save monitoring data"""
+        if self._tracer:
+            try:
+                trace = self._tracer.get_trace()
+                if trace:
+                    trace.end()
+                    metrics = self._metrics_collector.finalize() if self._metrics_collector else None
+
+                    # Save to store
+                    trace_store = get_trace_store()
+                    trace_store.save_trace(trace, metrics)
+
+                    logger.debug(f"Saved trace for {trace.conversation_id}")
+            except Exception as e:
+                logger.warning(f"Failed to save trace: {e}")
+
+        # Reset for next conversation
+        self._tracer = None
+        self._metrics_collector = None
+
     def invoke(
         self,
         message: str,
         conversation_id: Optional[str] = None,
         user_id: Optional[str] = None,
         config: Optional[RunnableConfig] = None,
+        session_id: Optional[str] = None,
+        file_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         调用 Agent
@@ -895,10 +1380,33 @@ class BAAgent:
             conversation_id: 对话 ID
             user_id: 用户 ID
             config: 可选的运行配置
+            session_id: 会话 ID（用于代码列表，传递给 ContextCoordinator）
+            file_context: 文件上下文（可选，用于文件上下文处理）
 
         Returns:
             Agent 响应结果
         """
+        # Initialize monitoring
+        tracer = None
+        if conversation_id:
+            tracer = self._get_tracer(conversation_id, session_id)
+
+        root_span = None
+        if tracer:
+            root_span = tracer.create_root_span(
+                name="agent_invoke",
+                span_type=SpanType.AGENT_INVOKE,
+                attributes={
+                    "message": message[:200] + "..." if len(message) > 200 else message,
+                    "model": self.config.model,
+                    "user_id": user_id,
+                }
+            )
+
+        # 保存 session_id 供 ContextCoordinator 使用
+        if session_id is not None:
+            self._current_session_id = session_id
+
         # 生成 ID（如果未提供）
         if conversation_id is None:
             conversation_id = f"conv_{datetime.now().strftime('%Y%m%d%H%M%S')}"
@@ -906,6 +1414,8 @@ class BAAgent:
             user_id = "user_default"
 
         # 准备输入消息
+        # 注意：如果 file_context 存在，需要将其添加到消息中
+        # 这里暂时不做处理，由 BAAgentService 层处理
         messages = [HumanMessage(content=message)]
 
         # 准备配置
@@ -915,12 +1425,26 @@ class BAAgent:
         # 添加线程 ID 用于记忆
         config["configurable"] = {"thread_id": conversation_id}
 
-        # 调用 Agent
+        # 调用 Agent（LangGraph 会自动从 checkpointer 加载历史）
         try:
+            # 调试：检查 checkpointer 中是否有现有状态
+            existing_state = self.agent.get_state(config)
+            if existing_state and existing_state.values:
+                existing_messages = existing_state.values.get("messages", [])
+                if existing_messages:
+                    logger.info(f"[BAAgent.invoke] conversation_id={conversation_id}, 从 checkpointer 加载了 {len(list(existing_messages))} 条历史消息")
+
+            # 直接调用 invoke，LangGraph 会自动处理 checkpointer 中的历史
             result = self.agent.invoke(
                 {"messages": messages},
                 config,
             )
+
+            # 调试：检查 invoke 后的状态
+            new_state = self.agent.get_state(config)
+            if new_state and new_state.values:
+                new_messages = new_state.values.get("messages", [])
+                logger.info(f"[BAAgent.invoke] invoke 后共有 {len(list(new_messages))} 条消息")
 
             # 检查是否有 skill 激活结果
             skill_result = self._extract_skill_activation_result(result)
@@ -953,6 +1477,17 @@ class BAAgent:
             # 提取响应
             response = self._extract_response(result)
 
+            # End root span
+            if root_span:
+                tracer.end_span(root_span, SpanStatus.SUCCESS if result.get("success", True) else SpanStatus.ERROR)
+
+            # 清理临时状态
+            if hasattr(self, '_current_session_id'):
+                delattr(self, '_current_session_id)
+
+            # Finalize and save monitoring data
+            self._finalize_monitoring()
+
             return {
                 "conversation_id": conversation_id,
                 "user_id": user_id,
@@ -961,6 +1496,7 @@ class BAAgent:
                 "timestamp": datetime.now().isoformat(),
                 "tokens_used": tokens_used,
                 "session_tokens": self.session_tokens,
+                "trace_id": tracer.trace_id if tracer else None,  # Include trace_id for debugging
                 # flush_triggered 不再暴露给用户 (Clawdbot 风格: 静默)
             }
 
@@ -973,6 +1509,15 @@ class BAAgent:
                     "请尝试：1) 使用官方 Anthropic API（不设置 ANTHROPIC_BASE_URL）；"
                     "2) 或将 ANTHROPIC_BASE_URL 设为仅域名根，如 https://api.lingyaai.cn。"
                 )
+            # End root span with error status (upstream monitoring)
+            if root_span:
+                tracer.end_span(root_span, SpanStatus.ERROR)
+                if tracer:
+                    tracer.add_event("error", {"error_type": type(e).__name__, "error_message": str(e)})
+            if hasattr(self, '_current_session_id'):
+                delattr(self, '_current_session_id')
+            self._finalize_monitoring()
+
             return {
                 "conversation_id": conversation_id,
                 "user_id": user_id,
@@ -980,6 +1525,7 @@ class BAAgent:
                 "success": False,
                 "error": str(e),
                 "timestamp": datetime.now().isoformat(),
+                "trace_id": tracer.trace_id if tracer else None,
             }
 
     def _extract_skill_activation_result(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -1028,11 +1574,13 @@ class BAAgent:
         """
         从 Agent 结果中提取响应文本
 
+        支持结构化 JSON 响应格式的解析
+
         Args:
             result: Agent 返回结果
 
         Returns:
-            响应文本
+            响应文本（如果是结构化 JSON，则提取并返回显示内容）
         """
         messages = result.get("messages", [])
         if not messages:
@@ -1043,6 +1591,10 @@ class BAAgent:
             if isinstance(msg, AIMessage):
                 content = msg.content
                 if isinstance(content, str):
+                    # 尝试解析结构化响应
+                    parsed = self._try_parse_structured_response(content)
+                    if parsed:
+                        return parsed
                     return content
                 elif isinstance(content, list):
                     # 处理多模态内容
@@ -1051,9 +1603,103 @@ class BAAgent:
                         for part in content
                         if isinstance(part, dict) and "text" in part
                     ]
-                    return "\n".join(text_parts)
+                    combined = "\n".join(text_parts)
+                    # 尝试解析结构化响应
+                    parsed = self._try_parse_structured_response(combined)
+                    if parsed:
+                        return parsed
+                    return combined
 
         return ""
+
+    def _try_parse_structured_response(self, content: str) -> Optional[str]:
+        """
+        尝试解析结构化响应
+
+        Args:
+            content: 原始响应内容
+
+        Returns:
+            解析后的显示内容，如果不是结构化响应则返回 None
+        """
+        try:
+            from backend.models.response import parse_structured_response
+
+            structured = parse_structured_response(content)
+            if structured and structured.is_complete():
+                # 是结构化的 complete 响应，提取显示内容
+                final_report = structured.get_final_report()
+
+                # 构建显示内容（与 ba_agent.py 中的逻辑一致）
+                display_parts = []
+
+                # 思维链分析（可折叠）
+                if structured.task_analysis:
+                    display_parts.append(f"""
+<div class="task-analysis" style="margin-bottom: 12px; padding: 10px; background: #f0f7ff; border-left: 3px solid #2196F3; border-radius: 4px;">
+    <details>
+        <summary style="cursor: pointer; font-weight: 500; color: #1976D2;">💡 思维链分析</summary>
+        <div style="margin-top: 8px; font-size: 13px; color: #555; white-space: pre-wrap;">{structured.task_analysis}</div>
+    </details>
+</div>
+""")
+
+                # 执行计划
+                if structured.execution_plan:
+                    display_parts.append(f"""
+<div class="execution-plan" style="margin-bottom: 12px; padding: 10px; background: #fff3e0; border-left: 3px solid #FF9800; border-radius: 4px;">
+    <div style="font-weight: 500; color: #E65100; margin-bottom: 4px;">📋 执行计划</div>
+    <div style="font-size: 13px; color: #555;">{structured.execution_plan}</div>
+</div>
+""")
+
+                # 最终报告
+                has_html = '<div' in final_report or '<script' in final_report or 'echarts' in final_report.lower()
+
+                if has_html:
+                    display_parts.append(f'<div class="final-report">{final_report}</div>')
+                else:
+                    display_parts.append(f'<div class="final-report" style="line-height: 1.6;">{final_report.replace("\\n", "<br>")}</div>')
+
+                # 推荐问题
+                if structured.action.recommended_questions:
+                    questions_html = '<br>'.join(
+                        f'<button class="recommended-question" style="display: block; width: 100%; text-align: left; padding: 10px; margin: 6px 0; background: #f5f5f5; border: 1px solid #ddd; border-radius: 6px; cursor: pointer;">💡 {q}</button>'
+                        for q in structured.action.recommended_questions
+                    )
+                    display_parts.append(f"""
+<div class="recommended-questions" style="margin-top: 16px; padding: 12px; background: #f9f9f9; border-radius: 6px;">
+    <div style="font-weight: 500; color: #333; margin-bottom: 8px;">🤔 推荐问题</div>
+    {questions_html}
+</div>
+""")
+
+                # 下载链接
+                if structured.action.download_links:
+                    links_html = '<br>'.join(
+                        f'<a href="/api/v1/files/download/{filename}" style="display: inline-block; padding: 8px 16px; margin: 4px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px;">📥 {filename}</a>'
+                        for filename in structured.action.download_links
+                    )
+                    display_parts.append(f"""
+<div class="download-links" style="margin-top: 12px; padding: 12px; background: #e8f5e9; border-radius: 6px;">
+    <div style="font-weight: 500; color: #2E7D32; margin-bottom: 8px;">📦 可下载文件</div>
+    {links_html}
+</div>
+""")
+
+                result = "\n".join(display_parts)
+
+                # 添加 HTML 标记
+                if has_html:
+                    result = f"<!-- HAS_HTML -->{result}"
+
+                return result
+
+        except Exception as e:
+            logger = __import__('logging').getLogger(__name__)
+            logger.debug(f"Failed to parse structured response: {e}")
+
+        return None
 
     def stream(
         self,

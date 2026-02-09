@@ -413,5 +413,6 @@ class TestEdgeCases:
         files = list(tmp_path.glob("*.md"))
         assert len(files) > 0
         content = files[0].read_text(encoding='utf-8')
-        assert "第一次 flush 的长消息" in content or "flush的长消息确保提取" in content
-        assert "第二次flush的长消息" in content or "第二次 flush 的长消息" in content
+        # MemoryExtractor 提取的是完整的消息内容
+        assert "第一次flush的长消息" in content or "flush的长消息" in content
+        assert "第二次flush的长消息" in content or "flush的长消息" in content

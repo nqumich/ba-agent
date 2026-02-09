@@ -36,6 +36,10 @@ class DatabaseSecurityConfig(BaseModel):
 class DatabaseConnectionConfig(BaseModel):
     """单个数据库连接配置"""
 
+    type: str = Field(default="sqlite", description="数据库类型 (sqlite, postgresql, clickhouse)")
+    # SQLite 配置
+    path: str = Field(default="./data/ba_agent.db", description="SQLite 数据库文件路径")
+    # PostgreSQL/ClickHouse 配置
     host: str = Field(default="localhost", description="数据库主机")
     port: int = Field(default=5432, description="数据库端口")
     username: str = Field(default="", description="数据库用户名")
@@ -45,10 +49,33 @@ class DatabaseConnectionConfig(BaseModel):
     max_overflow: int = Field(default=20, description="最大溢出连接数")
 
 
-class DatabaseConfig(BaseModel):
-    """数据库配置"""
+class DatabaseCleanupConfig(BaseModel):
+    """数据库清理配置"""
 
-    # 默认连接配置（向后兼容）
+    enabled: bool = Field(default=True, description="是否启用自动清理")
+    max_age_hours: float = Field(default=1.0, description="数据库文件最大保留时间（小时）")
+    max_total_size_mb: float = Field(default=100.0, description="数据库目录最大总大小（MB）")
+    cleanup_on_shutdown: bool = Field(default=True, description="关闭时是否清理所有数据库文件")
+    exclude_files: list[str] = Field(
+        default_factory=lambda: ["memory.db"],
+        description="清理时排除的文件列表（默认保留 memory.db）"
+    )
+
+
+class DatabaseConfig(BaseModel):
+    """数据库配置
+
+    默认使用 SQLite（嵌入式数据库，无需外部服务器）
+    可配置 PostgreSQL 或 ClickHouse 用于企业级部署
+    """
+
+    # 数据库类型
+    type: str = Field(default="sqlite", description="数据库类型 (sqlite, postgresql, clickhouse)")
+
+    # SQLite 配置（默认）
+    path: str = Field(default="./data/ba_agent.db", description="SQLite 数据库文件路径")
+
+    # PostgreSQL/ClickHouse 配置（可选）
     host: str = Field(default="localhost", description="数据库主机")
     port: int = Field(default=5432, description="数据库端口")
     username: str = Field(default="", description="数据库用户名")
@@ -67,6 +94,12 @@ class DatabaseConfig(BaseModel):
     security: DatabaseSecurityConfig = Field(
         default_factory=DatabaseSecurityConfig,
         description="数据库安全配置"
+    )
+
+    # 清理配置
+    cleanup: DatabaseCleanupConfig = Field(
+        default_factory=DatabaseCleanupConfig,
+        description="数据库清理配置"
     )
 
 
@@ -170,6 +203,15 @@ class MemoryWatcherConfig(BaseModel):
     check_interval_seconds: float = Field(default=5.0, description="检查间隔秒数")
 
 
+class MemoryIndexRotationConfig(BaseModel):
+    """记忆索引轮换配置"""
+
+    enabled: bool = Field(default=True, description="是否启用索引轮换")
+    max_size_mb: float = Field(default=50.0, description="单个索引文件最大大小（MB）")
+    index_prefix: str = Field(default="memory", description="索引文件前缀")
+    index_dir: str = Field(default="memory/.index", description="索引目录")
+
+
 class MemoryConfig(BaseModel):
     """记忆管理配置"""
 
@@ -180,6 +222,10 @@ class MemoryConfig(BaseModel):
     flush: MemoryFlushConfig = Field(default_factory=MemoryFlushConfig, description="Memory Flush 配置")
     search: MemorySearchConfig = Field(default_factory=MemorySearchConfig, description="Memory Search 配置")
     watcher: MemoryWatcherConfig = Field(default_factory=MemoryWatcherConfig, description="Memory Watcher 配置")
+    index_rotation: MemoryIndexRotationConfig = Field(
+        default_factory=MemoryIndexRotationConfig,
+        description="索引轮换配置"
+    )
 
 
 class LoggingConfig(BaseModel):

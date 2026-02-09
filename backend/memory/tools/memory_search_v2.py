@@ -62,6 +62,15 @@ class MemorySearchV2Input(BaseModel):
         default=2,
         description="匹配行上下文行数（前后各几行）"
     )
+    # 从旧版 memory_search 迁移的功能
+    entities: Optional[List[str]] = Field(
+        default=None,
+        description="实体过滤（如 ['@Python', '@架构']），仅匹配包含这些实体的结果"
+    )
+    since_days: Optional[int] = Field(
+        default=None,
+        description="时间范围（最近 N 天），None 表示搜索全部时间范围"
+    )
 
     @field_validator('query')
     @classmethod
@@ -110,6 +119,24 @@ class MemorySearchV2Input(BaseModel):
             raise ValueError("max_results 不能超过 100")
         return v
 
+    @field_validator('since_days')
+    @classmethod
+    def validate_since_days(cls, v: Optional[int]) -> Optional[int]:
+        """验证时间范围"""
+        if v is not None and v < 1:
+            raise ValueError("since_days 必须 >= 1")
+        return v
+
+    @field_validator('entities')
+    @classmethod
+    def validate_entities(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        """验证实体列表"""
+        if v is not None:
+            for entity in v:
+                if not entity.startswith('@'):
+                    raise ValueError(f"实体必须以 @ 开头， got: {entity}")
+        return v
+
 
 def memory_search_v2(
     query: str,
@@ -119,10 +146,14 @@ def memory_search_v2(
     use_hybrid: bool = True,
     vector_weight: float = 0.7,
     text_weight: float = 0.3,
-    context_lines: int = 2
+    context_lines: int = 2,
+    entities: Optional[List[str]] = None,
+    since_days: Optional[int] = None
 ) -> str:
     """
     使用混合搜索引擎搜索用户记忆
+
+    支持多索引文件搜索：当索引文件轮换时，会自动搜索所有索引文件
 
     Args:
         query: 搜索查询（关键词或自然语言问题）
@@ -133,6 +164,8 @@ def memory_search_v2(
         vector_weight: 向量搜索权重
         text_weight: 文本搜索权重
         context_lines: 上下文行数
+        entities: 实体过滤（如 ['@Python', '@架构']）
+        since_days: 时间范围（最近 N 天）
 
     Returns:
         搜索结果（Markdown 格式）
@@ -140,71 +173,120 @@ def memory_search_v2(
     Examples:
         >>> memory_search_v2("Python 装饰器")  # 语义搜索
         >>> memory_search_v2("今天的任务", min_score=0.5)  # 高相关性过滤
-        >>> memory_search_v2("@架构", source="bank")  # 仅搜索 bank 目录
+        >>> memory_search_v2("架构", entities=["@Python"])  # 实体过滤
+        >>> memory_search_v2("任务", since_days=7)  # 最近7天
     """
-    # 确保索引存在
-    index_path = get_index_db_path()
+    # 获取所有索引文件路径
+    try:
+        from backend.memory.index_rotation import get_all_index_paths
+        index_paths = get_all_index_paths()
+    except Exception:
+        # 回退到单索引模式
+        index_paths = [get_index_db_path()]
 
-    if not index_path.exists():
+    # 检查索引是否存在
+    if not any(p.exists() for p in index_paths):
         return "❌ 搜索索引尚未创建。请先运行索引建立。"
 
-    try:
-        # 打开索引数据库
-        db = open_index_db(index_path)
+    all_results = []
+    has_vectors = False
+    embedding_dims = 0
+    query_embedding = None
 
-        # 检查是否已创建 schema
-        cursor = db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks'"
-        )
-        if cursor.fetchone() is None:
-            return "❌ 搜索索引尚未建立。请先运行索引建立。"
-
-        # 检查是否有向量表
-        cursor = db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
-        )
-        has_vectors = cursor.fetchone() is not None
-
-        # 创建 embedding provider
+    # 创建 embedding provider（只需一次）
+    if use_hybrid:
         try:
             provider = create_embedding_provider(provider="auto")
-            embedding = provider.encode_batch([query])[0]
-            embedding_dims = len(embedding)
+            query_embedding = provider.encode_batch([query])[0]
+            embedding_dims = len(query_embedding)
         except Exception as e:
             # Embedding 失败，回退到 FTS only
             use_hybrid = False
             embedding_dims = 0
 
-        if use_hybrid and has_vectors and embedding_dims > 0:
-            # 使用混合搜索
-            results = _search_hybrid(
-                db,
-                query,
-                embedding,
-                embedding_dims,
-                max_results,
-                min_score,
-                source,
-                vector_weight,
-                text_weight
+    # 遍历所有索引文件进行搜索
+    for index_path in index_paths:
+        if not index_path.exists():
+            continue
+
+        try:
+            # 打开索引数据库
+            db = open_index_db(index_path)
+
+            # 检查是否已创建 schema
+            cursor = db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks'"
             )
-        else:
-            # 仅使用 FTS 搜索
-            results = _search_fts(
-                db,
-                query,
-                max_results,
-                min_score,
-                source
-            )
+            if cursor.fetchone() is None:
+                db.close()
+                continue
 
-        db.close()
+            # 检查是否有向量表
+            if not has_vectors:
+                cursor = db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_vec'"
+                )
+                has_vectors = cursor.fetchone() is not None
 
-        # 格式化结果
-        return _format_results_v2(results, query, min_score, source, use_hybrid)
+            if use_hybrid and has_vectors and embedding_dims > 0:
+                # 使用混合搜索
+                results = _search_hybrid(
+                    db,
+                    query,
+                    query_embedding,
+                    embedding_dims,
+                    max_results,
+                    min_score,
+                    source,
+                    vector_weight,
+                    text_weight
+                )
+            else:
+                # 仅使用 FTS 搜索
+                results = _search_fts(
+                    db,
+                    query,
+                    max_results,
+                    min_score,
+                    source
+                )
 
-    except Exception as e:
-        return f"❌ 搜索失败: {str(e)}"
+            # 标记结果来源索引
+            for result in results:
+                result["_index_file"] = index_path.name
+
+            all_results.extend(results)
+            db.close()
+
+        except Exception as e:
+            logger.warning(f"搜索索引 {index_path.name} 失败: {e}")
+            continue
+
+    if not all_results:
+        return "❌ 未找到相关结果。"
+
+    # 按分数排序并去重（按 id）
+    seen_ids = set()
+    unique_results = []
+    for r in sorted(all_results, key=lambda x: x.get("score", 0), reverse=True):
+        chunk_id = r.get("id")
+        if chunk_id and chunk_id not in seen_ids:
+            seen_ids.add(chunk_id)
+            unique_results.append(r)
+
+    # 限制结果数量
+    results = unique_results[:max_results * 2]
+
+    # 应用后处理过滤器
+    results = _apply_filters(
+        results,
+        entities=entities,
+        since_days=since_days,
+        max_results=max_results
+    )
+
+    # 格式化结果
+    return _format_results_v2(results, query, min_score, source, use_hybrid, entities, since_days)
 
 
 def _search_hybrid(
@@ -420,12 +502,79 @@ def _get_context_from_text(text: str, start_line: int, context_lines: int) -> st
     return '\n'.join(lines[context_start:context_end])
 
 
+def _apply_filters(
+    results: List[Dict[str, Any]],
+    entities: Optional[List[str]] = None,
+    since_days: Optional[int] = None,
+    max_results: int = 100
+) -> List[Dict[str, Any]]:
+    """
+    应用后处理过滤器
+
+    Args:
+        results: 搜索结果列表
+        entities: 实体过滤列表
+        since_days: 时间范围过滤
+        max_results: 最大结果数
+
+    Returns:
+        过滤后的结果列表
+    """
+    filtered = results
+
+    # 实体过滤：只保留上下文中包含所有指定实体的结果
+    if entities:
+        filtered = [
+            r for r in filtered
+            if all(entity in r.get("context", r.get("text", "")) for entity in entities)
+        ]
+
+    # 时间过滤：只保留最近 N 天的结果
+    if since_days:
+        from datetime import datetime, timedelta
+        cutoff_date = (datetime.now() - timedelta(days=since_days)).strftime("%Y-%m-%d")
+
+        filtered = [
+            r for r in filtered
+            if _is_result_recent(r, cutoff_date)
+        ]
+
+    # 限制结果数量
+    return filtered[:max_results]
+
+
+def _is_result_recent(result: Dict[str, Any], cutoff_date: str) -> bool:
+    """
+    检查结果是否在指定日期之后
+
+    Args:
+        result: 搜索结果
+        cutoff_date: 截止日期 (YYYY-MM-DD 格式)
+
+    Returns:
+        是否在截止日期之后
+    """
+    path = result.get("path", "")
+
+    # 从文件路径中提取日期 (格式: memory/YYYY-MM-DD.md)
+    import re
+    date_match = re.search(r'(\d{4}-\d{2}-\d{2})', path)
+
+    if date_match:
+        result_date = date_match.group(1)
+        return result_date >= cutoff_date
+
+    return True  # 如果无法解析日期，默认保留
+
+
 def _format_results_v2(
     results: List[Dict[str, Any]],
     query: str,
     min_score: float,
     source: str,
-    use_hybrid: bool
+    use_hybrid: bool,
+    entities: Optional[List[str]] = None,
+    since_days: Optional[int] = None
 ) -> str:
     """
     格式化搜索结果（v2 版本）
@@ -436,6 +585,8 @@ def _format_results_v2(
         min_score: 最小分数
         source: 来源过滤
         use_hybrid: 是否使用混合搜索
+        entities: 实体过滤
+        since_days: 时间范围
 
     Returns:
         格式化的 Markdown 输出
@@ -446,13 +597,30 @@ def _format_results_v2(
             filters.append(f"来源={source}")
         if min_score > 0:
             filters.append(f"最小分数={min_score}")
+        if entities:
+            filters.append(f"实体={', '.join(entities)}")
+        if since_days:
+            filters.append(f"最近{since_days}天")
         filter_str = f" (过滤: {', '.join(filters)})" if filters else ""
         return f"❌ 未找到匹配 \"{query}\" 的结果{filter_str}"
 
     # 构建输出
     output = [f"## 搜索结果: \"{query}\"\n"]
     output.append(f"**搜索模式**: {'混合搜索 (FTS + 向量)' if use_hybrid else 'FTS 关键词搜索'}")
-    output.append(f"**找到 {len(results)} 个匹配** (最低分数: {min_score:.2f})\n")
+    output.append(f"**找到 {len(results)} 个匹配** (最低分数: {min_score:.2f})")
+
+    # 显示过滤器
+    active_filters = []
+    if source != "all":
+        active_filters.append(f"来源={source}")
+    if entities:
+        active_filters.append(f"实体={', '.join(entities)}")
+    if since_days:
+        active_filters.append(f"最近{since_days}天")
+    if active_filters:
+        output.append(f"**过滤条件**: {', '.join(active_filters)}")
+
+    output.append("")
 
     for i, result in enumerate(results, 1):
         score = result.get("score", 0)
@@ -485,6 +653,8 @@ memory_search_v2_tool = StructuredTool.from_function(
 - 相关性评分: 返回每个结果的相关性分数 (0-1)
 - 混合算法: 结合 BM25 (文本) 和 Cosine (向量) 分数
 - 来源过滤: 可按 memory/sessions 过滤
+- 实体过滤: 按实体标记过滤 (如 @Python, @架构)
+- 时间过滤: 按时间范围过滤 (最近 N 天)
 
 **参数**:
 - query: 搜索查询（必需）
@@ -495,11 +665,15 @@ memory_search_v2_tool = StructuredTool.from_function(
 - vector_weight: 向量权重（默认 0.7）
 - text_weight: 文本权重（默认 0.3）
 - context_lines: 上下文行数（默认 2）
+- entities: 实体过滤列表（如 ['@Python', '@架构']）
+- since_days: 时间范围（最近 N 天）
 
 **示例**:
 - 语义搜索: memory_search_v2("Python 装饰器的用法")
 - 高相关性: memory_search_v2("架构设计", min_score=0.7)
-- 仅搜索 bank: memory_search_v2("@实体", source="memory")
+- 实体过滤: memory_search_v2("架构", entities=["@Python"])
+- 时间过滤: memory_search_v2("任务", since_days=7)
+- 组合过滤: memory_search_v2("代码", entities=["@Python"], since_days=30)
 
 **返回**: 匹配的内容片段，包含文件路径、行号、相关性分数
 """,

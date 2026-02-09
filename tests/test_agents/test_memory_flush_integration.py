@@ -106,10 +106,12 @@ class TestMemoryFlushIntegration:
             with patch('backend.agents.agent.os.environ.get', return_value="test-key"):
                 agent = BAAgent()
 
-                # 模拟带 metadata 的消息
+                # v2.1: DynamicTokenCounter 优先计数实际内容
+                # 如果需要测试 metadata 后备方案，需要让 DynamicTokenCounter 返回 0
                 from langchain_core.messages import AIMessage
 
-                msg = AIMessage(content="test")
+                # 创建一个空消息，让 DynamicTokenCounter 返回 0，触发 metadata 后备方案
+                msg = AIMessage(content="")
                 msg.usage_metadata = {"input_tokens": 200, "output_tokens": 100}
 
                 result = {
@@ -117,6 +119,7 @@ class TestMemoryFlushIntegration:
                 }
 
                 tokens = agent._get_total_tokens(result)
+                # 由于 content 为空，DynamicTokenCounter 返回 0，降级到 metadata 检查
                 assert tokens == 300
 
     def test_check_and_flush_returns_none_when_disabled(self):
