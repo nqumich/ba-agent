@@ -92,6 +92,7 @@ ba-agent/
 │   ├── tools/                 # 工具测试
 │   └── models/                # 模型测试
 ├── memory/                    # 每日对话日志
+├── frontend02/                # 前端 (React + Vite，端口 8080)
 ├── docs/                      # 文档
 ├── .claude/hooks/             # Claude CLI 钩子 (5个脚本)
 ├── AGENTS.md                  # Agent 系统指令
@@ -180,6 +181,18 @@ docker-compose up -d
 # 启动 Agent (Python)
 python -c "from backend.agents.agent import create_agent; agent = create_agent(); print(agent.invoke('你好'))"
 ```
+
+### 启动前端 (frontend02)
+
+前端位于 `frontend02/`，使用 React + Vite，开发端口 8080。
+
+```bash
+cd frontend02
+yarn install   # 或 npm install
+yarn dev       # 或 npm run dev
+```
+
+浏览器访问 http://localhost:8080。前端会通过 Vite 代理将 `/api`、`/health` 转发到后端 (默认 http://127.0.0.1:8000)，可通过环境变量 `BA_BACKEND_URL` 或 `BACKEND_URL` 修改。
 
 ## 📚 文档
 

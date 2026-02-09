@@ -75,6 +75,10 @@ skills/existing_skill
 skills/skills/test_install_skill*/
 skills/skills/test_*/
 
+# Frontend
+frontend02/node_modules/
+frontend02/build/
+
 # Development Memory (personal use, not in Git)
 # 开发记忆存储在 ~/.ba-agent-dev/，不进项目仓库
 # 包含：PROGRESS.md, TASKS.md, MEMORY.md, daily-notes/

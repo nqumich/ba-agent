@@ -11,24 +11,33 @@ FastAPI 应用入口。
 
 from __future__ import annotations
 
+import os
+import re
 import threading
-from typing import Optional, Dict, Any
+import uuid
+from pathlib import Path
+from typing import Optional, Dict, Any, List
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from backend.agents.agent import create_agent, BAAgent
 from config import get_config
+from tools.file_reader import file_reader_impl
 
 
 app = FastAPI(title="BA-Agent", version="0.1.0")
+
+UPLOAD_DIR = Path("./data/uploads")
+MAX_UPLOAD_BYTES = 30 * 1024 * 1024  # 30MB
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="用户输入")
     conversation_id: Optional[str] = Field(default=None, description="会话 ID（多轮对话复用）")
+    file_ids: Optional[List[str]] = Field(default=None, description="已上传文件 ID 列表")
 
 
 @app.get("/health")
@@ -41,6 +50,9 @@ def _startup() -> None:
     # 创建单例 agent，避免每次请求都重新加载 skills / memory 等。
     app.state.agent = create_agent()
     app.state.agent_lock = threading.Lock()
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    # 内存索引：file_id -> {path, filename, size}
+    app.state.upload_index = {}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -193,12 +205,65 @@ def index() -> str:
 async def chat(payload: ChatRequest) -> Dict[str, Any]:
     agent: BAAgent = app.state.agent
     lock: threading.Lock = app.state.agent_lock
+    upload_index: Dict[str, Dict[str, Any]] = app.state.upload_index
 
     def _invoke() -> Dict[str, Any]:
+        # 若带文件，则把文件预览注入到消息里，帮助大模型回答
+        message = payload.message
+        if payload.file_ids:
+            previews: list[str] = []
+            for fid in payload.file_ids:
+                meta = upload_index.get(fid)
+                if not meta:
+                    continue
+                try:
+                    preview = file_reader_impl(path=meta["path"], nrows=50)
+                except Exception as e:
+                    preview = f"(读取失败: {e})"
+                previews.append(
+                    f"文件：{meta['filename']} (id={fid})\n预览:\n{preview}"
+                )
+            if previews:
+                message = (
+                    "用户上传了以下文件，请结合文件内容回答用户问题。\n\n"
+                    + "\n\n---\n\n".join(previews)
+                    + "\n\n用户问题：\n"
+                    + payload.message
+                )
         with lock:
-            return agent.invoke(payload.message, conversation_id=payload.conversation_id)
+            return agent.invoke(message, conversation_id=payload.conversation_id)
 
     result = await run_in_threadpool(_invoke)
     # agent.invoke 自己会返回 success/error 字段；这里统一为 200，交由前端展示。
     return result
+
+
+def _safe_filename(name: str) -> str:
+    name = (name or "").strip()
+    name = name.replace("\\", "_").replace("/", "_")
+    # 只保留常见安全字符
+    name = re.sub(r"[^a-zA-Z0-9._\u4e00-\u9fa5-]+", "_", name)
+    return name[:200] or "upload"
+
+
+@app.post("/api/upload")
+async def upload(file: UploadFile = File(...)) -> Dict[str, Any]:
+    # 简单大小限制（读入内存前检查不了 Content-Length 时，只能边读边限制）
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"文件过大，最大支持 {MAX_UPLOAD_BYTES} bytes")
+
+    fid = uuid.uuid4().hex
+    filename = _safe_filename(file.filename or "upload")
+    save_path = UPLOAD_DIR / f"{fid}_{filename}"
+    save_path.write_bytes(raw)
+
+    meta = {
+        "id": fid,
+        "filename": filename,
+        "size": len(raw),
+        "path": str(save_path),
+    }
+    app.state.upload_index[fid] = meta
+    return meta
 
