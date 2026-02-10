@@ -457,8 +457,8 @@ ba-agent/
 │   ├── attribution/           # 归因分析
 │   ├── report_gen/            # 报告生成
 │   └── visualization/         # 数据可视化
-├── frontend/                  # Web 前端
-│   └── index.html            # 单页应用 (SPA)
+├── coco-frontend/             # Web 前端 (Vite + React SPA)
+│   └── index.html            # 单页应用入口
 ├── config/                    # 配置文件
 │   ├── config.py              # 配置管理核心
 │   ├── settings.yaml          # 主配置

@@ -286,7 +286,6 @@ class BAAgent:
         kwargs = {
             "model": self.config.model,
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
             "api_key": api_key.strip(),
             "request_timeout": self.app_config.llm.timeout,
         }
@@ -1483,7 +1482,7 @@ class BAAgent:
 
             # 清理临时状态
             if hasattr(self, '_current_session_id'):
-                delattr(self, '_current_session_id)
+                delattr(self, '_current_session_id')
 
             # Finalize and save monitoring data
             self._finalize_monitoring()

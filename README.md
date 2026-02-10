@@ -94,12 +94,9 @@ ba-agent/
 │   ├── attribution/           # 归因分析
 │   ├── report_gen/            # 报告生成
 │   └── visualization/         # 数据可视化
-├── frontend/                  # Web 前端
-│   ├── index.html            # 单页应用 (SPA) - Agent 对话
-│   └── monitoring/           # 监控仪表板 (v2.4.0 新增) ⭐
-│       ├── index.html        # 监控仪表板主页面
-│       ├── css/              # 监控仪表板样式
-│       └── js/               # 监控仪表板脚本
+├── coco-frontend/             # Web 前端 (Vite + React)
+│   ├── index.html            # 单页应用入口
+│   └── src/                  # 页面与组件（含 Agent 对话）
 ├── config/                    # 配置文件
 │   ├── config.py              # 配置管理核心
 │   ├── settings.yaml          # 主配置
@@ -214,7 +211,11 @@ BA-Agent 提供了完整的单页应用 (SPA) 前端测试控制台：
 # 启动 API 服务器
 uvicorn backend.api.main:app --reload --port 8000
 
-# 浏览器访问前端
+# 启动前端（在 coco-frontend 目录，端口 8080）
+cd coco-frontend && npm run dev
+# 浏览器打开 http://localhost:8080
+
+# 或由后端直接提供前端页面（需先 build coco-frontend 并配置静态目录）
 open http://localhost:8000
 
 # 默认登录账号
@@ -222,8 +223,8 @@ open http://localhost:8000
 密码: admin123
 ```
 
-**前端技术栈**:
-- 纯 HTML/CSS/JavaScript（无框架依赖）
+**前端技术栈** (coco-frontend):
+- Vite + React，/api 代理到后端 8000
 - JWT 令牌管理 (localStorage)
 - 响应式设计
 - 拖拽上传支持
@@ -414,7 +415,7 @@ Agent Execution → ExecutionTracer → TraceStore (FileStore)
 - `backend/monitoring/metrics_collector.py` - 指标收集器
 - `backend/monitoring/trace_store.py` - 追踪存储（基于 FileStore）
 - `backend/api/routes/monitoring/` - 监控 API 路由
-- `frontend/monitoring/` - 监控仪表板前端
+- `coco-frontend/` - Web 前端（对话、首页）；监控仪表板可由后端 `/monitoring` 提供静态页（若存在）
 - 35 个新测试通过
 
 **监控仪表板访问**: `http://localhost:8000/monitoring`

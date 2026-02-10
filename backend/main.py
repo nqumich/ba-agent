@@ -115,6 +115,20 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/v1/chat/debug")
+def chat_debug():
+    """始终返回 200，用于确认当前运行的是本 main.py。若此接口返回 200 则说明后端入口正确。"""
+    return JSONResponse(
+        status_code=200,
+        content={
+            "response": "[debug] 后端 main.py 已加载，聊天接口可用",
+            "success": True,
+            "conversation_id": "",
+            "timestamp": "",
+        },
+    )
+
+
 def _chat_response(response: str, success: bool, conversation_id: str = "", timestamp: str = ""):
     """统一返回 200 + JSON，绝不返回 5xx。"""
     return JSONResponse(
@@ -135,31 +149,35 @@ async def chat(request: Request):
     使用原始 Request，手动解析 body，确保任何异常都返回 200+JSON，绝不返回 500。
     """
     try:
-        body = await request.json()
-    except Exception as e:
-        logger.warning("chat body parse failed: %s", e)
-        return _chat_response(f"请求体解析失败：{e}", False)
+        try:
+            body = await request.json()
+        except Exception as e:
+            logger.warning("chat body parse failed: %s", e)
+            return _chat_response(f"请求体解析失败：{e}", False)
 
-    message = (body.get("message") or "").strip()
-    if not message:
-        return _chat_response("消息不能为空", False)
+        message = (body.get("message") or "").strip()
+        if not message:
+            return _chat_response("消息不能为空", False)
 
-    conversation_id = body.get("conversation_id")
-    user_id = body.get("user_id")
+        conversation_id = body.get("conversation_id")
+        user_id = body.get("user_id")
 
-    try:
-        agent = get_agent()
-        result = agent.invoke(
-            message=message,
-            conversation_id=conversation_id,
-            user_id=user_id,
-        )
-        return _chat_response(
-            response=result.get("response") or "",
-            success=bool(result.get("success", False)),
-            conversation_id=result.get("conversation_id") or "",
-            timestamp=result.get("timestamp") or "",
-        )
-    except Exception as e:
-        logger.exception("chat request failed")
+        try:
+            agent = get_agent()
+            result = agent.invoke(
+                message=message,
+                conversation_id=conversation_id,
+                user_id=user_id,
+            )
+            return _chat_response(
+                response=result.get("response") or "",
+                success=bool(result.get("success", False)),
+                conversation_id=result.get("conversation_id") or "",
+                timestamp=result.get("timestamp") or "",
+            )
+        except Exception as e:
+            logger.exception("chat request failed")
+            return _chat_response(f"请求处理失败：{str(e)}", False)
+    except BaseException as e:
+        logger.exception("chat unexpected error")
         return _chat_response(f"请求处理失败：{str(e)}", False)

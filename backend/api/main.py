@@ -198,8 +198,8 @@ app.include_router(
 from fastapi.responses import HTMLResponse, FileResponse
 from pathlib import Path
 
-frontend_path = Path(__file__).parent.parent.parent / "frontend" / "index.html"
-monitoring_path = Path(__file__).parent.parent.parent / "frontend" / "monitoring" / "index.html"
+frontend_path = Path(__file__).parent.parent.parent / "coco-frontend" / "index.html"
+monitoring_path = Path(__file__).parent.parent.parent / "coco-frontend" / "monitoring" / "index.html"
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -216,6 +216,65 @@ async def monitoring():
         with open(monitoring_path, "r", encoding="utf-8") as f:
             return f.read()
     return HTMLResponse(content="<h1>监控仪表板文件不存在</h1>", status_code=404)
+
+
+# ---------- 简易聊天接口（与 backend.main 一致，供前端 ChatInterface 使用，绝不返回 500）----------
+_CHAT_AGENT = None
+
+def _get_chat_agent():
+    global _CHAT_AGENT
+    if _CHAT_AGENT is None:
+        from backend.agents.agent import create_agent
+        _CHAT_AGENT = create_agent()
+    return _CHAT_AGENT
+
+def _chat_json(response: str, success: bool, conversation_id: str = "", timestamp: str = ""):
+    return JSONResponse(
+        status_code=200,
+        content={
+            "response": str(response),
+            "success": bool(success),
+            "conversation_id": str(conversation_id or ""),
+            "timestamp": str(timestamp or ""),
+        },
+    )
+
+@app.post("/api/v1/chat")
+async def chat_simple(request: Request):
+    """
+    简易聊天接口，与 backend.main 的 /api/v1/chat 行为一致。
+    不校验 JWT，任何异常均返回 200+JSON，绝不返回 500。
+    """
+    try:
+        try:
+            body = await request.json()
+        except Exception as e:
+            logger.warning("chat body parse failed: %s", e)
+            return _chat_json(f"请求体解析失败：{e}", False)
+        message = (body.get("message") or "").strip()
+        if not message:
+            return _chat_json("消息不能为空", False)
+        conversation_id = body.get("conversation_id")
+        user_id = body.get("user_id")
+        try:
+            agent = _get_chat_agent()
+            result = agent.invoke(
+                message=message,
+                conversation_id=conversation_id,
+                user_id=user_id,
+            )
+            return _chat_json(
+                response=result.get("response") or "",
+                success=bool(result.get("success", False)),
+                conversation_id=result.get("conversation_id") or "",
+                timestamp=result.get("timestamp") or "",
+            )
+        except Exception as e:
+            logger.exception("chat request failed")
+            return _chat_json(f"请求处理失败：{str(e)}", False)
+    except BaseException as e:
+        logger.exception("chat unexpected error")
+        return _chat_json(f"请求处理失败：{str(e)}", False)
 
 
 @app.get("/api")
@@ -237,6 +296,7 @@ async def api_info():
         "endpoints": {
             "health": "/api/v1/health",
             "auth": "/api/v1/auth",
+            "chat": "/api/v1/chat",
             "files": "/api/v1/files",
             "agent": "/api/v1/agent",
             "skills": "/api/v1/skills"
