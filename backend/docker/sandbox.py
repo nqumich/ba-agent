@@ -14,6 +14,18 @@ import docker
 from config import get_config
 
 
+def _safe_decode(data: bytes) -> str:
+    """将字节解码为字符串，避免非 UTF-8 或 gzip 等导致解码失败。"""
+    if not isinstance(data, bytes):
+        return str(data)
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("utf-8", errors="replace")
+    except Exception:
+        return data.decode("latin-1", errors="replace")
+
+
 class DockerSandbox:
     """
     Docker Python 沙盒
@@ -75,8 +87,8 @@ class DockerSandbox:
             # 等待容器完成（带超时）
             result = container.wait(timeout=timeout)
 
-            # 获取日志（在容器被移除之前）
-            logs = container.logs().decode('utf-8')
+            # 获取日志（在容器被移除之前，可能含非 UTF-8 字节）
+            logs = _safe_decode(container.logs())
 
             return {
                 'success': result['StatusCode'] == 0,
@@ -151,8 +163,8 @@ class DockerSandbox:
                 # 不使用 detach，这样可以直接获取输出
             )
 
-            # output 是字节串
-            stdout = output.decode('utf-8').strip()
+            # output 是字节串，可能含非 UTF-8 字节
+            stdout = _safe_decode(output).strip()
 
             return {
                 'success': True,
@@ -197,7 +209,7 @@ class DockerSandbox:
                 command="python --version",
                 remove=True,
             )
-            version = result.decode('utf-8').strip()
+            version = _safe_decode(result).strip()
             return "Python 3.12" in version
         except Exception as e:
             print(f"Docker test failed: {e}")

@@ -1,0 +1,4 @@
+[submodule "coco-frontend"]
+	path = coco-frontend
+	url = ssh://git@git.sankuai.com/nocode/nocode-f01e49747abd4ef8.git
+	branch = temp/ai-126572bc

@@ -289,7 +289,7 @@ curl http://localhost:8000/api/v1/files \
 
 实现了完整的单页应用 (SPA) 前端测试控制台：
 
-**主要功能** (`frontend/index.html`, 730+ 行):
+**主要功能** (现为 `coco-frontend/` 单页应用):
 - **登录系统**: JWT 认证，令牌存储在 localStorage
 - **Agent 对话**: 消息发送、历史显示、实时响应
 - **文件管理**: 拖拽上传、列表查看、下载、删除
@@ -424,7 +424,7 @@ open http://localhost:8000
   - 26 个测试通过
 
 - [x] **US-FE-01**: Web 前端测试控制台 ✅ (2026-02-07)
-  - ✅ 单页应用 (SPA) 设计 (`frontend/index.html`, 730+ 行)
+  - ✅ 单页应用 (SPA) 设计 (`coco-frontend/`)
   - ✅ JWT 登录/登出功能
   - ✅ Agent 对话界面（消息发送/历史显示）
   - ✅ 文件管理界面（上传/下载/删除）
